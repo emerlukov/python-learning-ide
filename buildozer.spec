@@ -25,7 +25,7 @@ source.exclude_patterns = *.pyc,*.pyo
 version = 3.4.0
 
 # (list) Зависимости
-requirements = python3==3.10.7,kivy==2.3.0,kivymd,pygments,autopep8,plyr
+requirements = python3,kivy==2.3.0,kivymd,pygments,autopep8,plyer
 
 # (str) Экран загрузки
 presplash.filename = splash.png
@@ -51,8 +51,8 @@ android.ndk_api = 24
 # (str) Версия NDK
 android.ndk = 25b
 
-# (str) Архитектуры
-android.archs = arm64-v8a, armeabi-v7a
+# (str) Архитектуры (БЕЗ пробелов!)
+android.archs = arm64-v8a,armeabi-v7a
 
 # (list) Разрешения
 android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,MANAGE_EXTERNAL_STORAGE
@@ -69,9 +69,6 @@ android.statusbar_color = #121212
 # (str) Цвет навигации
 android.navigationbar_color = #121212
 
-# (bool) Не показывать лог
-log_level = 2
-
 # (bool) Backup
 android.allow_backup = True
 
@@ -82,34 +79,10 @@ entrypoint = main.py
 source.main = main.py
 
 # (bool) Копировать libs
-copy_libs = 1
-
-# (bool) Использовать sqlite
 android.copy_libs = 1
 
-# (str) Дополнительные java классы
-# android.add_src =
-
-# (str) Дополнительные aar
-# android.add_aars =
-
-# (str) Дополнительные jar
-# android.add_jars =
-
-# (str) Дополнительные assets
-# android.add_assets =
-
-# (str) Дополнительные ресурсы
-# android.add_resources =
-
-# (str) Дополнительные зависимости gradle
-# android.gradle_dependencies =
-
-# (bool) Использовать legacy storage
+# (str) Legacy storage
 android.manifest.application_arguments = android:requestLegacyExternalStorage="true"
-
-# (str) Сервисы
-# services =
 
 # (str) Python-for-android branch
 p4a.branch = master
@@ -126,10 +99,10 @@ p4a.bootstrap = sdl2
 # (str) Цвет splash
 android.presplash_color = #121212
 
-# (bool) Очистка после сборки
+# (str) Папка сборки
 build_dir = .buildozer
 
-# (str) Архивировать python
+# (str) Тип артефакта
 android.release_artifact = apk
 
 # (bool) Debuggable
@@ -138,29 +111,17 @@ android.debuggable = False
 # (str) Имя apk
 package.full_name = Python Learning IDE
 
-# (bool) Использовать logcat
+# (str) Фильтры logcat
 android.logcat_filters = *:S python:D
-
-# (str) Home app
-# android.home_app = False
 
 # (bool) Extract native libs
 android.extract_native_libs = True
 
-# (bool) Отключить окно разрешений SDL
-sdl2.disable_text_input = False
-
-# (str) Дополнительные аргументы p4a
-# p4a.extra_args =
-
-# (str) Gradle options
-# android.gradle_options =
-
 # (str) Версия SDK
 android.sdk = 33
 
-# (bool) Использовать AAB
-# android.release_artifact = aab
+# (int) Уровень логирования
+log_level = 2
 
 
 [buildozer]
