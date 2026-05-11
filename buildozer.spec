@@ -15,7 +15,7 @@ requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0,git+https://githu
 
 p4a.recipe_blacklist = _grp
 
-presplash.filename = splash.png
+presplash.filename = presplash.png
 icon.filename = icon.png
 orientation = portrait
 fullscreen = 0
