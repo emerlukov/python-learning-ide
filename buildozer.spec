@@ -10,9 +10,10 @@ source.exclude_patterns = *.pyc,*.pyo
 version = 3.4.0
 
 # Главное исправление — pinned версии
-requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0,kivymd==2.0.1,pygments,autopep8,plyer,cython==0.29.36
+requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0,kivymd==1.2.0,pygments,autopep8,plyer,cython==0.29.36
 
 p4a.recipe_blacklist = _grp
+p4a.branch = develop
 
 presplash.filename = splash.png
 icon.filename = icon.png
