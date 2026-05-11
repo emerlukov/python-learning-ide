@@ -1,4 +1,5 @@
 [app]
+
 title = Python Learning IDE
 package.name = pythonlearningide
 package.domain = com.emerlukov
@@ -8,7 +9,8 @@ source.exclude_dirs = .git,__pycache__,bin,.buildozer,venv
 source.exclude_patterns = *.pyc,*.pyo
 version = 3.4.0
 
-requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0,kivymd,pygments,autopep8,plyer
+# Исправленная строка requirements
+requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0,kivymd,pygments,autopep8,plyer,setuptools, wheel, pip<25.0
 
 p4a.recipe_blacklist = _grp
 
@@ -16,26 +18,29 @@ presplash.filename = splash.png
 icon.filename = icon.png
 orientation = portrait
 fullscreen = 0
+
 android.api = 33
 android.minapi = 24
 android.ndk_api = 24
 android.ndk = 25b
 android.archs = arm64-v8a,armeabi-v7a
+
 android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,MANAGE_EXTERNAL_STORAGE
 android.enable_androidx = True
 android.accept_sdk_license = True
 android.statusbar_color = #121212
 android.navigationbar_color = #121212
 android.allow_backup = True
+
 entrypoint = main.py
 source.main = main.py
 android.copy_libs = 1
 android.manifest.application_arguments = android:requestLegacyExternalStorage="true"
 
-# Вот это ИСПРАВЛЕНИЕ ↓↓↓
+# Важные исправления
 p4a.branch = develop
-
 p4a.hostpython_version = 3.10.7
+
 android.private_storage = True
 android.wakelock = False
 p4a.bootstrap = sdl2
