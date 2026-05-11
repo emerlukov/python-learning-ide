@@ -9,8 +9,8 @@ source.exclude_dirs = .git,__pycache__,bin,.buildozer,venv
 source.exclude_patterns = *.pyc,*.pyo
 version = 3.4.0
 
-# Исправленная строка requirements
-requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0,kivymd,pygments,autopep8,plyer,setuptools, wheel, pip<25.0
+# Главное исправление — pinned версии
+requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0,kivymd,pygments,autopep8,plyer,setuptools, wheel, pip==24.3.1
 
 p4a.recipe_blacklist = _grp
 
@@ -31,16 +31,15 @@ android.accept_sdk_license = True
 android.statusbar_color = #121212
 android.navigationbar_color = #121212
 android.allow_backup = True
+android.manifest.application_arguments = android:requestLegacyExternalStorage="true"
 
 entrypoint = main.py
 source.main = main.py
 android.copy_libs = 1
-android.manifest.application_arguments = android:requestLegacyExternalStorage="true"
 
-# Важные исправления
+# Важные настройки для стабильности
 p4a.branch = develop
 p4a.hostpython_version = 3.10.7
-
 android.private_storage = True
 android.wakelock = False
 p4a.bootstrap = sdl2
