@@ -37,13 +37,23 @@ jobs:
         python3 --version
         echo "Directory contents:"
         ls -la
-        echo "Main.py first 10 lines:"
-        head -10 main.py
+        echo "Main.py exists:"
+        test -f main.py && echo "YES" || echo "NO"
 
     - name: Build APK with full log
       run: |
         buildozer android debug 2>&1 | tee full_build.log
         echo "BUILD_EXIT_CODE=$?" >> $GITHUB_ENV
+
+    - name: Find APK files
+      if: always()
+      run: |
+        echo "=== ALL APK FILES ==="
+        find / -name "*.apk" 2>/dev/null | head -20
+        echo "=== BIN DIRECTORY ==="
+        ls -la bin/ 2>/dev/null || echo "No bin/ directory"
+        echo "=== BUILDOZER OUTPUT ==="
+        find .buildozer -name "*.apk" 2>/dev/null || echo "No APK in .buildozer"
 
     - name: Upload full log
       if: always()
@@ -53,8 +63,11 @@ jobs:
         path: full_build.log
 
     - name: Upload APK
-      if: success()
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: app-debug
-        path: bin/*.apk
+        path: |
+          bin/*.apk
+          .buildozer/**/*.apk
+          *.apk
