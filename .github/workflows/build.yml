@@ -53,3 +53,10 @@ jobs:
           cd ../../../..
 
           buildozer -v android debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Python-Learning-IDE-APK
+          path: bin/*.apk
+          if-no-files-found: warn
