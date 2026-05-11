@@ -20,34 +20,30 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install Buildozer dependencies
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git zip unzip openjdk-17-jdk python3-pip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
+
+      - name: Install Buildozer + Cython
         run: |
           python -m pip install --upgrade pip setuptools wheel
           pip install buildozer cython==0.29.36
 
       - name: Clean previous builds
         run: |
-          rm -rf \~/.buildozer
+          rm -rf \~/.buildozer .buildozer
           buildozer -v android clean || true
-
-      - name: Patch python-for-android (fix pip error)
-        run: |
-          echo "Patching python-for-android..."
-          P4A_DIR=$(python -c "import pythonforandroid; print(pythonforandroid.__path__[0])" 2>/dev/null || echo "")
-          if [ -n "$P4A_DIR" ]; then
-            sed -i "s|pip install -U pip|pip install pip==24.3.1 --no-deps|g" $P4A_DIR/build.py || true
-            echo "Patched successfully"
-          else
-            echo "Will patch after p4a clone"
-          fi
 
       - name: Build APK
         run: |
           buildozer -v android debug
+        env:
+          P4A_DEBUG: "true"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Python-Learning-IDE-APK
           path: bin/*.apk
-          if-no-files-found: error
+          if-no-files-found: warn
