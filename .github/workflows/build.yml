@@ -25,7 +25,7 @@ jobs:
 
     - name: Install Python packages
       run: |
-        pip install --upgrade pip setuptools wheel resolvelib
+        python -m pip install --upgrade pip==23.0.1 setuptools wheel
         pip install cython buildozer
 
     - name: Clean previous builds
@@ -33,6 +33,20 @@ jobs:
         rm -rf ~/.buildozer
         rm -rf .buildozer
         rm -rf bin/
+
+    - name: Patch python-for-android pip
+      run: |
+        # Находим файл build.py в python-for-android
+        P4A_DIR=$(python -c "import pythonforandroid; print(pythonforandroid.__path__[0])" 2>/dev/null || echo "")
+        if [ -z "$P4A_DIR" ]; then
+          # Если не установлен, он будет клонирован при первой сборке
+          echo "Will patch after clone"
+        else
+          # Патчим: заменяем 'pip install -U pip' на 'pip install pip==23.0.1'
+          sed -i "s/'pip install -U pip'/'pip install pip==23.0.1'/g" $P4A_DIR/build.py
+          sed -i 's/"pip install -U pip"/"pip install pip==23.0.1"/g' $P4A_DIR/build.py
+          echo "Patched $P4A_DIR/build.py"
+        fi
 
     - name: Build APK
       env:
@@ -42,7 +56,23 @@ jobs:
         ANDROID_HOME: ''
         ANDROID_SDK_ROOT: ''
       run: |
-        buildozer android debug 2>&1 | tee full_build.log
+        # Если python-for-android ещё нет, buildozer его склонирует
+        # Тогда патчим после клонирования
+        buildozer android debug 2>&1 | tee full_build.log &
+        BUILD_PID=$!
+        
+        # Ждём появления python-for-android
+        for i in $(seq 1 60); do
+          if [ -f ".buildozer/android/platform/python-for-android/pythonforandroid/build.py" ]; then
+            sed -i "s/'pip install -U pip'/'pip install pip==23.0.1'/g" .buildozer/android/platform/python-for-android/pythonforandroid/build.py
+            sed -i 's/"pip install -U pip"/"pip install pip==23.0.1"/g' .buildozer/android/platform/python-for-android/pythonforandroid/build.py
+            echo "PATCHED build.py"
+            break
+          fi
+          sleep 2
+        done
+        
+        wait $BUILD_PID
         echo "=== Searching for APK ==="
         find /home/runner -name "*.apk" 2>/dev/null
 
