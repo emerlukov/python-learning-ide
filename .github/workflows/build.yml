@@ -31,43 +31,18 @@ jobs:
         pip install --upgrade pip setuptools wheel
         pip install cython buildozer
 
-    - name: Show environment
+    - name: Clean previous builds
       run: |
-        echo "Python version:"
-        python3 --version
-        echo "Directory contents:"
-        ls -la
-        echo "Main.py exists:"
-        test -f main.py && echo "YES" || echo "NO"
+        rm -rf ~/.buildozer
+        rm -rf .buildozer
+        rm -rf bin/
 
-    - name: Build APK with full log
+    - name: Build APK
       run: |
-        buildozer android debug 2>&1 | tee full_build.log
-        echo "BUILD_EXIT_CODE=$?" >> $GITHUB_ENV
-
-    - name: Find APK files
-      if: always()
-      run: |
-        echo "=== ALL APK FILES ==="
-        find / -name "*.apk" 2>/dev/null | head -20
-        echo "=== BIN DIRECTORY ==="
-        ls -la bin/ 2>/dev/null || echo "No bin/ directory"
-        echo "=== BUILDOZER OUTPUT ==="
-        find .buildozer -name "*.apk" 2>/dev/null || echo "No APK in .buildozer"
-
-    - name: Upload full log
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: full-build-log
-        path: full_build.log
+        yes | buildozer android debug
 
     - name: Upload APK
-      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: app-debug
-        path: |
-          bin/*.apk
-          .buildozer/**/*.apk
-          *.apk
+        path: bin/*.apk
