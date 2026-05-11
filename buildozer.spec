@@ -38,7 +38,7 @@ source.main = main.py
 android.copy_libs = 1
 
 # Важные настройки для стабильности
-p4a.branch = develop
+p4a.branch = master   # временно вместо develop
 p4a.hostpython_version = 3.10.7
 android.private_storage = True
 android.wakelock = False
