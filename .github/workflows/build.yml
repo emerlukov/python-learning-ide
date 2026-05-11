@@ -23,7 +23,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git zip unzip openjdk-17-jdk python3-pip \
+          sudo apt-get install -y git zip unzip openjdk-17-jdk \
             autoconf libtool pkg-config zlib1g-dev libncurses-dev libtinfo6 \
             cmake libffi-dev libssl-dev automake autopoint gettext libltdl-dev
 
@@ -32,18 +32,24 @@ jobs:
           python -m pip install --upgrade pip setuptools wheel
           pip install buildozer cython==0.29.36
 
-      - name: Clean previous builds
+      - name: Clean builds
         run: |
           rm -rf \~/.buildozer .buildozer
           buildozer -v android clean || true
 
-      - name: Patch python-for-android (force old pip)
+      - name: Build APK with pip fix
         run: |
-          echo "Patching p4a to prevent pip upgrade..."
-          # Patch after clone
-          sed -i "s|pip install -U pip|pip install pip==24.3.1 --no-deps --force-reinstall|g" .buildozer/android/platform/python-for-android/pythonforandroid/build.py || true
-          sed -i "s|pip install -U pip|pip install pip==24.3.1 --no-deps --force-reinstall|g" \~/.buildozer/android/platform/python-for-android/pythonforandroid/build.py || true
+          # Клонируем p4a вручную и патчим до запуска buildozer
+          mkdir -p .buildozer/android/platform
+          cd .buildozer/android/platform
+          git clone -b develop --single-branch https://github.com/kivy/python-for-android.git
+          cd python-for-android
+          
+          # Сильный патч
+          sed -i "s|pip install -U pip|pip install pip==24.3.1 --no-deps --force-reinstall|g" pythonforandroid/build.py
+          sed -i "s|'pip install -U pip'|'pip install pip==24.3.1 --no-deps --force-reinstall'|g" pythonforandroid/build.py
+          
+          echo "✅ p4a patched successfully"
+          cd ../../../..
 
-      - name: Build APK
-        run: |
           buildozer -v android debug
