@@ -13,7 +13,6 @@ version = 3.4.0
 requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0,kivymd==1.2.0,pygments,autopep8,plyer,cython==0.29.36
 
 p4a.recipe_blacklist = _grp
-p4a.branch = develop
 
 presplash.filename = splash.png
 icon.filename = icon.png
