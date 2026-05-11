@@ -25,7 +25,7 @@ source.exclude_patterns = *.pyc,*.pyo
 version = 3.4.0
 
 # (list) Зависимости
-requirements = python3,kivy==2.3.0,kivymd,pygments,autopep8,plyer
+requirements = python3==3.11.7,kivy==2.3.0,kivymd,pygments,autopep8,plyer
 
 # (str) Экран загрузки
 presplash.filename = splash.png
