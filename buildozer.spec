@@ -100,7 +100,7 @@ p4a.bootstrap = sdl2
 android.presplash_color = #121212
 
 # (str) Папка сборки
-build_dir = .buildozer
+# build_dir = .buildozer
 
 # (str) Тип артефакта
 android.release_artifact = apk
