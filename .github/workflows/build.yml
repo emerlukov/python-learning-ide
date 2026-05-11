@@ -3,91 +3,52 @@ name: Build APK
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # Позволяет запускать вручную
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Setup Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-    - name: Install system dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y python3-pip python3-dev build-essential git autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev openjdk-17-jdk zip unzip
+      - name: Install Buildozer and dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install buildozer
 
-    - name: Install Python packages
-      run: |
-        python -m pip install --upgrade pip==23.0.1 setuptools wheel
-        pip install cython buildozer
+      - name: Clean previous builds
+        run: |
+          rm -rf \~/.buildozer
+          buildozer -v android clean || true
 
-    - name: Clean previous builds
-      run: |
-        rm -rf ~/.buildozer
-        rm -rf .buildozer
-        rm -rf bin/
-
-    - name: Patch python-for-android pip
-      run: |
-        # Находим файл build.py в python-for-android
-        P4A_DIR=$(python -c "import pythonforandroid; print(pythonforandroid.__path__[0])" 2>/dev/null || echo "")
-        if [ -z "$P4A_DIR" ]; then
-          # Если не установлен, он будет клонирован при первой сборке
-          echo "Will patch after clone"
-        else
-          # Патчим: заменяем 'pip install -U pip' на 'pip install pip==23.0.1'
-          sed -i "s/'pip install -U pip'/'pip install pip==23.0.1'/g" $P4A_DIR/build.py
-          sed -i 's/"pip install -U pip"/"pip install pip==23.0.1"/g' $P4A_DIR/build.py
-          echo "Patched $P4A_DIR/build.py"
-        fi
-
-    - name: Build APK
-      env:
-        ANDROID_NDK: ''
-        ANDROID_NDK_HOME: ''
-        ANDROID_NDK_ROOT: ''
-        ANDROID_HOME: ''
-        ANDROID_SDK_ROOT: ''
-      run: |
-        # Если python-for-android ещё нет, buildozer его склонирует
-        # Тогда патчим после клонирования
-        buildozer android debug 2>&1 | tee full_build.log &
-        BUILD_PID=$!
-        
-        # Ждём появления python-for-android
-        for i in $(seq 1 60); do
-          if [ -f ".buildozer/android/platform/python-for-android/pythonforandroid/build.py" ]; then
-            sed -i "s/'pip install -U pip'/'pip install pip==23.0.1'/g" .buildozer/android/platform/python-for-android/pythonforandroid/build.py
-            sed -i 's/"pip install -U pip"/"pip install pip==23.0.1"/g' .buildozer/android/platform/python-for-android/pythonforandroid/build.py
-            echo "PATCHED build.py"
-            break
+      - name: Patch python-for-android (fix pip error)
+        run: |
+          echo "Patching python-for-android..."
+          # Патч будет работать после того, как buildozer скачает p4a
+          P4A_DIR=$(python -c "import pythonforandroid; print(pythonforandroid.__path__[0])" 2>/dev/null || echo "")
+          if [ -n "$P4A_DIR" ]; then
+            sed -i "s|pip install -U pip|pip install pip==24.3.1 --no-deps|g" $P4A_DIR/build.py || true
+            echo "Patched successfully"
+          else
+            echo "Will patch after p4a clone"
           fi
-          sleep 2
-        done
-        
-        wait $BUILD_PID
-        echo "=== Searching for APK ==="
-        find /home/runner -name "*.apk" 2>/dev/null
 
-    - name: Upload full log
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: full-build-log
-        path: full_build.log
+      - name: Build APK
+        run: |
+          buildozer -v android debug
 
-    - name: Upload APK
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: app-debug
-        path: |
-          /home/runner/**/*.apk
-          bin/*.apk
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Python-Learning-IDE-APK
+          path: bin/*.apk
+          if-no-files-found: error
