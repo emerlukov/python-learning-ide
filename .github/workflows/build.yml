@@ -32,10 +32,17 @@ jobs:
           python -m pip install --upgrade pip setuptools wheel
           pip install buildozer cython==0.29.36
 
-      - name: Clean everything
+      - name: Clean previous builds
         run: |
           rm -rf \~/.buildozer .buildozer
           buildozer -v android clean || true
+
+      - name: Patch python-for-android (force old pip)
+        run: |
+          echo "Patching p4a to prevent pip upgrade..."
+          # Patch after clone
+          sed -i "s|pip install -U pip|pip install pip==24.3.1 --no-deps --force-reinstall|g" .buildozer/android/platform/python-for-android/pythonforandroid/build.py || true
+          sed -i "s|pip install -U pip|pip install pip==24.3.1 --no-deps --force-reinstall|g" \~/.buildozer/android/platform/python-for-android/pythonforandroid/build.py || true
 
       - name: Build APK
         run: |
