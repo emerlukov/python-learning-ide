@@ -10,7 +10,7 @@ source.exclude_patterns = *.pyc,*.pyo
 version = 3.4.0
 
 # Главное исправление — pinned версии
-requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0,git+https://github.com/kivymd/KivyMD.git,pygments,autopep8,plyer,cython==0.29.36
+requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0,git+https://github.com/kivymd/KivyMD.git,pygments,autopep8,plyer,cython==0.29.36,pip==24.3.1
 
 
 p4a.recipe_blacklist = _grp
