@@ -46,20 +46,6 @@ except ImportError:
     autopep8 = None
     HAS_AUTOPEP8 = False
 
-# ====================== ИМПОРТ БИБЛИОТЕК ANVPY (ANDROID) ======================
-try:
-    import anv
-    from android import request_permissions, Permission
-    try:
-        import androidstorage
-    except ImportError:
-        androidstorage = None
-    ANV_AVAILABLE = True
-except ImportError:
-    ANV_AVAILABLE = False
-    androidstorage = None
-    print("Внимание: Запуск не в среде AnvPy. Некоторые функции могут не работать.")
-
 # ====================== ИМПОРТ БИБЛИОТЕК PLYER ======================
 try:
     from plyer import storagepath
