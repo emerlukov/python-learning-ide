@@ -23,11 +23,9 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            git zip unzip openjdk-17-jdk python3-pip \
-            autoconf libtool pkg-config zlib1g-dev libncurses-dev \
-            libtinfo6 cmake libffi-dev libssl-dev automake autopoint gettext \
-            libltdl-dev
+          sudo apt-get install -y git zip unzip openjdk-17-jdk python3-pip \
+            autoconf libtool pkg-config zlib1g-dev libncurses-dev libtinfo6 \
+            cmake libffi-dev libssl-dev automake autopoint gettext libltdl-dev
 
       - name: Install Buildozer
         run: |
