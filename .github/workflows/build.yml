@@ -23,7 +23,11 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git zip unzip openjdk-17-jdk python3-pip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
+          sudo apt-get install -y \
+            git zip unzip openjdk-17-jdk python3-pip \
+            autoconf libtool pkg-config zlib1g-dev \
+            libncurses-dev libtinfo6 cmake libffi-dev libssl-dev \
+            automake autopoint gettext
 
       - name: Install Buildozer + Cython
         run: |
@@ -38,8 +42,6 @@ jobs:
       - name: Build APK
         run: |
           buildozer -v android debug
-        env:
-          P4A_DEBUG: "true"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
