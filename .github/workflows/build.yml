@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
     - name: Checkout
@@ -18,68 +18,43 @@ jobs:
       with:
         python-version: '3.10'
 
-    - name: Install dependencies
+    - name: Install system dependencies
       run: |
         sudo apt update
         sudo apt install -y \
-          python3-pip \
-          python3-dev \
-          build-essential \
-          git \
-          autoconf \
-          libtool \
-          pkg-config \
-          zlib1g-dev \
-          libncurses5-dev \
-          libncursesw5-dev \
-          libtinfo5 \
-          cmake \
-          libffi-dev \
-          libssl-dev \
-          openjdk-17-jdk \
-          zip \
-          unzip
+          python3-pip python3-dev build-essential git autoconf libtool \
+          pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 \
+          cmake libffi-dev libssl-dev openjdk-17-jdk zip unzip
 
     - name: Install Python packages
       run: |
-        pip install --upgrade pip
+        pip install --upgrade pip setuptools wheel
         pip install cython buildozer
 
-    - name: Debug - Check files
+    - name: Show environment
       run: |
-        echo "=== Current directory ==="
-        pwd
-        echo "=== Files in root ==="
+        echo "Python version:"
+        python3 --version
+        echo "Directory contents:"
         ls -la
-        echo "=== Checking main.py ==="
-        if [ -f "main.py" ]; then
-          echo "main.py EXISTS"
-        else
-          echo "ERROR: main.py NOT FOUND!"
-          exit 1
-        fi
-        echo "=== Checking buildozer.spec ==="
-        if [ -f "buildozer.spec" ]; then
-          echo "buildozer.spec EXISTS"
-        else
-          echo "ERROR: buildozer.spec NOT FOUND!"
-          exit 1
-        fi
+        echo "Main.py first 10 lines:"
+        head -10 main.py
 
-    - name: Build APK
+    - name: Build APK with full log
       run: |
-        buildozer android debug 2>&1 | tee build.log
+        buildozer android debug 2>&1 | tee full_build.log
+        echo "BUILD_EXIT_CODE=$?" >> $GITHUB_ENV
 
-    - name: Upload build log
+    - name: Upload full log
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: build-log
-        path: build.log
+        name: full-build-log
+        path: full_build.log
 
     - name: Upload APK
       if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: app-release
+        name: app-debug
         path: bin/*.apk
