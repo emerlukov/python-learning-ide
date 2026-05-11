@@ -8,7 +8,7 @@ source.exclude_dirs = .git,__pycache__,bin,.buildozer,venv
 source.exclude_patterns = *.pyc,*.pyo
 version = 3.4.0
 
-requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0
+requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0,kivymd,pygments,autopep8,plyer
 
 # Вот это исправление ↓↓↓
 p4a.recipe_blacklist = _grp
