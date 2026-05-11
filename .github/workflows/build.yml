@@ -45,11 +45,40 @@ jobs:
         pip install --upgrade pip
         pip install cython buildozer
 
+    - name: Debug - Check files
+      run: |
+        echo "=== Current directory ==="
+        pwd
+        echo "=== Files in root ==="
+        ls -la
+        echo "=== Checking main.py ==="
+        if [ -f "main.py" ]; then
+          echo "main.py EXISTS"
+        else
+          echo "ERROR: main.py NOT FOUND!"
+          exit 1
+        fi
+        echo "=== Checking buildozer.spec ==="
+        if [ -f "buildozer.spec" ]; then
+          echo "buildozer.spec EXISTS"
+        else
+          echo "ERROR: buildozer.spec NOT FOUND!"
+          exit 1
+        fi
+
     - name: Build APK
       run: |
-        buildozer android debug
+        buildozer android debug 2>&1 | tee build.log
+
+    - name: Upload build log
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log
+        path: build.log
 
     - name: Upload APK
+      if: success()
       uses: actions/upload-artifact@v4
       with:
         name: app-release
