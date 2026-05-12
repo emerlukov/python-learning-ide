@@ -23,7 +23,6 @@ Python Learning App
 """
 
 # ====================== ИМПОРТ СТАНДАРТНЫХ БИБЛИОТЕК ======================
-# ====================== ИМПОРТ СТАНДАРТНЫХ БИБЛИОТЕК ======================
 import sys
 import json
 import os
@@ -39,35 +38,6 @@ import re
 import builtins
 from datetime import datetime
 
-# ====================== РЕГИСТРАЦИЯ ШРИФТОВ ======================
-from kivy.core.text import LabelBase
-import os
-font_path = os.path.join(os.path.dirname(__file__), 'fonts', 'SourceSansPro-Bold.ttf')
-if os.path.exists(font_path):
-    LabelBase.register(name='SourceBold', fn_regular=font_path)
-else:
-    LabelBase.register(name='SourceBold', fn_regular='Roboto')
-
-Config.set('kivy', 'default_font', 'SourceBold')
-
-# ====================== ЛОВЕЦ ОШИБОК (ДО ВСЕГО) ======================
-def global_exception_handler(exctype, value, tb):
-    error_msg = ''.join(traceback.format_exception(exctype, value, tb))
-    # Пробуем записать в несколько мест
-    paths = [
-        '/storage/emulated/0/Download/crash.log',
-        '/storage/emulated/0/crash.log',
-        '/sdcard/crash.log',
-    ]
-    for path in paths:
-        try:
-            with open(path, 'w') as f:
-                f.write(f"CRASH:\n{error_msg}")
-        except:
-            pass
-
-sys.excepthook = global_exception_handler
-
 # ====================== ИМПОРТ СТОРОННИХ БИБЛИОТЕК ======================
 try:
     import autopep8
@@ -77,8 +47,25 @@ except ImportError:
     HAS_AUTOPEP8 = False
 
 # ====================== ИМПОРТ БИБЛИОТЕК ANVPY (ANDROID) ======================
-ANV_AVAILABLE = False
-androidstorage = None
+try:
+    import anv
+    from android import request_permissions, Permission
+    try:
+        import androidstorage
+    except ImportError:
+        androidstorage = None
+    ANV_AVAILABLE = True
+except ImportError:
+    ANV_AVAILABLE = False
+    androidstorage = None
+    print("Внимание: Запуск не в среде AnvPy. Некоторые функции могут не работать.")
+
+# ====================== ИМПОРТ БИБЛИОТЕК PLYER ======================
+try:
+    from plyer import storagepath
+    PLYER_AVAILABLE = True
+except:
+    PLYER_AVAILABLE = False
 
 # ====================== ИМПОРТ КОМПОНЕНТОВ KIVY ======================
 from kivy.app import App
@@ -118,6 +105,11 @@ except ImportError:
     PythonLexer = None
     HAS_PYGMENTS = False
 
+# Регистрируем шрифт до настроек Kivy
+from kivy.core.text import LabelBase
+if os.path.exists('/system/fonts/SourceSansPro-Bold.ttf'):
+    LabelBase.register(name='SourceBold',
+                       fn_regular='/system/fonts/SourceSansPro-Bold.ttf')
 
 # ====================== НАСТРОЙКИ KIVY ======================
 Config.set('graphics', 'maxfps', '30')
@@ -4585,36 +4577,83 @@ class PythonLearningApp(MDApp):
         threading.Thread(target=load_key, daemon=True).start()
 
     def _load_fonts(self):
+        """Регистрирует шрифты для корректного отображения символов."""
         try:
-            # ВСЕ шрифты регистрируем через реальный файл SourceSansPro-Bold.ttf
-            import os
-            fonts_dir = os.path.join(os.getcwd(), 'fonts')
-            source_bold_path = os.path.join(fonts_dir, 'SourceSansPro-Bold.ttf')
-            
-            if os.path.exists(source_bold_path):
-                LabelBase.register(name='SourceBold', fn_regular=source_bold_path)
-                LabelBase.register(name='JetBrainsMono', fn_regular=source_bold_path)
-                LabelBase.register(name='FiraCode', fn_regular=source_bold_path)
-                LabelBase.register(name='CascadiaCode', fn_regular=source_bold_path)
-                LabelBase.register(name='IBMPlexMono', fn_regular=source_bold_path)
-                LabelBase.register(name='NotoSansMono', fn_regular=source_bold_path)
-                LabelBase.register(name='SourceCodePro', fn_regular=source_bold_path)
-                LabelBase.register(name='DroidMono', fn_regular=source_bold_path)
-            else:
-                # Если файла нет — используем встроенный Roboto
-                LabelBase.register(name='SourceBold', fn_regular='Roboto')
-                LabelBase.register(name='JetBrainsMono', fn_regular='Roboto')
-                LabelBase.register(name='FiraCode', fn_regular='Roboto')
-                LabelBase.register(name='CascadiaCode', fn_regular='Roboto')
-                LabelBase.register(name='IBMPlexMono', fn_regular='Roboto')
-                LabelBase.register(name='NotoSansMono', fn_regular='Roboto')
-                LabelBase.register(name='SourceCodePro', fn_regular='Roboto')
-                LabelBase.register(name='DroidMono', fn_regular='Roboto')
+            # ЗАГЛУШКИ для шрифтов, которых нет на чистом Android
+            LabelBase.register(name='Roboto', fn_regular='Roboto')
+            LabelBase.register(name='DejaVuSans', fn_regular='Roboto')
+            LabelBase.register(name='SystemRoboto', fn_regular='Roboto')
+            LabelBase.register(name='DroidBold', fn_regular='Roboto')
+            LabelBase.register(name='DroidMono', fn_regular='Roboto')
+            # Системный шрифт для основного текста
+            cjk_path = '/system/fonts/NotoSansCJK-Regular.ttc'
+            if os.path.exists(cjk_path):
+                LabelBase.register(name='Roboto', fn_regular=cjk_path)
+    
+            # Шрифт для спецсимволов
+            dejavu_paths = [
+                os.path.join(os.getcwd(), 'fonts', 'DejaVuSans.ttf'),
+                '/system/fonts/DejaVuSans.ttf',
+            ]
+            for path in dejavu_paths:
+                if os.path.exists(path):
+                    LabelBase.register(name='DejaVuSans', fn_regular=path)
+                    break
+    
+            # Запасной системный Roboto
+            roboto_path = '/system/fonts/Roboto-Regular.ttf'
+            if os.path.exists(roboto_path):
+                LabelBase.register(name='SystemRoboto', fn_regular=roboto_path)
+    
+            # Жирный шрифт для интерфейса
+            droid_bold = '/system/fonts/DroidSans-Bold.ttf'
+            if os.path.exists(droid_bold):
+                LabelBase.register(name='DroidBold', fn_regular=droid_bold)
+    
+            # Системный моноширинный шрифт (запасной)
+            droid_mono = '/system/fonts/DroidSansMono.ttf'
+            if os.path.exists(droid_mono):
+                LabelBase.register(name='DroidMono', fn_regular=droid_mono)
+    
+            # JetBrains Mono
+            jetbrains_path = os.path.join(os.getcwd(), 'fonts', 'JetBrainsMono.ttf')
+            if os.path.exists(jetbrains_path):
+                LabelBase.register(name='JetBrainsMono', fn_regular=jetbrains_path)
+    
+            # Fira Code
+            fira_path = os.path.join(os.getcwd(), 'fonts', 'FiraCode-Regular.ttf')
+            if os.path.exists(fira_path):
+                LabelBase.register(name='FiraCode', fn_regular=fira_path)
+    
+            # Cascadia Code
+            cascadia_path = os.path.join(os.getcwd(), 'fonts', 'CascadiaCode.ttf')
+            if os.path.exists(cascadia_path):
+                LabelBase.register(name='CascadiaCode', fn_regular=cascadia_path)
+    
+            # IBM Plex Mono
+            ibm_path = os.path.join(os.getcwd(), 'fonts', 'IBMPlexMono-Regular.ttf')
+            if os.path.exists(ibm_path):
+                LabelBase.register(name='IBMPlexMono', fn_regular=ibm_path)
+    
+            # Noto Sans Mono
+            noto_path = os.path.join(os.getcwd(), 'fonts', 'NotoSansMono.ttf')
+            if os.path.exists(noto_path):
+                LabelBase.register(name='NotoSansMono', fn_regular=noto_path)
+    
+            # Source Code Pro
+            source_path = os.path.join(os.getcwd(), 'fonts', 'SourceCodePro-Regular.otf')
+            if os.path.exists(source_path):
+                LabelBase.register(name='SourceCodePro', fn_regular=source_path)
+    
         except Exception as e:
             log_error(f"Font error: {e}")
 
     def _request_permissions(self):
-        pass
+        if ANV_AVAILABLE:
+            try:
+                request_permissions([Permission.WRITE_EXTERNAL_STORAGE, Permission.READ_EXTERNAL_STORAGE])
+            except:
+                pass
 
     def _request_storage_permission(self):
         try:
