@@ -4579,11 +4579,14 @@ class PythonLearningApp(MDApp):
     def _load_fonts(self):
         """Регистрирует шрифты для корректного отображения символов."""
         try:
-            # ЗАГЛУШКИ для шрифтов, которых нет на чистом Android
+            # Эти две строки — всё, что нужно добавить:
             LabelBase.register(name='Roboto', fn_regular='Roboto')
-            LabelBase.register(name='DejaVuSans', fn_regular='Roboto')
-            LabelBase.register(name='SystemRoboto', fn_regular='Roboto')
-            LabelBase.register(name='DroidBold', fn_regular='Roboto')
+            LabelBase.register(name='JetBrainsMono', fn_regular='Roboto')
+            LabelBase.register(name='FiraCode', fn_regular='Roboto')
+            LabelBase.register(name='CascadiaCode', fn_regular='Roboto')
+            LabelBase.register(name='IBMPlexMono', fn_regular='Roboto')
+            LabelBase.register(name='NotoSansMono', fn_regular='Roboto')
+            LabelBase.register(name='SourceCodePro', fn_regular='Roboto')
             LabelBase.register(name='DroidMono', fn_regular='Roboto')
             # Системный шрифт для основного текста
             cjk_path = '/system/fonts/NotoSansCJK-Regular.ttc'
