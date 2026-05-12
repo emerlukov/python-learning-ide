@@ -39,6 +39,14 @@ import re
 import builtins
 from datetime import datetime
 
+# ====================== РЕГИСТРАЦИЯ ШРИФТА (ДО ВСЕГО) ======================
+from kivy.core.text import LabelBase
+font_path = os.path.join(os.path.dirname(__file__), 'fonts', 'SourceSansPro-Bold.ttf')
+if os.path.exists(font_path):
+    LabelBase.register(name='SourceBold', fn_regular=font_path)
+else:
+    LabelBase.register(name='SourceBold', fn_regular='Roboto')
+
 # ====================== ЛОВЕЦ ОШИБОК (ДО ВСЕГО) ======================
 def global_exception_handler(exctype, value, tb):
     error_msg = ''.join(traceback.format_exception(exctype, value, tb))
