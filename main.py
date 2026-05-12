@@ -42,27 +42,13 @@ from datetime import datetime
 # ====================== РЕГИСТРАЦИЯ ШРИФТОВ ======================
 from kivy.core.text import LabelBase
 import os
+font_path = os.path.join(os.path.dirname(__file__), 'fonts', 'SourceSansPro-Bold.ttf')
+if os.path.exists(font_path):
+    LabelBase.register(name='SourceBold', fn_regular=font_path)
+else:
+    LabelBase.register(name='SourceBold', fn_regular='Roboto')
 
-# Пути к шрифтам
-font_dir = os.path.join(os.path.dirname(__file__), 'fonts')
-
-fonts = {
-    'JetBrainsMono': 'JetBrainsMono.ttf',
-    'FiraCode': 'FiraCode-Regular.ttf',
-    'CascadiaCode': 'CascadiaCode.ttf',
-    'DejaVuSans': 'DejaVuSans.ttf',
-    'IBMPlexMono': 'IBMPlexMono-Regular.ttf',
-    'NotoSans': 'NotoSans-Regular.ttf',
-    'NotoSansMono': 'NotoSansMono.ttf',
-}
-
-for name, filename in fonts.items():
-    font_path = os.path.join(font_dir, filename)
-    if os.path.exists(font_path):
-        LabelBase.register(name=name, fn_regular=font_path)
-        print(f"✅ Шрифт зарегистрирован: {name}")
-    else:
-        print(f"⚠️ Шрифт не найден: {filename}")
+Config.set('kivy', 'default_font', 'SourceBold')
 
 # ====================== ЛОВЕЦ ОШИБОК (ДО ВСЕГО) ======================
 def global_exception_handler(exctype, value, tb):
@@ -4599,39 +4585,31 @@ class PythonLearningApp(MDApp):
         threading.Thread(target=load_key, daemon=True).start()
 
     def _load_fonts(self):
-        """Регистрирует шрифты для корректного отображения символов."""
         try:
-            LabelBase.register(name='SourceBold', fn_regular='DroidMono')
-            # JetBrains Mono
-            jetbrains_path = os.path.join(os.getcwd(), 'fonts', 'JetBrainsMono.ttf')
-            if os.path.exists(jetbrains_path):
-                LabelBase.register(name='JetBrainsMono', fn_regular=jetbrains_path)
-    
-            # Fira Code
-            fira_path = os.path.join(os.getcwd(), 'fonts', 'FiraCode-Regular.ttf')
-            if os.path.exists(fira_path):
-                LabelBase.register(name='FiraCode', fn_regular=fira_path)
-    
-            # Cascadia Code
-            cascadia_path = os.path.join(os.getcwd(), 'fonts', 'CascadiaCode.ttf')
-            if os.path.exists(cascadia_path):
-                LabelBase.register(name='CascadiaCode', fn_regular=cascadia_path)
-    
-            # IBM Plex Mono
-            ibm_path = os.path.join(os.getcwd(), 'fonts', 'IBMPlexMono-Regular.ttf')
-            if os.path.exists(ibm_path):
-                LabelBase.register(name='IBMPlexMono', fn_regular=ibm_path)
-    
-            # Noto Sans Mono
-            noto_path = os.path.join(os.getcwd(), 'fonts', 'NotoSansMono.ttf')
-            if os.path.exists(noto_path):
-                LabelBase.register(name='NotoSansMono', fn_regular=noto_path)
-    
-            # Source Code Pro
-            source_path = os.path.join(os.getcwd(), 'fonts', 'SourceCodePro-Regular.otf')
-            if os.path.exists(source_path):
-                LabelBase.register(name='SourceCodePro', fn_regular=source_path)
-    
+            # ВСЕ шрифты регистрируем через реальный файл SourceSansPro-Bold.ttf
+            import os
+            fonts_dir = os.path.join(os.getcwd(), 'fonts')
+            source_bold_path = os.path.join(fonts_dir, 'SourceSansPro-Bold.ttf')
+            
+            if os.path.exists(source_bold_path):
+                LabelBase.register(name='SourceBold', fn_regular=source_bold_path)
+                LabelBase.register(name='JetBrainsMono', fn_regular=source_bold_path)
+                LabelBase.register(name='FiraCode', fn_regular=source_bold_path)
+                LabelBase.register(name='CascadiaCode', fn_regular=source_bold_path)
+                LabelBase.register(name='IBMPlexMono', fn_regular=source_bold_path)
+                LabelBase.register(name='NotoSansMono', fn_regular=source_bold_path)
+                LabelBase.register(name='SourceCodePro', fn_regular=source_bold_path)
+                LabelBase.register(name='DroidMono', fn_regular=source_bold_path)
+            else:
+                # Если файла нет — используем встроенный Roboto
+                LabelBase.register(name='SourceBold', fn_regular='Roboto')
+                LabelBase.register(name='JetBrainsMono', fn_regular='Roboto')
+                LabelBase.register(name='FiraCode', fn_regular='Roboto')
+                LabelBase.register(name='CascadiaCode', fn_regular='Roboto')
+                LabelBase.register(name='IBMPlexMono', fn_regular='Roboto')
+                LabelBase.register(name='NotoSansMono', fn_regular='Roboto')
+                LabelBase.register(name='SourceCodePro', fn_regular='Roboto')
+                LabelBase.register(name='DroidMono', fn_regular='Roboto')
         except Exception as e:
             log_error(f"Font error: {e}")
 
@@ -6175,6 +6153,30 @@ if __name__ == '__main__':
         except:
             pass
         raise
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
