@@ -39,13 +39,30 @@ import re
 import builtins
 from datetime import datetime
 
-# ====================== РЕГИСТРАЦИЯ ШРИФТА (ДО ВСЕГО) ======================
+# ====================== РЕГИСТРАЦИЯ ШРИФТОВ ======================
 from kivy.core.text import LabelBase
-font_path = os.path.join(os.path.dirname(__file__), 'fonts', 'SourceSansPro-Bold.ttf')
-if os.path.exists(font_path):
-    LabelBase.register(name='SourceBold', fn_regular=font_path)
-else:
-    LabelBase.register(name='SourceBold', fn_regular='Roboto')
+import os
+
+# Пути к шрифтам
+font_dir = os.path.join(os.path.dirname(__file__), 'fonts')
+
+fonts = {
+    'JetBrainsMono': 'JetBrainsMono.ttf',
+    'FiraCode': 'FiraCode-Regular.ttf',
+    'CascadiaCode': 'CascadiaCode.ttf',
+    'DejaVuSans': 'DejaVuSans.ttf',
+    'IBMPlexMono': 'IBMPlexMono-Regular.ttf',
+    'NotoSans': 'NotoSans-Regular.ttf',
+    'NotoSansMono': 'NotoSansMono.ttf',
+}
+
+for name, filename in fonts.items():
+    font_path = os.path.join(font_dir, filename)
+    if os.path.exists(font_path):
+        LabelBase.register(name=name, fn_regular=font_path)
+        print(f"✅ Шрифт зарегистрирован: {name}")
+    else:
+        print(f"⚠️ Шрифт не найден: {filename}")
 
 # ====================== ЛОВЕЦ ОШИБОК (ДО ВСЕГО) ======================
 def global_exception_handler(exctype, value, tb):
