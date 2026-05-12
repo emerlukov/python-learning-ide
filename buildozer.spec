@@ -10,7 +10,7 @@ source.exclude_patterns = *.pyc,*.pyo
 version = 3.4.0
 
 # Главное исправление — pinned версии
-requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0,kivymd
+requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0,kivymd,pygments,autopep8,plyer
 
 
 
