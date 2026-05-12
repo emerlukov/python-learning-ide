@@ -4579,16 +4579,17 @@ class PythonLearningApp(MDApp):
     def _load_fonts(self):
         """Регистрирует шрифты для корректного отображения символов."""
         try:
-            # Используем ТОЛЬКО встроенный шрифт Kivy
-            from kivy.core.text import DEFAULT_FONT
-            LabelBase.register(name='Roboto', fn_regular=DEFAULT_FONT)
-            LabelBase.register(name='JetBrainsMono', fn_regular=DEFAULT_FONT)
-            LabelBase.register(name='FiraCode', fn_regular=DEFAULT_FONT)
-            LabelBase.register(name='CascadiaCode', fn_regular=DEFAULT_FONT)
-            LabelBase.register(name='IBMPlexMono', fn_regular=DEFAULT_FONT)
-            LabelBase.register(name='NotoSansMono', fn_regular=DEFAULT_FONT)
-            LabelBase.register(name='SourceCodePro', fn_regular=DEFAULT_FONT)
-            LabelBase.register(name='DroidMono', fn_regular=DEFAULT_FONT)
+            # Системный шрифт Android (всегда доступен)
+            SYSTEM_FONT = '/system/fonts/DroidSans.ttf'
+            
+            LabelBase.register(name='Roboto', fn_regular=SYSTEM_FONT)
+            LabelBase.register(name='JetBrainsMono', fn_regular=SYSTEM_FONT)
+            LabelBase.register(name='FiraCode', fn_regular=SYSTEM_FONT)
+            LabelBase.register(name='CascadiaCode', fn_regular=SYSTEM_FONT)
+            LabelBase.register(name='IBMPlexMono', fn_regular=SYSTEM_FONT)
+            LabelBase.register(name='NotoSansMono', fn_regular=SYSTEM_FONT)
+            LabelBase.register(name='SourceCodePro', fn_regular=SYSTEM_FONT)
+            LabelBase.register(name='DroidMono', fn_regular=SYSTEM_FONT)
             # Системный шрифт для основного текста
             cjk_path = '/system/fonts/NotoSansCJK-Regular.ttc'
             if os.path.exists(cjk_path):
@@ -6196,30 +6197,6 @@ if __name__ == '__main__':
         except:
             pass
         raise
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
