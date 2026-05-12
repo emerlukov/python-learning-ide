@@ -122,7 +122,7 @@ Config.set('kivy', 'window_icon', '')
 Config.set('kivy', 'window_title', 'Python Learning IDE')
 Config.set('kivy', 'exit_on_escape', '0')
 Config.set('kivy', 'keyboard_mode', 'systemanddock')
-Config.set('kivy', 'default_font', 'DroidMono')
+Config.set('kivy', 'default_font', 'SourceBold')
 
 Window.allow_screensaver = True
 Window.softinput_mode = ''
