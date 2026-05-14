@@ -1,0 +1,75 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git zip unzip openjdk-17-jdk autoconf libtool pkg-config \
+            zlib1g-dev libncurses-dev libtinfo6 cmake libffi-dev libssl-dev automake \
+            autopoint gettext libltdl-dev
+
+      - name: Install Buildozer and dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install buildozer cython==0.29.36 autopep8 pycodestyle requests
+
+      - name: Test autopep8 installation
+        run: |
+          python -c "import autopep8, pycodestyle; print('✅ autopep8 version:', autopep8.__version__); print('✅ pycodestyle version:', pycodestyle.__version__)"
+
+      - name: Check required files
+        run: |
+          if [ ! -f splash.png ]; then
+            echo "❌ ERROR: splash.png not found!"
+            exit 1
+          fi
+          echo "✅ splash.png found"
+
+      - name: Clean previous build
+        run: |
+          buildozer -v android clean || true
+
+      - name: Build APK
+        run: |
+          mkdir -p .buildozer/android/platform
+          cd .buildozer/android/platform
+          
+          if [ ! -d python-for-android ]; then
+            git clone -b develop --single-branch --depth 1 https://github.com/kivy/python-for-android.git
+          else
+            cd python-for-android && git pull && cd ..
+          fi
+          
+          cd python-for-android
+          sed -i "s|pip install -U pip|pip install pip==24.3.1 --no-deps --force-reinstall|g" pythonforandroid/build.py
+          sed -i "s|'pip install -U pip'|'pip install pip==24.3.1 --no-deps --force-reinstall'|g" pythonforandroid/build.py
+          
+          cd ../../../..
+          
+          buildozer -v android debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Python-Learning-IDE-APK
+          path: bin/*.apk
+          if-no-files-found: error
