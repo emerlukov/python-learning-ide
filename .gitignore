@@ -1,0 +1,36 @@
+# Файлы, создаваемые Buildozer при сборке APK
+.buildozer/
+bin/
+*.apk
+*.aab
+*.zip
+
+# Кэш и скомпилированные файлы Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+
+# Файлы Android Studio (если есть)
+*.iml
+.gradle/
+local.properties
+
+# Файлы сред разработки (IDE)
+.idea/
+.vscode/
+
+# Системные файлы macOS и Windows
+.DS_Store
+Thumbs.db
+
+# Лог-файлы вашего приложения
+*.log
+app_debug.log
+app_error.log
+
+# Локальные данные и сохранения
+data/
+language.txt
+tabs.json
+autosave.py
