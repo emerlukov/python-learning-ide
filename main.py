@@ -41,6 +41,7 @@ from datetime import datetime
 # ====================== ИМПОРТ СТОРОННИХ БИБЛИОТЕК ======================
 try:
     import autopep8
+
     HAS_AUTOPEP8 = True
     print("[INFO] autopep8 успешно загружен")
 except ImportError:
@@ -52,6 +53,7 @@ except ImportError:
 try:
     import anv
     from android import request_permissions, Permission
+
     try:
         import androidstorage
     except ImportError:
@@ -65,6 +67,7 @@ except ImportError:
 # ====================== ИМПОРТ БИБЛИОТЕК PLYER ======================
 try:
     from plyer import storagepath
+
     PLYER_AVAILABLE = True
 except:
     PLYER_AVAILABLE = False
@@ -104,16 +107,52 @@ DEBUG = True
 try:
     from pygments.lexers import PythonLexer
     from pygments.styles import get_style_by_name
+
     HAS_PYGMENTS = True
 except ImportError:
     PythonLexer = None
     HAS_PYGMENTS = False
 
-# Регистрируем шрифт до настроек Kivy
+# ====================== РЕГИСТРАЦИЯ ШРИФТОВ ТОЛЬКО ИЗ ПАПКИ ======================
 from kivy.core.text import LabelBase
-if os.path.exists('/system/fonts/SourceSansPro-Bold.ttf'):
-    LabelBase.register(name='SourceBold',
-                       fn_regular='/system/fonts/SourceSansPro-Bold.ttf')
+
+fonts_dir = os.path.join(os.path.dirname(__file__), 'fonts')
+
+# 1. Регистрируем SourceBold (основной шрифт интерфейса)
+source_bold_path = os.path.join(fonts_dir, 'SourceSansPro-Bold.ttf')
+if os.path.exists(source_bold_path):
+    LabelBase.register(name='SourceBold', fn_regular=source_bold_path)
+else:
+    # Fallback на другой шрифт из папки
+    fallback_path = os.path.join(fonts_dir, 'NotoSans-Regular.ttf')
+    if os.path.exists(fallback_path):
+        LabelBase.register(name='SourceBold', fn_regular=fallback_path)
+
+# 2. Регистрируем DejaVuSans для спецсимволов
+dejavu_path = os.path.join(fonts_dir, 'DejaVuSans.ttf')
+if os.path.exists(dejavu_path):
+    LabelBase.register(name='DejaVuSans', fn_regular=dejavu_path)
+
+# 3. Регистрируем моноширинные шрифты для редактора
+mono_fonts = {
+    'JetBrainsMono': 'JetBrainsMono.ttf',
+    'FiraCode': 'FiraCode-Regular.ttf',
+    'CascadiaCode': 'CascadiaCode.ttf',
+    'IBMPlexMono': 'IBMPlexMono-Regular.ttf',
+    'NotoSansMono': 'NotoSansMono.ttf',
+    'SourceCodePro': 'SourceCodePro-Regular.otf',
+    'DroidMono': 'NotoSansMono.ttf',
+}
+
+for font_name, font_file in mono_fonts.items():
+    font_path = os.path.join(fonts_dir, font_file)
+    if os.path.exists(font_path):
+        LabelBase.register(name=font_name, fn_regular=font_path)
+
+# 4. Регистрируем Roboto как основной (если нужен)
+noto_path = os.path.join(fonts_dir, 'NotoSans-Regular.ttf')
+if os.path.exists(noto_path):
+    LabelBase.register(name='Roboto', fn_regular=noto_path)
 
 # ====================== НАСТРОЙКИ KIVY ======================
 Config.set('graphics', 'maxfps', '30')
@@ -122,9 +161,9 @@ Config.set('kivy', 'window_title', 'Python Learning IDE')
 Config.set('kivy', 'exit_on_escape', '0')
 
 # === ИСПРАВЛЕНИЕ ДЁРГАНЬЯ КЛАВИАТУРЫ ===
-Config.set('kivy', 'keyboard_mode', 'system')           # ← изменил
-Window.softinput_mode = 'below_target'                  # ← лучший режим для анимаций
-Window.keyboard_anim_args = {'d': 0, 't': 'linear'}     # отключаем анимацию клавиатуры
+Config.set('kivy', 'keyboard_mode', 'system')  # ← изменил
+Window.softinput_mode = 'below_target'  # ← лучший режим для анимаций
+Window.keyboard_anim_args = {'d': 0, 't': 'linear'}  # отключаем анимацию клавиатуры
 
 Config.set('kivy', 'default_font', 'SourceBold')
 Window.allow_screensaver = True
@@ -150,6 +189,7 @@ Builder.load_string('''
     background_image: ''
 ''')
 
+
 # ====================== ИСПРАВЛЕНИЕ ОШИБКИ FOCUS ======================
 def patched_excepthook(exctype, value, traceback_obj):
     """
@@ -160,7 +200,9 @@ def patched_excepthook(exctype, value, traceback_obj):
         return
     sys.__excepthook__(exctype, value, traceback_obj)
 
+
 sys.excepthook = patched_excepthook
+
 
 # ====================== ОТЛАДОЧНЫЕ ФУНКЦИИ ======================
 def log_error(msg):
@@ -191,6 +233,7 @@ def log_error(msg):
     except:
         pass
 
+
 def android_copy(text):
     """
     Копирует текст в буфер обмена через Android API.
@@ -208,6 +251,7 @@ def android_copy(text):
         return True
     except:
         return False
+
 
 # ====================== ЭКСПОРТ ГЛОБАЛЬНЫХ ПЕРЕМЕННЫХ ======================
 __all__ = ['HAS_PYGMENTS', 'PythonLexer', 'ThemeManager', 'SettingsManager']
@@ -524,78 +568,78 @@ DARK_THEME = {
     'name': 'dark',
 
     # ==================== ОСНОВНЫЕ ФОНЫ ====================
-    'app_bg': (0.188, 0.204, 0.251, 1),        # фон всего приложения
-    'window_bg': (0.06, 0.06, 0.06, 1),          # фон за границами приложения (Window.clearcolor)
-    'widget_bg': (0.141, 0.145, 0.149, 1),       # фон кнопок, вкладок, попапов
-    'text_color': (0.85, 0.88, 0.90, 1),          # цвет текста везде
+    'app_bg': (0.188, 0.204, 0.251, 1),  # фон всего приложения
+    'window_bg': (0.06, 0.06, 0.06, 1),  # фон за границами приложения (Window.clearcolor)
+    'widget_bg': (0.141, 0.145, 0.149, 1),  # фон кнопок, вкладок, попапов
+    'text_color': (0.85, 0.88, 0.90, 1),  # цвет текста везде
 
     # ==================== ПАНЕЛИ ИНСТРУМЕНТОВ ====================
-    'action_bar_bg': (0.18, 0.18, 0.19, 1),      # фон панели кнопок действий
-    'top_bar_bg': (0.18, 0.18, 0.19, 1),          # фон верхней панели (Spinner + кнопка ☰)
-    'symbol_btn_bg': (0.141, 0.145, 0.149, 1),   # фон кнопок на панелях
-    'symbol_btn_text': (0.85, 0.88, 0.90, 1),     # цвет текста/иконок на кнопках панелей
+    'action_bar_bg': (0.18, 0.18, 0.19, 1),  # фон панели кнопок действий
+    'top_bar_bg': (0.18, 0.18, 0.19, 1),  # фон верхней панели (Spinner + кнопка ☰)
+    'symbol_btn_bg': (0.141, 0.145, 0.149, 1),  # фон кнопок на панелях
+    'symbol_btn_text': (0.85, 0.88, 0.90, 1),  # цвет текста/иконок на кнопках панелей
 
     # ==================== РЕДАКТОР КОДА ====================
-    'editor_bg': (0.188, 0.204, 0.251, 1),        # фон редактора кода
-    'editor_text': (0.95, 0.95, 0.95, 1),          # цвет текста в редакторе
-    'editor_cursor': (1.0, 1.0, 1.0, 1),           # цвет курсора
-    'editor_selection': (1, 1, 1, 0.15),           # цвет выделения текста
-    'panel_bg': (0.188, 0.204, 0.251, 1),          # фон панели с номерами строк
-    'panel_text': (0.45, 0.48, 0.50, 1),           # цвет номеров строк
-    'separator_color': (0.5, 0.5, 0.5, 0.3),       # разделитель панели строк и кода
-    'current_line_highlight': (1, 1, 1, 0.04),     # подсветка текущей строки
-    'indent_guide_color': (0.35, 0.38, 0.40, 0.30),# направляющие отступов
+    'editor_bg': (0.188, 0.204, 0.251, 1),  # фон редактора кода
+    'editor_text': (0.95, 0.95, 0.95, 1),  # цвет текста в редакторе
+    'editor_cursor': (1.0, 1.0, 1.0, 1),  # цвет курсора
+    'editor_selection': (1, 1, 1, 0.15),  # цвет выделения текста
+    'panel_bg': (0.188, 0.204, 0.251, 1),  # фон панели с номерами строк
+    'panel_text': (0.45, 0.48, 0.50, 1),  # цвет номеров строк
+    'separator_color': (0.5, 0.5, 0.5, 0.3),  # разделитель панели строк и кода
+    'current_line_highlight': (1, 1, 1, 0.04),  # подсветка текущей строки
+    'indent_guide_color': (0.35, 0.38, 0.40, 0.30),  # направляющие отступов
 
     # ==================== ПОЛЯ ВВОДА ====================
-    'input_bg': (0.188, 0.204, 0.251, 1),          # фон полей ввода
-    'input_text': (1.0, 1.0, 1.0, 1),              # цвет текста в полях ввода
-    'input_cursor': (1.0, 1.0, 1.0, 1),            # цвет курсора в полях ввода
-    'hint_text': (0.45, 0.48, 0.50, 1),            # цвет подсказок в пустых полях
+    'input_bg': (0.188, 0.204, 0.251, 1),  # фон полей ввода
+    'input_text': (1.0, 1.0, 1.0, 1),  # цвет текста в полях ввода
+    'input_cursor': (1.0, 1.0, 1.0, 1),  # цвет курсора в полях ввода
+    'hint_text': (0.45, 0.48, 0.50, 1),  # цвет подсказок в пустых полях
 
     # ==================== ВКЛАДКИ ====================
-    'tab_bar_bg': (0.18, 0.18, 0.19, 1),           # фон панели вкладок
-    'tab_inactive_bg': (0.141, 0.145, 0.149, 1),   # фон неактивных вкладок
-    'tab_active_bg': None,                          # фон активной вкладки (авто)
-    'tab_add_btn_bg': (0.141, 0.145, 0.149, 1),    # фон кнопки добавления вкладки
-    'tab_close_btn_text': (0.85, 0.88, 0.90, 1),   # цвет кнопки закрытия вкладки
-    'tab_context_danger_bg': (0.5, 0.2, 0.2, 1),   # фон кнопки "Закрыть все"
+    'tab_bar_bg': (0.18, 0.18, 0.19, 1),  # фон панели вкладок
+    'tab_inactive_bg': (0.141, 0.145, 0.149, 1),  # фон неактивных вкладок
+    'tab_active_bg': None,  # фон активной вкладки (авто)
+    'tab_add_btn_bg': (0.141, 0.145, 0.149, 1),  # фон кнопки добавления вкладки
+    'tab_close_btn_text': (0.85, 0.88, 0.90, 1),  # цвет кнопки закрытия вкладки
+    'tab_context_danger_bg': (0.5, 0.2, 0.2, 1),  # фон кнопки "Закрыть все"
 
     # ==================== ВЕРХНЯЯ ПАНЕЛЬ (Spinner + ☰) ====================
-    'spinner_bg': (0.141, 0.145, 0.149, 1),        # фон выпадающего списка Примеров
-    'spinner_text': (0.85, 0.88, 0.90, 1),          # текст в списке Примеров
-    'spinner_dropdown_bg': (0.188, 0.204, 0.251, 1),# фон выпавшего меню Примеров
-    'spinner_dropdown_text': (0.85, 0.88, 0.90, 1), # цвет пунктов в выпавшем меню
-    'spinner_dropdown_selected_bg': (0.141, 0.145, 0.149, 1),# фон выбранного пункта
-    'spinner_dropdown_btn_bg': (0.141, 0.14, 0.149, 1),# фон кнопок-примеров
-    'menu_btn_bg': (0.141, 0.145, 0.149, 1),        # фон кнопки ☰
-    'menu_btn_text': (0.85, 0.88, 0.90, 1),          # цвет значка ☰
+    'spinner_bg': (0.141, 0.145, 0.149, 1),  # фон выпадающего списка Примеров
+    'spinner_text': (0.85, 0.88, 0.90, 1),  # текст в списке Примеров
+    'spinner_dropdown_bg': (0.188, 0.204, 0.251, 1),  # фон выпавшего меню Примеров
+    'spinner_dropdown_text': (0.85, 0.88, 0.90, 1),  # цвет пунктов в выпавшем меню
+    'spinner_dropdown_selected_bg': (0.141, 0.145, 0.149, 1),  # фон выбранного пункта
+    'spinner_dropdown_btn_bg': (0.141, 0.14, 0.149, 1),  # фон кнопок-примеров
+    'menu_btn_bg': (0.141, 0.145, 0.149, 1),  # фон кнопки ☰
+    'menu_btn_text': (0.85, 0.88, 0.90, 1),  # цвет значка ☰
 
     # ==================== ВСПЛЫВАЮЩИЕ ОКНА ====================
-    'popup_bg': (0.188, 0.204, 0.251, 1),           # фон всплывающих окон
-    'popup_title': (0.85, 0.88, 0.90, 1),            # цвет заголовка попапа
-    'popup_title_bg': (0.188, 0.204, 0.251, 1),      # фон заголовка попапа
-    'popup_separator': (0.25, 0.25, 0.25, 1),        # разделитель под заголовком попапа
+    'popup_bg': (0.188, 0.204, 0.251, 1),  # фон всплывающих окон
+    'popup_title': (0.85, 0.88, 0.90, 1),  # цвет заголовка попапа
+    'popup_title_bg': (0.188, 0.204, 0.251, 1),  # фон заголовка попапа
+    'popup_separator': (0.25, 0.25, 0.25, 1),  # разделитель под заголовком попапа
 
     # ==================== КНОПКИ РАЗНЫХ ТИПОВ ====================
-    'btn_success_bg': (0.2, 0.5, 0.2, 1),           # зелёные кнопки (Apply, Save)
-    'btn_danger_bg': (0.5, 0.2, 0.2, 1),             # красные кнопки (Close, Delete)
-    'btn_selected_file_bg': (0.3, 0.5, 0.3, 1),      # выделенный файл в диалоге
-    'fold_btn_bg': (0.141, 0.145, 0.149, 1),         # фон кнопок сворачивания
-    'fold_btn_text': (0.75, 0.78, 0.80, 1),           # текст кнопок сворачивания
+    'btn_success_bg': (0.2, 0.5, 0.2, 1),  # зелёные кнопки (Apply, Save)
+    'btn_danger_bg': (0.5, 0.2, 0.2, 1),  # красные кнопки (Close, Delete)
+    'btn_selected_file_bg': (0.3, 0.5, 0.3, 1),  # выделенный файл в диалоге
+    'fold_btn_bg': (0.141, 0.145, 0.149, 1),  # фон кнопок сворачивания
+    'fold_btn_text': (0.75, 0.78, 0.80, 1),  # текст кнопок сворачивания
 
     # ==================== КНОПКА ЗАПУСКА ====================
-    'run_btn_bg': (0.85, 0.88, 0.90, 1),             # фон кнопки Run
-    'run_btn_text': (0.18, 0.18, 0.19, 1),            # цвет значка ▶
-    'run_btn_shadow': (0, 0, 0, 0.35),                # тень кнопки Run
+    'run_btn_bg': (0.85, 0.88, 0.90, 1),  # фон кнопки Run
+    'run_btn_text': (0.18, 0.18, 0.19, 1),  # цвет значка ▶
+    'run_btn_shadow': (0, 0, 0, 0.35),  # тень кнопки Run
 
     # ==================== ПРОЧЕЕ ====================
-    'syntax_style': 'dracula',                        # стиль подсветки по умолчанию
-    'result_bg': (0.188, 0.204, 0.251, 1),            # фон окна результата
-    'result_text': (0.85, 0.88, 0.90, 1),             # текст в окне результата
-    'stats_text': (0.60, 0.63, 0.65, 1),              # цвет пути к файлу
-    'ai_response_bg': (0.06, 0.06, 0.06, 1),          # фон ответа AI
-    'scroll_bar_color': (0.4, 0.4, 0.4, 0.9),         # полоса прокрутки активная
-    'scroll_bar_inactive': (0.25, 0.25, 0.25, 0.6),   # полоса прокрутки неактивная
+    'syntax_style': 'dracula',  # стиль подсветки по умолчанию
+    'result_bg': (0.188, 0.204, 0.251, 1),  # фон окна результата
+    'result_text': (0.85, 0.88, 0.90, 1),  # текст в окне результата
+    'stats_text': (0.60, 0.63, 0.65, 1),  # цвет пути к файлу
+    'ai_response_bg': (0.06, 0.06, 0.06, 1),  # фон ответа AI
+    'scroll_bar_color': (0.4, 0.4, 0.4, 0.9),  # полоса прокрутки активная
+    'scroll_bar_inactive': (0.25, 0.25, 0.25, 0.6),  # полоса прокрутки неактивная
 }
 
 # ==================== СВЕТЛАЯ ТЕМА ====================
@@ -603,79 +647,80 @@ LIGHT_THEME = {
     'name': 'light',
 
     # ==================== ОСНОВНЫЕ ФОНЫ ====================
-    'app_bg': (1.0, 1.0, 1.0, 1),                 # фон всего приложения — белый
-    'window_bg': (1.0, 1.0, 1.0, 1),               # фон за границами — белый
-    'widget_bg': (0.843, 0.816, 1.0, 1),            # фон кнопок — светло-фиолетовый #D7D0FF
-    'text_color': (0, 0, 0, 1),                     # цвет текста — чёрный
+    'app_bg': (1.0, 1.0, 1.0, 1),  # фон всего приложения — белый
+    'window_bg': (1.0, 1.0, 1.0, 1),  # фон за границами — белый
+    'widget_bg': (0.843, 0.816, 1.0, 1),  # фон кнопок — светло-фиолетовый #D7D0FF
+    'text_color': (0, 0, 0, 1),  # цвет текста — чёрный
 
     # ==================== ПАНЕЛИ ИНСТРУМЕНТОВ ====================
-    'action_bar_bg': (0.843, 0.816, 1.0, 1),        # фон панели кнопок — #D7D0FF
-    'top_bar_bg': (0.843, 0.816, 1.0, 1),            # фон верхней панели — #D7D0FF
-    'symbol_btn_bg': (0.596, 0.486, 1.0, 1),         # фон кнопок на панелях — #987CFF
-    'symbol_btn_text': (0, 0, 0, 1),                 # текст на кнопках панелей — чёрный
+    'action_bar_bg': (0.843, 0.816, 1.0, 1),  # фон панели кнопок — #D7D0FF
+    'top_bar_bg': (0.843, 0.816, 1.0, 1),  # фон верхней панели — #D7D0FF
+    'symbol_btn_bg': (0.596, 0.486, 1.0, 1),  # фон кнопок на панелях — #987CFF
+    'symbol_btn_text': (0, 0, 0, 1),  # текст на кнопках панелей — чёрный
 
     # ==================== РЕДАКТОР КОДА ====================
-    'editor_bg': (1.0, 1.0, 1.0, 1),                # фон редактора — белый
-    'editor_text': (0, 0, 0, 1),                     # текст в редакторе — чёрный
-    'editor_cursor': (0, 0, 0, 1),                   # курсор — чёрный
-    'editor_selection': (0, 0, 0, 0.12),             # выделение текста
-    'panel_bg': (0.843, 0.816, 1.0, 1),              # панель номеров строк — #D7D0FF
-    'panel_text': (0.40, 0.40, 0.40, 1),             # номера строк — тёмно-серый
-    'separator_color': (0.5, 0.5, 0.5, 0.3),         # разделитель панели строк
-    'current_line_highlight': (0.7, 0.7, 0.7, 0.08), # подсветка строки курсора
-    'indent_guide_color': (0.7, 0.7, 0.7, 0.30),     # направляющие отступов
+    'editor_bg': (1.0, 1.0, 1.0, 1),  # фон редактора — белый
+    'editor_text': (0, 0, 0, 1),  # текст в редакторе — чёрный
+    'editor_cursor': (0, 0, 0, 1),  # курсор — чёрный
+    'editor_selection': (0, 0, 0, 0.12),  # выделение текста
+    'panel_bg': (0.843, 0.816, 1.0, 1),  # панель номеров строк — #D7D0FF
+    'panel_text': (0.40, 0.40, 0.40, 1),  # номера строк — тёмно-серый
+    'separator_color': (0.5, 0.5, 0.5, 0.3),  # разделитель панели строк
+    'current_line_highlight': (0.7, 0.7, 0.7, 0.08),  # подсветка строки курсора
+    'indent_guide_color': (0.7, 0.7, 0.7, 0.30),  # направляющие отступов
 
     # ==================== ПОЛЯ ВВОДА ====================
-    'input_bg': (1.0, 1.0, 1.0, 1),                 # фон полей ввода — белый
-    'input_text': (0, 0, 0, 1),                      # текст в полях — чёрный
-    'input_cursor': (0, 0, 0, 1),                    # курсор — чёрный
-    'hint_text': (0.50, 0.50, 0.50, 1),              # подсказки — серый
+    'input_bg': (1.0, 1.0, 1.0, 1),  # фон полей ввода — белый
+    'input_text': (0, 0, 0, 1),  # текст в полях — чёрный
+    'input_cursor': (0, 0, 0, 1),  # курсор — чёрный
+    'hint_text': (0.50, 0.50, 0.50, 1),  # подсказки — серый
 
     # ==================== ВКЛАДКИ ====================
-    'tab_bar_bg': (0.596, 0.486, 1.0, 1),            # фон панели вкладок — #987CFF
-    'tab_inactive_bg': (0.843, 0.816, 1.0, 1),       # неактивные вкладки — #D7D0FF
-    'tab_active_bg': None,                            # активная вкладка (авто)
-    'tab_add_btn_bg': (0.843, 0.816, 1.0, 1),        # кнопка добавления — #D7D0FF
-    'tab_close_btn_text': (0, 0, 0, 1),              # кнопка закрытия — чёрный
-    'tab_context_danger_bg': (0.7, 0.2, 0.2, 1),     # кнопка "Закрыть все" — красный
+    'tab_bar_bg': (0.596, 0.486, 1.0, 1),  # фон панели вкладок — #987CFF
+    'tab_inactive_bg': (0.843, 0.816, 1.0, 1),  # неактивные вкладки — #D7D0FF
+    'tab_active_bg': None,  # активная вкладка (авто)
+    'tab_add_btn_bg': (0.843, 0.816, 1.0, 1),  # кнопка добавления — #D7D0FF
+    'tab_close_btn_text': (0, 0, 0, 1),  # кнопка закрытия — чёрный
+    'tab_context_danger_bg': (0.7, 0.2, 0.2, 1),  # кнопка "Закрыть все" — красный
 
     # ==================== ВЕРХНЯЯ ПАНЕЛЬ (Spinner + ☰) ====================
-    'spinner_bg': (0.596, 0.486, 1.0, 1),             # фон Примеров — #987CFF
-    'spinner_text': (0, 0, 0, 1),                     # текст Примеров — чёрный
-    'spinner_dropdown_bg': (1.0, 1.0, 1.0, 1),        # фон меню Примеров — белый
-    'spinner_dropdown_text': (0, 0, 0, 1),            # пункты меню — чёрный
-    'spinner_dropdown_selected_bg': (0.843, 0.816, 1.0, 1),# выбранный пункт — #D7D0FF
-    'spinner_dropdown_btn_bg': (1.0, 1.0, 1.0, 1),    # кнопки-примеры — белый
-    'menu_btn_bg': (0.596, 0.486, 1.0, 1),            # кнопка ☰ — #987CFF
-    'menu_btn_text': (0, 0, 0, 1),                    # значок ☰ — чёрный
+    'spinner_bg': (0.596, 0.486, 1.0, 1),  # фон Примеров — #987CFF
+    'spinner_text': (0, 0, 0, 1),  # текст Примеров — чёрный
+    'spinner_dropdown_bg': (1.0, 1.0, 1.0, 1),  # фон меню Примеров — белый
+    'spinner_dropdown_text': (0, 0, 0, 1),  # пункты меню — чёрный
+    'spinner_dropdown_selected_bg': (0.843, 0.816, 1.0, 1),  # выбранный пункт — #D7D0FF
+    'spinner_dropdown_btn_bg': (1.0, 1.0, 1.0, 1),  # кнопки-примеры — белый
+    'menu_btn_bg': (0.596, 0.486, 1.0, 1),  # кнопка ☰ — #987CFF
+    'menu_btn_text': (0, 0, 0, 1),  # значок ☰ — чёрный
 
     # ==================== ВСПЛЫВАЮЩИЕ ОКНА ====================
-    'popup_bg': (1.0, 1.0, 1.0, 1),                  # фон попапов — белый
-    'popup_title': (0, 0, 0, 1),                      # заголовок попапа — чёрный
-    'popup_title_bg': (0.843, 0.816, 1.0, 1),         # фон заголовка — #D7D0FF
-    'popup_separator': (0.70, 0.69, 0.66, 1),         # разделитель попапа — светлый
+    'popup_bg': (1.0, 1.0, 1.0, 1),  # фон попапов — белый
+    'popup_title': (0, 0, 0, 1),  # заголовок попапа — чёрный
+    'popup_title_bg': (0.843, 0.816, 1.0, 1),  # фон заголовка — #D7D0FF
+    'popup_separator': (0.70, 0.69, 0.66, 1),  # разделитель попапа — светлый
 
     # ==================== КНОПКИ РАЗНЫХ ТИПОВ ====================
-    'btn_success_bg': (0.2, 0.5, 0.2, 1),            # зелёные кнопки
-    'btn_danger_bg': (0.7, 0.2, 0.2, 1),              # красные кнопки
-    'btn_selected_file_bg': (0.3, 0.5, 0.3, 1),       # выделенный файл
-    'fold_btn_bg': (0.843, 0.816, 1.0, 1),            # кнопки сворачивания — #D7D0FF
-    'fold_btn_text': (0.35, 0.35, 0.35, 1),           # текст сворачивания — тёмный
+    'btn_success_bg': (0.2, 0.5, 0.2, 1),  # зелёные кнопки
+    'btn_danger_bg': (0.7, 0.2, 0.2, 1),  # красные кнопки
+    'btn_selected_file_bg': (0.3, 0.5, 0.3, 1),  # выделенный файл
+    'fold_btn_bg': (0.843, 0.816, 1.0, 1),  # кнопки сворачивания — #D7D0FF
+    'fold_btn_text': (0.35, 0.35, 0.35, 1),  # текст сворачивания — тёмный
 
     # ==================== КНОПКА ЗАПУСКА ====================
-    'run_btn_bg': (0.596, 0.486, 1.0, 1),             # кнопка Run — #987CFF
-    'run_btn_text': (0, 0, 0, 1),                     # значок ▶ — чёрный
-    'run_btn_shadow': (0, 0, 0, 0.25),                # тень кнопки
+    'run_btn_bg': (0.596, 0.486, 1.0, 1),  # кнопка Run — #987CFF
+    'run_btn_text': (0, 0, 0, 1),  # значок ▶ — чёрный
+    'run_btn_shadow': (0, 0, 0, 0.25),  # тень кнопки
 
     # ==================== ПРОЧЕЕ ====================
-    'syntax_style': 'default',                         # стиль подсветки по умолчанию
-    'result_bg': (1.0, 1.0, 1.0, 1),                  # фон результата — белый
-    'result_text': (0, 0, 0, 1),                       # текст результата — чёрный
-    'stats_text': (0.40, 0.40, 0.40, 1),              # путь к файлу — тёмно-серый
-    'ai_response_bg': (1.0, 1.0, 1.0, 1),             # фон ответа AI — белый
-    'scroll_bar_color': (0.6, 0.6, 0.6, 0.9),         # полоса прокрутки активная
-    'scroll_bar_inactive': (0.8, 0.8, 0.8, 0.6),      # полоса прокрутки неактивная
+    'syntax_style': 'default',  # стиль подсветки по умолчанию
+    'result_bg': (1.0, 1.0, 1.0, 1),  # фон результата — белый
+    'result_text': (0, 0, 0, 1),  # текст результата — чёрный
+    'stats_text': (0.40, 0.40, 0.40, 1),  # путь к файлу — тёмно-серый
+    'ai_response_bg': (1.0, 1.0, 1.0, 1),  # фон ответа AI — белый
+    'scroll_bar_color': (0.6, 0.6, 0.6, 0.9),  # полоса прокрутки активная
+    'scroll_bar_inactive': (0.8, 0.8, 0.8, 0.6),  # полоса прокрутки неактивная
 }
+
 
 # [Классы: ThemedPopup, ThemedSpinner, SettingsManager, LanguageSelectMenu,
 #  ThemeSelectMenu, EditorSettingsMenu, FontSelectMenu, SyntaxStyleManager,
@@ -683,6 +728,7 @@ LIGHT_THEME = {
 
 class ThemedPopup(Popup):
     """Кастомный Popup с поддержкой тем"""
+
     def __init__(self, **kwargs):
         self._title_bg = kwargs.pop('title_bg', (0.188, 0.204, 0.251, 1))
         self._title_color = kwargs.pop('title_color', (0.85, 0.88, 0.90, 1))
@@ -857,6 +903,7 @@ class ThemedSpinner(Spinner):
 
 class SettingsManager:
     """Управляет сохранением и загрузкой настроек"""
+
     @staticmethod
     def get_settings_path():
         settings_dir = os.path.join(os.getcwd(), 'data')
@@ -961,6 +1008,7 @@ class LanguageSelectMenu:
                     pos=lambda inst, val: self._update_container_bg(inst, theme),
                     size=lambda inst, val: self._update_container_bg(inst, theme)
                 )
+
         self._dropdown.bind(on_open=lambda *args: style_container(self._dropdown, theme))
 
         from kivy.uix.behaviors import ButtonBehavior
@@ -972,9 +1020,11 @@ class LanguageSelectMenu:
             display_text = f"✓ {lang_name}" if lang_code == self.app.current_language else f"    {lang_name}"
             icon_text = lang_code.upper()
             box = MenuItem(orientation='horizontal', size_hint_y=None, height=dp(30), padding=(dp(8), 0), spacing=dp(5))
-            icon_lbl = Label(text=icon_text, color=theme['text_color'], font_size=dp(11), font_name='SourceBold', size_hint_x=None, width=dp(17), halign='center', valign='middle')
+            icon_lbl = Label(text=icon_text, color=theme['text_color'], font_size=dp(11), font_name='SourceBold',
+                             size_hint_x=None, width=dp(17), halign='center', valign='middle')
             box.add_widget(icon_lbl)
-            lbl = Label(text=display_text, color=theme['text_color'], font_size=dp(15), font_name='SourceBold', halign='left', valign='middle')
+            lbl = Label(text=display_text, color=theme['text_color'], font_size=dp(15), font_name='SourceBold',
+                        halign='left', valign='middle')
             box.add_widget(lbl)
             box.canvas.before.clear()
             with box.canvas.before:
@@ -982,7 +1032,8 @@ class LanguageSelectMenu:
                 Rectangle(pos=box.pos, size=box.size)
                 Color(btn_bg[0] + 0.08, btn_bg[1] + 0.08, btn_bg[2] + 0.08, 1)
                 Line(rectangle=(box.pos[0], box.pos[1], box.size[0], box.size[1]), width=dp(0.5))
-            box.bind(pos=lambda inst, val, bg=btn_bg: self._update_btn_bg(inst, bg), size=lambda inst, val, bg=btn_bg: self._update_btn_bg(inst, bg))
+            box.bind(pos=lambda inst, val, bg=btn_bg: self._update_btn_bg(inst, bg),
+                     size=lambda inst, val, bg=btn_bg: self._update_btn_bg(inst, bg))
             box.bind(on_release=lambda instance, code=lang_code: self._on_language_select(code))
             self._dropdown.add_widget(box)
 
@@ -997,6 +1048,7 @@ class LanguageSelectMenu:
                     self._dropdown.y = parent_button.y + parent_button.height
                 elif self._dropdown.y + self._dropdown.height > win_height:
                     self._dropdown.y = parent_button.y - self._dropdown.height
+
         Clock.schedule_once(adjust_position, 0.15)
 
     def _on_language_select(self, lang_code):
@@ -1016,7 +1068,8 @@ class LanguageSelectMenu:
                 pass
             SettingsManager.save_language(lang_code)
             self.app._update_ui_language()
-            self.app.show_result_popup(f"{self.app.tr.get('language', 'Language')}: {self.LANGUAGE_NAMES.get(lang_code, lang_code.upper())}")
+            self.app.show_result_popup(
+                f"{self.app.tr.get('language', 'Language')}: {self.LANGUAGE_NAMES.get(lang_code, lang_code.upper())}")
 
     def _update_container_bg(self, instance, theme):
         if not hasattr(instance, 'canvas'):
@@ -1039,6 +1092,7 @@ class LanguageSelectMenu:
 
 class ThemeSelectMenu:
     """Подменю выбора темы"""
+
     def __init__(self, app):
         self.app = app
         self._dropdown = None
@@ -1061,6 +1115,7 @@ class ThemeSelectMenu:
                     pos=lambda inst, val: self._update_container_bg(inst, theme_colors),
                     size=lambda inst, val: self._update_container_bg(inst, theme_colors)
                 )
+
         self._dropdown.bind(on_open=lambda *args: style_container(self._dropdown, theme))
 
         from kivymd.uix.label import MDIcon
@@ -1076,9 +1131,11 @@ class ThemeSelectMenu:
             display_text = f"✓ {theme_title}" if theme_id == current_theme_name else f"    {theme_title}"
             icon_name = theme_icons.get(theme_id, 'circle')
             box = MenuItem(orientation='horizontal', size_hint_y=None, height=dp(30), padding=(dp(8), 0), spacing=dp(5))
-            icon = MDIcon(icon=icon_name, font_size=f"{dp(10)}sp", theme_text_color="Custom", text_color=theme['text_color'], size_hint_x=None, width=dp(17))
+            icon = MDIcon(icon=icon_name, font_size=f"{dp(10)}sp", theme_text_color="Custom",
+                          text_color=theme['text_color'], size_hint_x=None, width=dp(17))
             box.add_widget(icon)
-            lbl = Label(text=display_text, color=theme['text_color'], font_size=dp(15), font_name='SourceBold', halign='left', valign='middle')
+            lbl = Label(text=display_text, color=theme['text_color'], font_size=dp(15), font_name='SourceBold',
+                        halign='left', valign='middle')
             box.add_widget(lbl)
             box.canvas.before.clear()
             with box.canvas.before:
@@ -1086,7 +1143,8 @@ class ThemeSelectMenu:
                 Rectangle(pos=box.pos, size=box.size)
                 Color(btn_bg[0] + 0.08, btn_bg[1] + 0.08, btn_bg[2] + 0.08, 1)
                 Line(rectangle=(box.pos[0], box.pos[1], box.size[0], box.size[1]), width=dp(0.5))
-            box.bind(pos=lambda inst, val, bg=btn_bg: self._update_btn_bg(inst, bg), size=lambda inst, val, bg=btn_bg: self._update_btn_bg(inst, bg))
+            box.bind(pos=lambda inst, val, bg=btn_bg: self._update_btn_bg(inst, bg),
+                     size=lambda inst, val, bg=btn_bg: self._update_btn_bg(inst, bg))
             box.bind(on_release=lambda instance, tid=theme_id: self._on_theme_select(tid))
             self._dropdown.add_widget(box)
 
@@ -1101,6 +1159,7 @@ class ThemeSelectMenu:
                     self._dropdown.y = parent_button.y + parent_button.height
                 elif self._dropdown.y + self._dropdown.height > win_height:
                     self._dropdown.y = parent_button.y - self._dropdown.height
+
         Clock.schedule_once(adjust_position, 0.15)
 
     def _on_theme_select(self, theme_id):
@@ -1132,7 +1191,8 @@ class ThemeSelectMenu:
             f"{tr.get('restart_for_syntax', 'Restart app to fully apply syntax highlighting?')}\n"
             f"{tr.get('restart_info', 'All tabs will be saved and restored.')}"
         )
-        lbl = Label(text=message, font_name='SourceBold', color=new_theme['text_color'], font_size=dp(10), halign='center', valign='middle', size_hint_y=0.7)
+        lbl = Label(text=message, font_name='SourceBold', color=new_theme['text_color'], font_size=dp(10),
+                    halign='center', valign='middle', size_hint_y=0.7)
         lbl.bind(width=lambda instance, value: setattr(instance, 'text_size', (value, None)))
         content.add_widget(lbl)
         btn_layout = BoxLayout(size_hint_y=0.3, spacing=dp(4))
@@ -1144,8 +1204,13 @@ class ThemeSelectMenu:
             separator_color=new_theme.get('popup_separator', (0.25, 0.25, 0.25, 1)),
             content=content, size_hint=(0.85, 0.35), auto_dismiss=False
         )
-        btn_restart = Button(text=tr.get('restart_btn', 'Restart'), font_name='SourceBold', background_color=(0.2, 0.5, 0.2, 1), background_normal='', background_down='', color=new_theme['text_color'], font_size=dp(9), on_release=lambda x: self._do_restart(popup))
-        btn_later = Button(text=tr.get('later_btn', 'Later'), font_name='SourceBold', background_color=new_theme['widget_bg'], background_normal='', background_down='', color=new_theme['text_color'], font_size=dp(9), on_release=lambda x: popup.dismiss())
+        btn_restart = Button(text=tr.get('restart_btn', 'Restart'), font_name='SourceBold',
+                             background_color=(0.2, 0.5, 0.2, 1), background_normal='', background_down='',
+                             color=new_theme['text_color'], font_size=dp(9),
+                             on_release=lambda x: self._do_restart(popup))
+        btn_later = Button(text=tr.get('later_btn', 'Later'), font_name='SourceBold',
+                           background_color=new_theme['widget_bg'], background_normal='', background_down='',
+                           color=new_theme['text_color'], font_size=dp(9), on_release=lambda x: popup.dismiss())
         btn_layout.add_widget(btn_later)
         btn_layout.add_widget(btn_restart)
         content.add_widget(btn_layout)
@@ -1180,6 +1245,7 @@ class ThemeSelectMenu:
 
 class EditorSettingsMenu:
     """Подменю настроек редактора"""
+
     def __init__(self, app):
         self.app = app
         self._dropdown = None
@@ -1203,6 +1269,7 @@ class EditorSettingsMenu:
                     pos=lambda inst, val: self._update_container_bg(inst, theme_colors),
                     size=lambda inst, val: self._update_container_bg(inst, theme_colors)
                 )
+
         self._dropdown.bind(on_open=lambda *args: style_container(self._dropdown, theme))
 
         from kivymd.uix.label import MDIcon
@@ -1216,9 +1283,11 @@ class EditorSettingsMenu:
 
         for icon_name, text, handler in menu_items:
             box = MenuItem(orientation='horizontal', size_hint_y=None, height=dp(30), padding=(dp(8), 0), spacing=dp(5))
-            icon = MDIcon(icon=icon_name, font_size=f"{dp(10)}sp", theme_text_color="Custom", text_color=theme['text_color'], size_hint_x=None, width=dp(17))
+            icon = MDIcon(icon=icon_name, font_size=f"{dp(10)}sp", theme_text_color="Custom",
+                          text_color=theme['text_color'], size_hint_x=None, width=dp(17))
             box.add_widget(icon)
-            lbl = Label(text=text, color=theme['text_color'], font_size=dp(15), font_name='SourceBold', halign='left', valign='middle')
+            lbl = Label(text=text, color=theme['text_color'], font_size=dp(15), font_name='SourceBold', halign='left',
+                        valign='middle')
             box.add_widget(lbl)
             box.canvas.before.clear()
             with box.canvas.before:
@@ -1226,7 +1295,8 @@ class EditorSettingsMenu:
                 Rectangle(pos=box.pos, size=box.size)
                 Color(btn_bg[0] + 0.08, btn_bg[1] + 0.08, btn_bg[2] + 0.08, 1)
                 Line(rectangle=(box.pos[0], box.pos[1], box.size[0], box.size[1]), width=dp(0.5))
-            box.bind(pos=lambda inst, val, bg=btn_bg: self._update_btn_bg(inst, bg), size=lambda inst, val, bg=btn_bg: self._update_btn_bg(inst, bg))
+            box.bind(pos=lambda inst, val, bg=btn_bg: self._update_btn_bg(inst, bg),
+                     size=lambda inst, val, bg=btn_bg: self._update_btn_bg(inst, bg))
             box.bind(on_release=lambda instance, h=handler: self._on_item_click(h))
             self._dropdown.add_widget(box)
 
@@ -1241,6 +1311,7 @@ class EditorSettingsMenu:
                     self._dropdown.y = parent_button.y + parent_button.height
                 elif self._dropdown.y + self._dropdown.height > win_height:
                     self._dropdown.y = parent_button.y - self._dropdown.height
+
         Clock.schedule_once(adjust_position, 0.15)
 
     def _on_item_click(self, handler):
@@ -1338,7 +1409,8 @@ class FontSelectMenu:
         current_font = SettingsManager.get_font()
         btn_bg = theme.get('action_bar_bg', theme['widget_bg'])
 
-        font_order = ['JetBrainsMono', 'FiraCode', 'CascadiaCode', 'IBMPlexMono', 'NotoSansMono', 'SourceCodePro', 'DroidMono']
+        font_order = ['JetBrainsMono', 'FiraCode', 'CascadiaCode', 'IBMPlexMono', 'NotoSansMono', 'SourceCodePro',
+                      'DroidMono']
 
         for font_key in font_order:
             font_name = self.FONT_NAMES.get(font_key, font_key)
@@ -1389,7 +1461,7 @@ class FontSelectMenu:
                 Rectangle(pos=box.pos, size=box.size)
                 Color(btn_bg[0] + 0.08, btn_bg[1] + 0.08, btn_bg[2] + 0.08, 1)
                 Line(rectangle=(box.pos[0], box.pos[1],
-                     box.size[0], box.size[1]), width=dp(0.5))
+                                box.size[0], box.size[1]), width=dp(0.5))
 
             box.bind(
                 pos=lambda inst, val, bg=btn_bg: self._update_btn_bg(inst, bg),
@@ -1397,7 +1469,7 @@ class FontSelectMenu:
             )
 
             box.bind(on_release=lambda instance,
-                     fk=font_key: self._on_font_select(fk))
+                                       fk=font_key: self._on_font_select(fk))
             self._dropdown.add_widget(box)
 
         Clock.schedule_once(lambda dt: self._dropdown.open(parent_button), 0.1)
@@ -1462,7 +1534,7 @@ class FontSelectMenu:
             Color(bg_color[0] + 0.08, bg_color[1] +
                   0.08, bg_color[2] + 0.08, 1)
             Line(rectangle=(instance.pos[0], instance.pos[1],
-                 instance.size[0], instance.size[1]), width=dp(0.5))
+                            instance.size[0], instance.size[1]), width=dp(0.5))
 
 
 class SyntaxStyleManager:
@@ -1568,6 +1640,7 @@ class SyntaxStyleManager:
 
 class SyntaxHighlightMenu:
     """Меню выбора стиля подсветки"""
+
     def __init__(self, app):
         self.app = app
         self._popup = None
@@ -1583,31 +1656,36 @@ class SyntaxHighlightMenu:
         styles = SyntaxStyleManager.get_available_styles()
         style_info = SyntaxStyleManager.get_style_display_info()
         current_style = SyntaxStyleManager.get_current_style()
-    
+
         content = BoxLayout(orientation='vertical', padding=dp(5), spacing=dp(3))
         header_text = tr.get('syntax_header', 'Выберите стиль подсветки:')
-        content.add_widget(Label(text=header_text, size_hint_y=None, height=dp(30), color=theme.get('text_color', (0, 0, 0, 1)), font_size=dp(17), halign='left', valign='middle'))
-    
+        content.add_widget(
+            Label(text=header_text, size_hint_y=None, height=dp(30), color=theme.get('text_color', (0, 0, 0, 1)),
+                  font_size=dp(17), halign='left', valign='middle'))
+
         scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False, do_scroll_y=True)
         styles_list = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(1.5), padding=[0, dp(2)])
         styles_list.bind(minimum_height=styles_list.setter('height'))
-    
+
         from kivymd.uix.label import MDIcon
         from kivy.uix.behaviors import ButtonBehavior
         btn_bg = theme.get('popup_bg', (1.0, 1.0, 1.0, 1))  # ← фон как у попапа
-    
+
         for style_name in styles:
             info = style_info.get(style_name, {'name': style_name.replace('_', ' ').title(), 'type': 'unknown'})
             prefix = '✓ ' if style_name == current_style else '  '
             display_name = f"{prefix}{info['name']}"
-    
+
             class MenuItem(ButtonBehavior, BoxLayout):
                 pass
-    
+
             box = MenuItem(orientation='horizontal', size_hint_y=None, height=dp(30), padding=(dp(8), 0), spacing=dp(4))
-            icon = MDIcon(icon='weather-night' if info['type'] == 'dark' else 'weather-sunny', font_size=f"{dp(7)}sp", theme_text_color="Custom", text_color=theme.get('text_color', (0, 0, 0, 1)), size_hint_x=None, width=dp(13))
+            icon = MDIcon(icon='weather-night' if info['type'] == 'dark' else 'weather-sunny', font_size=f"{dp(7)}sp",
+                          theme_text_color="Custom", text_color=theme.get('text_color', (0, 0, 0, 1)), size_hint_x=None,
+                          width=dp(13))
             box.add_widget(icon)
-            lbl = Label(text=display_name, color=theme.get('text_color', (0, 0, 0, 1)), font_size=dp(15), font_name='SourceBold', halign='left', valign='middle')
+            lbl = Label(text=display_name, color=theme.get('text_color', (0, 0, 0, 1)), font_size=dp(15),
+                        font_name='SourceBold', halign='left', valign='middle')
             box.add_widget(lbl)
             box.canvas.before.clear()
             with box.canvas.before:
@@ -1615,17 +1693,21 @@ class SyntaxHighlightMenu:
                 Rectangle(pos=box.pos, size=box.size)
                 Color(btn_bg[0] + 0.05, btn_bg[1] + 0.05, btn_bg[2] + 0.05, 1)
                 Line(rectangle=(box.pos[0], box.pos[1], box.size[0], box.size[1]), width=dp(0.3))
-            box.bind(pos=lambda inst, val, bg=btn_bg: self._update_btn_bg(inst, bg), size=lambda inst, val, bg=btn_bg: self._update_btn_bg(inst, bg))
+            box.bind(pos=lambda inst, val, bg=btn_bg: self._update_btn_bg(inst, bg),
+                     size=lambda inst, val, bg=btn_bg: self._update_btn_bg(inst, bg))
             box.bind(on_release=lambda instance, sn=style_name: self._open_preview_after_close(sn))
             styles_list.add_widget(box)
-    
+
         scroll.add_widget(styles_list)
         content.add_widget(scroll)
-    
+
         close_text = tr.get('close', 'Закрыть')
-        btn_close = Button(text=close_text, size_hint_y=None, height=dp(40), background_color=theme.get('widget_bg', (0.843, 0.816, 1.0, 1)), background_normal='', background_down='', color=theme.get('text_color', (0, 0, 0, 1)), font_size=dp(13), on_release=lambda x: self._destroy_all_windows())
+        btn_close = Button(text=close_text, size_hint_y=None, height=dp(40),
+                           background_color=theme.get('widget_bg', (0.843, 0.816, 1.0, 1)), background_normal='',
+                           background_down='', color=theme.get('text_color', (0, 0, 0, 1)), font_size=dp(13),
+                           on_release=lambda x: self._destroy_all_windows())
         content.add_widget(btn_close)
-    
+
         title = tr.get('syntax_menu_title', 'Стиль подсветки')
         self._popup = Popup(
             title=title,
@@ -1649,7 +1731,7 @@ class SyntaxHighlightMenu:
         tr = self._get_translations()
         info = SyntaxStyleManager.get_style_display_info()
         style_info = info.get(style_name, {'name': style_name.replace('_', ' ').title(), 'type': 'unknown'})
-    
+
         demo_code = f'''# Предпросмотр: {style_info['name']}
     def fibonacci(n):
         """Вычисляет числа Фибоначчи"""
@@ -1659,7 +1741,7 @@ class SyntaxHighlightMenu:
         for _ in range(n - 1):
             a, b = b, a + b
         return b
-    
+
     class Calculator:
         def __init__(self, name="Calc"):
             self.name = name
@@ -1667,7 +1749,7 @@ class SyntaxHighlightMenu:
         def add(self, x):
             self._value += x
             return self._value
-    
+
     calc = Calculator("Калькулятор")
     result = calc.add(10)
     print(f"{{calc.name}}: {{result}}")
@@ -1678,18 +1760,22 @@ class SyntaxHighlightMenu:
     '''
         highlighted_text = self._highlight_code(demo_code, style_name, theme)
         content = BoxLayout(orientation='vertical', padding=dp(5), spacing=dp(3))
-    
+
         from kivymd.uix.label import MDIcon
         header_box = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(20), spacing=dp(3))
-        icon = MDIcon(icon='weather-night' if style_info['type'] == 'dark' else 'weather-sunny', font_size=f"{dp(11)}sp", theme_text_color="Custom", text_color=theme.get('text_color', (0.85, 0.88, 0.90, 1)), size_hint_x=None, width=dp(20))
+        icon = MDIcon(icon='weather-night' if style_info['type'] == 'dark' else 'weather-sunny',
+                      font_size=f"{dp(11)}sp", theme_text_color="Custom",
+                      text_color=theme.get('text_color', (0.85, 0.88, 0.90, 1)), size_hint_x=None, width=dp(20))
         header_box.add_widget(icon)
         type_str = 'Тёмный стиль' if style_info['type'] == 'dark' else 'Светлый стиль'
-        header_lbl = Label(text=f"[b]{style_info['name']}[/b] — {type_str}", markup=True, color=theme.get('text_color', (0.85, 0.88, 0.90, 1)), font_size=dp(13), font_name='SourceBold', halign='left', valign='middle')
+        header_lbl = Label(text=f"[b]{style_info['name']}[/b] — {type_str}", markup=True,
+                           color=theme.get('text_color', (0.85, 0.88, 0.90, 1)), font_size=dp(13),
+                           font_name='SourceBold', halign='left', valign='middle')
         header_box.add_widget(header_lbl)
         content.add_widget(header_box)
-    
+
         scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False, do_scroll_y=True)
-        
+
         # Обёртка с фоном редактора
         editor_bg_color = theme.get('editor_bg', (1.0, 1.0, 1.0, 1))
         preview_box = FloatLayout(size_hint=(1, None))
@@ -1697,7 +1783,7 @@ class SyntaxHighlightMenu:
             Color(*editor_bg_color)
             self._preview_bg_rect = Rectangle(pos=preview_box.pos, size=preview_box.size)
         preview_box.bind(pos=self._update_preview_bg, size=self._update_preview_bg)
-        
+
         preview_label = Label(
             text=highlighted_text,
             markup=True,
@@ -1712,25 +1798,31 @@ class SyntaxHighlightMenu:
         )
         preview_label.bind(texture_size=lambda instance, value: setattr(instance, 'height', value[1] + dp(10)))
         preview_label.bind(texture_size=lambda instance, value: setattr(preview_box, 'height', value[1] + dp(10)))
-        
+
         preview_box.add_widget(preview_label)
         scroll.add_widget(preview_box)
         content.add_widget(scroll)
-    
+
         btn_layout = BoxLayout(size_hint_y=None, height=dp(33), spacing=dp(4))
         apply_text = tr.get('apply', 'Применить')
         cancel_text = tr.get('cancel', 'Отмена')
         back_text = tr.get('back', '← Назад')
-        btn_back = Button(text=back_text, background_color=theme.get('widget_bg', (0.14, 0.14, 0.15, 1)), background_normal='', background_down='', color=theme.get('text_color', (0, 0, 0, 1)), font_size=dp(13), on_release=lambda x: self._back_to_menu())
-        btn_cancel = Button(text=cancel_text, background_color=theme.get('widget_bg', (0.14, 0.14, 0.15, 1)), background_normal='', background_down='', color=theme.get('text_color', (0, 0, 0, 1)), font_size=dp(13), on_release=lambda x: self._destroy_all_windows())
-        btn_apply = Button(text=apply_text, background_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1)), background_normal='', background_down='', color=(1, 1, 1, 1), font_size=dp(13), on_release=lambda x: self._apply_style(style_name))
+        btn_back = Button(text=back_text,font_name='DejaVuSans', background_color=theme.get('widget_bg', (0.14, 0.14, 0.15, 1)),
+                          background_normal='', background_down='', color=theme.get('text_color', (0, 0, 0, 1)),
+                          font_size=dp(13), on_release=lambda x: self._back_to_menu())
+        btn_cancel = Button(text=cancel_text, background_color=theme.get('widget_bg', (0.14, 0.14, 0.15, 1)),
+                            background_normal='', background_down='', color=theme.get('text_color', (0, 0, 0, 1)),
+                            font_size=dp(13), on_release=lambda x: self._destroy_all_windows())
+        btn_apply = Button(text=apply_text, background_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1)),
+                           background_normal='', background_down='', color=(1, 1, 1, 1), font_size=dp(13),
+                           on_release=lambda x: self._apply_style(style_name))
         btn_layout.add_widget(btn_back)
         btn_layout.add_widget(btn_cancel)
         btn_layout.add_widget(btn_apply)
         content.add_widget(btn_layout)
-    
+
         title = tr.get('syntax_preview', 'Предпросмотр: ') + style_info['name']
-        
+
         popup_bg_color = theme.get('editor_bg', (1.0, 1.0, 1.0, 1))
         self._preview_popup = Popup(
             title=title,
@@ -1800,7 +1892,8 @@ class SyntaxHighlightMenu:
             f"{tr.get('restart_for_syntax', 'Перезапустить приложение для полной смены подсветки синтаксиса?')}\n"
             f"{tr.get('restart_info', 'Все вкладки будут сохранены и восстановлены.')}"
         )
-        lbl = Label(text=message, font_name='SourceBold', color=theme.get('text_color', (0, 0, 0, 1)), font_size=dp(10), halign='center', valign='middle', size_hint_y=0.7)
+        lbl = Label(text=message, font_name='SourceBold', color=theme.get('text_color', (0, 0, 0, 1)), font_size=dp(10),
+                    halign='center', valign='middle', size_hint_y=0.7)
         lbl.bind(width=lambda instance, value: setattr(instance, 'text_size', (value, None)))
         content.add_widget(lbl)
         btn_layout = BoxLayout(size_hint_y=0.3, spacing=dp(4))
@@ -1814,8 +1907,14 @@ class SyntaxHighlightMenu:
             size_hint=(0.85, 0.35),
             auto_dismiss=False
         )
-        btn_restart = Button(text=tr.get('restart_btn', 'Перезапустить'), font_name='SourceBold', background_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1)), background_normal='', background_down='', color=(1, 1, 1, 1), font_size=dp(9), on_release=lambda x: self._do_restart(popup))
-        btn_later = Button(text=tr.get('later_btn', 'Позже'), font_name='SourceBold', background_color=theme.get('widget_bg', (0.843, 0.816, 1.0, 1)), background_normal='', background_down='', color=theme.get('text_color', (0, 0, 0, 1)), font_size=dp(9), on_release=lambda x: popup.dismiss())
+        btn_restart = Button(text=tr.get('restart_btn', 'Перезапустить'), font_name='SourceBold',
+                             background_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1)), background_normal='',
+                             background_down='', color=(1, 1, 1, 1), font_size=dp(9),
+                             on_release=lambda x: self._do_restart(popup))
+        btn_later = Button(text=tr.get('later_btn', 'Позже'), font_name='SourceBold',
+                           background_color=theme.get('widget_bg', (0.843, 0.816, 1.0, 1)), background_normal='',
+                           background_down='', color=theme.get('text_color', (0, 0, 0, 1)), font_size=dp(9),
+                           on_release=lambda x: popup.dismiss())
         btn_layout.add_widget(btn_later)
         btn_layout.add_widget(btn_restart)
         content.add_widget(btn_layout)
@@ -1864,7 +1963,10 @@ class SyntaxHighlightMenu:
                 return ThemeManager.get_theme()
         except:
             pass
-        return {'widget_bg': (0.141, 0.145, 0.149, 1), 'text_color': (0.85, 0.88, 0.90, 1), 'editor_bg': (0.188, 0.204, 0.251, 1), 'editor_text': (0.95, 0.95, 0.95, 1), 'popup_title': (0.85, 0.88, 0.90, 1), 'popup_separator': (0.25, 0.25, 0.25, 1), 'popup_bg': (0.188, 0.204, 0.251, 1), 'btn_success_bg': (0.2, 0.5, 0.2, 1)}
+        return {'widget_bg': (0.141, 0.145, 0.149, 1), 'text_color': (0.85, 0.88, 0.90, 1),
+                'editor_bg': (0.188, 0.204, 0.251, 1), 'editor_text': (0.95, 0.95, 0.95, 1),
+                'popup_title': (0.85, 0.88, 0.90, 1), 'popup_separator': (0.25, 0.25, 0.25, 1),
+                'popup_bg': (0.188, 0.204, 0.251, 1), 'btn_success_bg': (0.2, 0.5, 0.2, 1)}
 
     def _get_translations(self):
         if hasattr(self.app, 'tr'):
@@ -1884,6 +1986,7 @@ class SyntaxHighlightMenu:
 
 class SettingsMenu:
     """Выпадающее меню настроек"""
+
     def __init__(self, app):
         self.app = app
         self._dropdown = None
@@ -1914,6 +2017,7 @@ class SettingsMenu:
                     pos=lambda inst, val: self._update_container_bg(inst, theme_colors),
                     size=lambda inst, val: self._update_container_bg(inst, theme_colors)
                 )
+
         self._dropdown.bind(on_open=lambda *args: style_container(self._dropdown, theme))
 
         from kivymd.uix.label import MDIcon
@@ -1931,9 +2035,11 @@ class SettingsMenu:
 
         for icon_name, item_key, handler in menu_items:
             box = MenuItem(orientation='horizontal', size_hint_y=None, height=dp(30), padding=(dp(8), 0), spacing=dp(5))
-            icon = MDIcon(icon=icon_name, font_size=f"{dp(10)}sp", theme_text_color="Custom", text_color=theme['text_color'], size_hint_x=None, width=dp(17))
+            icon = MDIcon(icon=icon_name, font_size=f"{dp(10)}sp", theme_text_color="Custom",
+                          text_color=theme['text_color'], size_hint_x=None, width=dp(17))
             box.add_widget(icon)
-            lbl = Label(text=self.app.tr.get(item_key, item_key), color=theme['text_color'], font_size=dp(15), font_name='SourceBold', halign='left', valign='middle')
+            lbl = Label(text=self.app.tr.get(item_key, item_key), color=theme['text_color'], font_size=dp(15),
+                        font_name='SourceBold', halign='left', valign='middle')
             box.add_widget(lbl)
             box.canvas.before.clear()
             with box.canvas.before:
@@ -1941,7 +2047,8 @@ class SettingsMenu:
                 Rectangle(pos=box.pos, size=box.size)
                 Color(btn_bg[0] + 0.08, btn_bg[1] + 0.08, btn_bg[2] + 0.08, 1)
                 Line(rectangle=(box.pos[0], box.pos[1], box.size[0], box.size[1]), width=dp(0.5))
-            box.bind(pos=lambda inst, val, bg=btn_bg: self._update_btn_bg(inst, bg), size=lambda inst, val, bg=btn_bg: self._update_btn_bg(inst, bg))
+            box.bind(pos=lambda inst, val, bg=btn_bg: self._update_btn_bg(inst, bg),
+                     size=lambda inst, val, bg=btn_bg: self._update_btn_bg(inst, bg))
             box.bind(on_release=lambda instance, h=handler: self._on_item_click(h))
             self._dropdown.add_widget(box)
 
@@ -1956,6 +2063,7 @@ class SettingsMenu:
                     self._dropdown.y = parent_button.y + parent_button.height
                 elif self._dropdown.y + self._dropdown.height > win_height:
                     self._dropdown.y = parent_button.y - self._dropdown.height
+
         Clock.schedule_once(adjust_position, 0.15)
 
     def _on_item_click(self, handler):
@@ -2086,6 +2194,7 @@ class ThemeManager:
 
 class CodeExecutor:
     """Выполняет Python-код"""
+
     def __init__(self):
         self.is_running = False
         self._input_queue = []
@@ -2098,18 +2207,18 @@ class CodeExecutor:
         if not code.strip():
             result_callback("X Введите код перед запуском")
             return False
-        
+
         self.is_running = True
         self._input_queue.clear()
         self._input_event.clear()
-        
+
         def execute():
             old_stdout = sys.stdout
             redirected_output = io.StringIO()
             sys.stdout = redirected_output
             original_input = builtins.input
             builtins.input = input_handler
-            
+
             try:
                 exec(code, {})
                 result = redirected_output.getvalue()
@@ -2121,16 +2230,16 @@ class CodeExecutor:
                 sys.stdout = old_stdout
                 builtins.input = original_input
                 self.is_running = False
-            
+
             Clock.schedule_once(lambda dt: result_callback(result))
-        
+
         threading.Thread(target=execute, daemon=True).start()
         return True
-    
+
     def provide_input(self, value):
         self._input_queue.append(value)
         self._input_event.set()
-    
+
     def clear_input(self):
         self._input_queue.clear()
         self._input_event.clear()
@@ -2196,7 +2305,9 @@ class LineNumberTextInput(BoxLayout):
         self.line_panel.clear_widgets()
         for i in range(n_lines):
             row = BoxLayout(orientation='horizontal', size_hint_y=None, height=lh)
-            lbl = Label(text=str(i + 1), font_size=self._font_size, size_hint_x=None, width=dp(33), color=theme.get('panel_text', (0.45, 0.48, 0.50, 1)), halign='right', valign='middle', padding=(0, 0, dp(3), 0))
+            lbl = Label(text=str(i + 1), font_size=self._font_size, size_hint_x=None, width=dp(33),
+                        color=theme.get('panel_text', (0.45, 0.48, 0.50, 1)), halign='right', valign='middle',
+                        padding=(0, 0, dp(3), 0))
             row.add_widget(lbl)
             self.line_panel.add_widget(row)
         self.line_panel.height = max(self.text_input.height, n_lines * lh)
@@ -2226,12 +2337,14 @@ class LineNumberTextInput(BoxLayout):
                     chunk_size = 5000
                     for i in range(0, len(current_text), chunk_size):
                         self.text_input.text += current_text[i:i + chunk_size]
+
                     def restore_cursor(dt):
                         try:
                             if cursor_pos <= len(self.text_input.text):
                                 self.text_input.cursor = self.text_input.get_cursor_from_index(cursor_pos)
                         except:
                             pass
+
                     Clock.schedule_once(restore_cursor, 0.1)
                 except Exception as e:
                     log_error(f"Error changing syntax style: {e}")
@@ -2321,7 +2434,9 @@ class LineNumberTextInput(BoxLayout):
         theme = ThemeManager.get_theme()
         scroll_bar_color = theme.get('scroll_bar_color', (0.4, 0.4, 0.4, 0.9))
         scroll_bar_inactive = theme.get('scroll_bar_inactive', (0.25, 0.25, 0.25, 0.6))
-        self.line_panel_scroll = ScrollView(size_hint=(None, 1), width=dp(33), do_scroll_x=False, do_scroll_y=True, scroll_type=['bars'], bar_width=0, effect_cls='ScrollEffect', scroll_distance=dp(17), scroll_timeout=dp(33))
+        self.line_panel_scroll = ScrollView(size_hint=(None, 1), width=dp(33), do_scroll_x=False, do_scroll_y=True,
+                                            scroll_type=['bars'], bar_width=0, effect_cls='ScrollEffect',
+                                            scroll_distance=dp(17), scroll_timeout=dp(33))
         self.line_panel_scroll.add_widget(self.line_panel)
 
     def _create_code_input_scroll(self):
@@ -2339,9 +2454,19 @@ class LineNumberTextInput(BoxLayout):
         padding_top = 0
         padding_bottom = 0
         if has_lexer and CodeInput:
-            self.text_input = CodeInput(lexer=PythonLexer(), style=style_name, size_hint=(None, None), font_size=font_size, background_color=theme['editor_bg'], foreground_color=theme['editor_text'], cursor_color=theme['editor_cursor'], selection_color=theme.get('editor_selection', (1, 1, 1, 0.1)), multiline=True, do_wrap=False, padding=(dp(8), padding_top, dp(8), padding_bottom), background_normal='', background_active='')
+            self.text_input = CodeInput(lexer=PythonLexer(), style=style_name, size_hint=(None, None),
+                                        font_size=font_size, background_color=theme['editor_bg'],
+                                        foreground_color=theme['editor_text'], cursor_color=theme['editor_cursor'],
+                                        selection_color=theme.get('editor_selection', (1, 1, 1, 0.1)), multiline=True,
+                                        do_wrap=False, padding=(dp(8), padding_top, dp(8), padding_bottom),
+                                        background_normal='', background_active='')
         else:
-            self.text_input = TextInput(size_hint=(None, None), font_size=font_size, background_color=theme['editor_bg'], foreground_color=theme['editor_text'], cursor_color=theme['editor_cursor'], selection_color=theme.get('editor_selection', (1, 1, 1, 0.1)), multiline=True, do_wrap=False, padding=(dp(8), padding_top, dp(8), padding_bottom), background_normal='', background_active='')
+            self.text_input = TextInput(size_hint=(None, None), font_size=font_size,
+                                        background_color=theme['editor_bg'], foreground_color=theme['editor_text'],
+                                        cursor_color=theme['editor_cursor'],
+                                        selection_color=theme.get('editor_selection', (1, 1, 1, 0.1)), multiline=True,
+                                        do_wrap=False, padding=(dp(8), padding_top, dp(8), padding_bottom),
+                                        background_normal='', background_active='')
         self._font_size = font_size
         self._padding_top = padding_top
         self._padding_bottom = padding_bottom
@@ -2351,7 +2476,10 @@ class LineNumberTextInput(BoxLayout):
         self.text_input.width = dp(400)
         scroll_bar_color = theme.get('scroll_bar_color', (0.4, 0.4, 0.4, 0.9))
         scroll_bar_inactive = theme.get('scroll_bar_inactive', (0.25, 0.25, 0.25, 0.6))
-        self.editor_scroll = ScrollView(size_hint=(1, 1), do_scroll_x=True, do_scroll_y=True, scroll_type=['bars', 'content'], bar_width=dp(4), bar_color=scroll_bar_color, bar_inactive_color=scroll_bar_inactive, effect_cls='ScrollEffect', scroll_distance=dp(17), scroll_timeout=dp(33))
+        self.editor_scroll = ScrollView(size_hint=(1, 1), do_scroll_x=True, do_scroll_y=True,
+                                        scroll_type=['bars', 'content'], bar_width=dp(8), bar_color=scroll_bar_color,
+                                        bar_inactive_color=scroll_bar_inactive, effect_cls='ScrollEffect',
+                                        scroll_distance=dp(17), scroll_timeout=dp(33))
         self.editor_scroll.add_widget(self.text_input)
         self.text_input.bind(text=self._on_text_change)
         self.text_input.bind(focus=self._on_focus)
@@ -2364,6 +2492,7 @@ class LineNumberTextInput(BoxLayout):
             self.line_panel_scroll.scroll_y = value
             Clock.unschedule(self._draw_indent_guides)
             Clock.schedule_once(self._draw_indent_guides, 0.1)
+
         self.editor_scroll.bind(scroll_y=sync_scroll)
 
     def _on_text_change(self, instance, value):
@@ -2385,7 +2514,8 @@ class LineNumberTextInput(BoxLayout):
             if self._undo_counter % save_every == 0:
                 prev_text = '\n'.join(self.original_lines) if self.original_lines else ''
                 if not self._undo_stack or self._undo_stack[-1]['text'] != value:
-                    self._undo_stack.append({'text': prev_text, 'cursor': instance.cursor_index() if hasattr(instance, 'cursor_index') else 0})
+                    self._undo_stack.append({'text': prev_text, 'cursor': instance.cursor_index() if hasattr(instance,
+                                                                                                             'cursor_index') else 0})
                     while len(self._undo_stack) > max_states:
                         self._undo_stack.pop(0)
                     self._redo_stack.clear()
@@ -2416,43 +2546,46 @@ class LineNumberTextInput(BoxLayout):
         TARGET = 45
         if not self.original_lines:
             return
-        
+
         # Находим последнюю непустую строку
         last_non_empty = -1
         for i in range(len(self.original_lines) - 1, -1, -1):
             if self.original_lines[i].strip() != '':
                 last_non_empty = i
                 break
-        
+
         if last_non_empty == -1:
             # Вообще нет текста — ничего не делаем
             return
-        
+
         trailing = len(self.original_lines) - last_non_empty - 1
         if trailing >= TARGET:
             return
-        
+
         self._ensuring_trailing = True
         try:
             # Сохраняем позицию курсора ДО изменений
             cursor_index = self.text_input.cursor_index()
-            
+
             lines_to_add = TARGET - trailing
             current_text = self.text_input.text
             self.text_input.text = current_text + '\n' * lines_to_add
             self.original_lines = self.text_input.text.split('\n')
-            
+
             # Восстанавливаем курсор на то же место
             safe_cursor = min(cursor_index, len(self.text_input.text))
+
             def restore_cursor(dt):
                 try:
                     self.text_input.cursor = self.text_input.get_cursor_from_index(safe_cursor)
                 except:
                     pass
+
             Clock.schedule_once(restore_cursor, 0.05)
         finally:
             def reset_flag(dt):
                 self._ensuring_trailing = False
+
             Clock.schedule_once(reset_flag, 0.3)
 
     def _delayed_update_panel(self, dt):
@@ -2501,7 +2634,8 @@ class LineNumberTextInput(BoxLayout):
         if 0 < diff <= 10:
             for i in range(current_widgets, n_lines):
                 row = BoxLayout(orientation='horizontal', size_hint_y=None, height=lh)
-                lbl = Label(text=str(i + 1), font_size=self._font_size, size_hint_x=None, width=panel_width, color=theme['panel_text'], halign='right', valign='top', padding=(0, 0, dp(3), 0))
+                lbl = Label(text=str(i + 1), font_size=self._font_size, size_hint_x=None, width=panel_width,
+                            color=theme['panel_text'], halign='right', valign='top', padding=(0, 0, dp(3), 0))
                 lbl.text_size = (panel_width - dp(3), None)
                 row.add_widget(lbl)
                 self.line_panel.add_widget(row)
@@ -2527,7 +2661,8 @@ class LineNumberTextInput(BoxLayout):
             batch_end = min(batch_start + batch_size, n_lines)
             for i in range(batch_start, batch_end):
                 row = BoxLayout(orientation='horizontal', size_hint_y=None, height=lh)
-                lbl = Label(text=str(i + 1), font_size=self._font_size, size_hint_x=None, width=panel_width, color=theme['panel_text'], halign='right', valign='top', padding=(0, 0, dp(3), 0))
+                lbl = Label(text=str(i + 1), font_size=self._font_size, size_hint_x=None, width=panel_width,
+                            color=theme['panel_text'], halign='right', valign='top', padding=(0, 0, dp(3), 0))
                 lbl.text_size = (panel_width - dp(3), None)
                 row.add_widget(lbl)
                 self.line_panel.add_widget(row)
@@ -2608,6 +2743,7 @@ class LineNumberTextInput(BoxLayout):
                     if hasattr(self, 'original_lines'):
                         self.original_lines = new_text.split('\n')
                         self._update_line_panel()
+
                     def restore(dt):
                         try:
                             instance.focus = True
@@ -2616,6 +2752,7 @@ class LineNumberTextInput(BoxLayout):
                             pass
                         finally:
                             self._ensuring_trailing = False
+
                     Clock.schedule_once(restore, 0.2)
                     return True
                 instance.insert_text('    ')
@@ -2757,7 +2894,12 @@ class LineNumberTextInput(BoxLayout):
             self.editor_scroll.remove_widget(self.text_input)
             style_name = ThemeManager.get_syntax_style()
             self.current_syntax_style = style_name
-            self.text_input = CodeInput(lexer=PythonLexer(), style=style_name, size_hint=(None, None), font_size=self._font_size, background_color=theme['editor_bg'], foreground_color=theme['editor_text'], cursor_color=theme['editor_cursor'], selection_color=theme.get('editor_selection', (1, 1, 1, 0.1)), multiline=True, do_wrap=False, padding=(dp(8), self._padding_top, dp(8), self._padding_bottom), background_normal='', background_active='')
+            self.text_input = CodeInput(lexer=PythonLexer(), style=style_name, size_hint=(None, None),
+                                        font_size=self._font_size, background_color=theme['editor_bg'],
+                                        foreground_color=theme['editor_text'], cursor_color=theme['editor_cursor'],
+                                        selection_color=theme.get('editor_selection', (1, 1, 1, 0.1)), multiline=True,
+                                        do_wrap=False, padding=(dp(8), self._padding_top, dp(8), self._padding_bottom),
+                                        background_normal='', background_active='')
             self.text_input.bind(text=self._on_text_change, minimum_height=self.text_input.setter('height'))
             if hasattr(self.text_input, 'minimum_width'):
                 self.text_input.bind(minimum_width=self.text_input.setter('width'))
@@ -2768,12 +2910,14 @@ class LineNumberTextInput(BoxLayout):
             self.text_input.width = old_width
             if hasattr(self.text_input, '_trigger_refresh_text'):
                 Clock.schedule_once(lambda dt: self.text_input._trigger_refresh_text(), 0.1)
+
             def restore_cursor(dt):
                 try:
                     if cursor_pos <= len(self.text_input.text):
                         self.text_input.cursor = self.text_input.get_cursor_from_index(cursor_pos)
                 except:
                     pass
+
             Clock.schedule_once(restore_cursor, 0.05)
             if saved_text:
                 self.original_lines = saved_text.split('\n')
@@ -2795,6 +2939,7 @@ class LineNumberTextInput(BoxLayout):
 
 class FileDialog(BoxLayout):
     """Диалог для открытия и сохранения файлов"""
+
     def __init__(self, callback, cancel, is_save=False, popup=None, **kwargs):
         super().__init__(**kwargs)
         self.callback = callback
@@ -2821,19 +2966,27 @@ class FileDialog(BoxLayout):
 
     def _create_navigation_bar(self, theme):
         nav_box = BoxLayout(size_hint_y=None, height=dp(30), spacing=dp(3))
-        btn_app = Button(text=self.tr.get('app_folder', '[App]'), font_name='SourceBold', size_hint_x=0.33, background_color=theme['widget_bg'], background_normal='', background_down='', color=theme['text_color'], font_size=dp(12))
+        btn_app = Button(text=self.tr.get('app_folder', '[App]'), font_name='SourceBold', size_hint_x=0.33,
+                         background_color=theme['widget_bg'], background_normal='', background_down='',
+                         color=theme['text_color'], font_size=dp(12))
         btn_app.bind(on_release=lambda x: self._change_path(os.getcwd()))
         nav_box.add_widget(btn_app)
-        btn_dl = Button(text=self.tr.get('download_folder', '[Download]'), font_name='SourceBold', size_hint_x=0.33, background_color=theme['widget_bg'], background_normal='', background_down='', color=theme['text_color'], font_size=dp(12))
+        btn_dl = Button(text=self.tr.get('download_folder', '[Download]'), font_name='SourceBold', size_hint_x=0.33,
+                        background_color=theme['widget_bg'], background_normal='', background_down='',
+                        color=theme['text_color'], font_size=dp(12))
         btn_dl.bind(on_release=lambda x: self._change_path('/storage/emulated/0/Download'))
         nav_box.add_widget(btn_dl)
-        btn_root = Button(text=self.tr.get('sdcard_folder', '[/sdcard]'), font_name='SourceBold', size_hint_x=0.34, background_color=theme['widget_bg'], background_normal='', background_down='', color=theme['text_color'], font_size=dp(12))
+        btn_root = Button(text=self.tr.get('sdcard_folder', '[/sdcard]'), font_name='SourceBold', size_hint_x=0.34,
+                          background_color=theme['widget_bg'], background_normal='', background_down='',
+                          color=theme['text_color'], font_size=dp(12))
         btn_root.bind(on_release=lambda x: self._change_path('/storage/emulated/0'))
         nav_box.add_widget(btn_root)
         self.add_widget(nav_box)
 
     def _create_path_label(self, theme, start_path):
-        self.path_label = Label(text=start_path, font_name='SourceBold', color=theme['stats_text'], font_size=dp(11), size_hint_y=None, height=dp(17), halign='left', valign='middle', text_size=(None, dp(17)), shorten=True, shorten_from='left')
+        self.path_label = Label(text=start_path, font_name='SourceBold', color=theme['stats_text'], font_size=dp(11),
+                                size_hint_y=None, height=dp(17), halign='left', valign='middle',
+                                text_size=(None, dp(17)), shorten=True, shorten_from='left')
         self.add_widget(self.path_label)
 
     def _create_file_list(self, theme):
@@ -2844,7 +2997,9 @@ class FileDialog(BoxLayout):
         self.add_widget(self.file_list_scroll)
 
     def _create_up_button(self, theme):
-        btn_up = Button(text=self.tr.get('up_level', 'A На уровень выше'), font_name='SourceBold', size_hint_y=None, height=dp(23), background_color=theme['widget_bg'], background_normal='', background_down='', color=theme['text_color'], font_size=dp(12))
+        btn_up = Button(text=self.tr.get('up_level', 'A На уровень выше'), font_name='SourceBold', size_hint_y=None,
+                        height=dp(23), background_color=theme['widget_bg'], background_normal='', background_down='',
+                        color=theme['text_color'], font_size=dp(12))
         btn_up.bind(on_release=self._go_up)
         self.add_widget(btn_up)
 
@@ -2864,10 +3019,13 @@ class FileDialog(BoxLayout):
 
     def _create_action_buttons(self, theme):
         btns = BoxLayout(size_hint_y=None, height=dp(33), spacing=dp(5))
-        btn_cancel = Button(text=self.tr.get('cancel', 'Отмена'), font_name='SourceBold', background_color=theme['widget_bg'], background_normal='', background_down='', color=theme['text_color'], font_size=dp(12))
+        btn_cancel = Button(text=self.tr.get('cancel', 'Отмена'), font_name='SourceBold',
+                            background_color=theme['widget_bg'], background_normal='', background_down='',
+                            color=theme['text_color'], font_size=dp(12))
         btn_cancel.bind(on_release=self._on_cancel)
         action_text = self.tr.get('save_file') if self.is_save else self.tr.get('open', 'Открыть')
-        btn_action = Button(text=action_text, font_name='SourceBold', background_color=theme['widget_bg'], background_normal='', background_down='', color=theme['text_color'], font_size=dp(12))
+        btn_action = Button(text=action_text, font_name='SourceBold', background_color=theme['widget_bg'],
+                            background_normal='', background_down='', color=theme['text_color'], font_size=dp(12))
         btn_action.bind(on_release=self._on_action)
         btns.add_widget(btn_cancel)
         btns.add_widget(btn_action)
@@ -2917,7 +3075,9 @@ class FileDialog(BoxLayout):
         try:
             items = os.listdir(self.current_path)
         except:
-            self.file_list.add_widget(Label(text=self.tr.get('no_access', '[Нет доступа к папке]'), font_name='SourceBold', color=theme['stats_text'], font_size=dp(11), size_hint_y=None, height=dp(20)))
+            self.file_list.add_widget(
+                Label(text=self.tr.get('no_access', '[Нет доступа к папке]'), font_name='SourceBold',
+                      color=theme['stats_text'], font_size=dp(11), size_hint_y=None, height=dp(20)))
             return
         items.sort(key=str.lower)
         folders = []
@@ -2933,16 +3093,24 @@ class FileDialog(BoxLayout):
                 pass
         for folder in folders:
             full = os.path.join(self.current_path, folder)
-            btn = Button(text=f'[+] {folder}', font_name='SourceBold', size_hint_y=None, height=dp(23), background_color=theme['widget_bg'], background_normal='', background_down='', color=theme['text_color'], font_size=dp(11), halign='left', valign='middle', padding=(dp(7), 0))
+            btn = Button(text=f'[+] {folder}', font_name='SourceBold', size_hint_y=None, height=dp(23),
+                         background_color=theme['widget_bg'], background_normal='', background_down='',
+                         color=theme['text_color'], font_size=dp(11), halign='left', valign='middle',
+                         padding=(dp(7), 0))
             btn.bind(on_release=lambda x, p=full: self._change_path(p))
             self.file_list.add_widget(btn)
         for file in files:
             full = os.path.join(self.current_path, file)
-            btn = Button(text=f'  {file}', font_name='SourceBold', size_hint_y=None, height=dp(23), background_color=theme['input_bg'], background_normal='', background_down='', color=theme['input_text'], font_size=dp(11), halign='left', valign='middle', padding=(dp(7), 0))
+            btn = Button(text=f'  {file}', font_name='SourceBold', size_hint_y=None, height=dp(23),
+                         background_color=theme['input_bg'], background_normal='', background_down='',
+                         color=theme['input_text'], font_size=dp(11), halign='left', valign='middle',
+                         padding=(dp(7), 0))
             btn.bind(on_release=lambda x, p=full: self._select_file(p))
             self.file_list.add_widget(btn)
         if not folders and not files:
-            self.file_list.add_widget(Label(text=self.tr.get('empty', '[Пусто]'), font_name='SourceBold', color=theme['stats_text'], font_size=dp(11), size_hint_y=None, height=dp(20)))
+            self.file_list.add_widget(
+                Label(text=self.tr.get('empty', '[Пусто]'), font_name='SourceBold', color=theme['stats_text'],
+                      font_size=dp(11), size_hint_y=None, height=dp(20)))
 
     def _select_file(self, path):
         self.selected_file = path
@@ -2959,7 +3127,7 @@ class FileDialog(BoxLayout):
                 if child.text == f'  {target_name}':
                     child.background_color = theme.get('btn_selected_file_bg', (0.3, 0.5, 0.3, 1))
                     break
-    
+
     def _on_filename_focus(self, instance, focused):
         """Поднимает окно при фокусе на поле ввода имени файла."""
         if focused and self.popup:
@@ -3018,7 +3186,8 @@ class MyActionBar(BoxLayout):
         self._autocomplete_cache = None
         self._keywords_popup = None
         self._autocomplete_popup = None
-        self.action_keys = [self.ACTION_UNDO, self.ACTION_REDO, self.ACTION_COPY, self.ACTION_PASTE, self.ACTION_CUT, self.ACTION_SEL_ALL, self.ACTION_AUTO, self.ACTION_KEY, self.ACTION_CLEAN, self.ACTION_FIND]
+        self.action_keys = [self.ACTION_UNDO, self.ACTION_REDO, self.ACTION_COPY, self.ACTION_PASTE, self.ACTION_CUT,
+                            self.ACTION_SEL_ALL, self.ACTION_AUTO, self.ACTION_KEY, self.ACTION_CLEAN, self.ACTION_FIND]
         self.buttons = []
         self._create_scroll_view()
         self._create_buttons()
@@ -3031,8 +3200,10 @@ class MyActionBar(BoxLayout):
         theme = ThemeManager.get_theme()
         scroll_bar_color = theme.get('scroll_bar_color', (0.4, 0.4, 0.4, 0.7))
         scroll_bar_inactive = theme.get('scroll_bar_inactive', (0.25, 0.25, 0.25, 0.5))
-        self.scroll_view = ScrollView(size_hint=(1, 1), do_scroll_x=True, do_scroll_y=False, bar_width=dp(2), bar_color=scroll_bar_color, bar_inactive_color=scroll_bar_inactive)
-        self.button_container = BoxLayout(orientation='horizontal', size_hint_x=None, spacing=self.spacing, padding=self.padding)
+        self.scroll_view = ScrollView(size_hint=(1, 1), do_scroll_x=True, do_scroll_y=False, bar_width=dp(2),
+                                      bar_color=scroll_bar_color, bar_inactive_color=scroll_bar_inactive)
+        self.button_container = BoxLayout(orientation='horizontal', size_hint_x=None, spacing=self.spacing,
+                                          padding=self.padding)
         self.button_container.bind(minimum_width=self.button_container.setter('width'))
         self.scroll_view.add_widget(self.button_container)
         self.add_widget(self.scroll_view)
@@ -3050,11 +3221,15 @@ class MyActionBar(BoxLayout):
             icon_name = action_icons.get(key, None)
             if icon_name:
                 from kivymd.uix.button import MDIconButton
-                btn = MDIconButton(icon=icon_name, size_hint=(None, None), size=(dp(30), dp(30)), font_size=f"{dp(12)}sp", theme_icon_color="Custom", icon_color=theme['symbol_btn_text'], pos_hint={"center_y": 0.5})
+                btn = MDIconButton(icon=icon_name, size_hint=(None, None), size=(dp(30), dp(30)),
+                                   font_size=f"{dp(12)}sp", theme_icon_color="Custom",
+                                   icon_color=theme['symbol_btn_text'], pos_hint={"center_y": 0.5})
             else:
                 app = App.get_running_app()
                 tr = app.tr if app else TRANSLATIONS['ru']
-                btn = Button(text=tr.get(key, key), size_hint=(None, 1), width=dp(32), font_size=dp(11), background_color=theme['symbol_btn_bg'], background_normal='', background_down='', color=theme['symbol_btn_text'], bold=True)
+                btn = Button(text=tr.get(key, key), size_hint=(None, 1), width=dp(32), font_size=dp(11),
+                             background_color=theme['symbol_btn_bg'], background_normal='', background_down='',
+                             color=theme['symbol_btn_text'], bold=True)
             btn.action_key = key
             btn.bind(on_press=self.handle_action)
             self.buttons.append(btn)
@@ -3112,7 +3287,8 @@ class MyActionBar(BoxLayout):
             elif action_key == self.ACTION_FIND:
                 if self.app and hasattr(self.app, 'show_search_dialog_from_button'):
                     self.app.show_search_dialog_from_button()
-            if action_key in [self.ACTION_COPY, self.ACTION_PASTE, self.ACTION_CUT, self.ACTION_SEL_ALL, self.ACTION_CLEAN, self.ACTION_UNDO, self.ACTION_REDO]:
+            if action_key in [self.ACTION_COPY, self.ACTION_PASTE, self.ACTION_CUT, self.ACTION_SEL_ALL,
+                              self.ACTION_CLEAN, self.ACTION_UNDO, self.ACTION_REDO]:
                 Clock.schedule_once(lambda dt: self._refocus(ti), 0.05)
         except Exception as e:
             log_error(f"ActionBar error: {e}")
@@ -3179,11 +3355,13 @@ class MyActionBar(BoxLayout):
                         ti.select_all()
             except Exception as e:
                 log_error(f"SelectAll error: {e}")
+
         Clock.schedule_once(do_select, 0.05)
 
     def _show_keywords(self):
         app = App.get_running_app()
         tr = app.tr if app else TRANSLATIONS['ru']
+
         def insert_word(word):
             if self.text_input:
                 self.text_input.insert_text(word + ' ')
@@ -3191,12 +3369,15 @@ class MyActionBar(BoxLayout):
             if self._keywords_popup:
                 self._keywords_popup.dismiss()
                 self._keywords_popup = None
-        self._keywords_popup = self._create_filterable_dialog(tr.get('keywords_title', 'Python Keywords'), self._get_keywords_list(), insert_word)
+
+        self._keywords_popup = self._create_filterable_dialog(tr.get('keywords_title', 'Python Keywords'),
+                                                              self._get_keywords_list(), insert_word)
         self._keywords_popup.open()
 
     def _show_autocomplete(self):
         app = App.get_running_app()
         tr = app.tr if app else TRANSLATIONS['ru']
+
         def insert_word(word):
             if self.text_input:
                 self.text_input.insert_text(word + ' ')
@@ -3204,7 +3385,9 @@ class MyActionBar(BoxLayout):
             if self._autocomplete_popup:
                 self._autocomplete_popup.dismiss()
                 self._autocomplete_popup = None
-        self._autocomplete_popup = self._create_filterable_dialog(tr.get('autocomplete_title', 'Autocomplete'), self._get_autocomplete_list(), insert_word)
+
+        self._autocomplete_popup = self._create_filterable_dialog(tr.get('autocomplete_title', 'Autocomplete'),
+                                                                  self._get_autocomplete_list(), insert_word)
         self._autocomplete_popup.open()
 
     def _create_filterable_dialog(self, title, items, insert_callback):
@@ -3212,13 +3395,18 @@ class MyActionBar(BoxLayout):
         app = App.get_running_app()
         tr = app.tr if app else TRANSLATIONS['ru']
         layout = BoxLayout(orientation='vertical', spacing=dp(3), padding=dp(4))
-        search_box = TextInput(hint_text=tr.get('search_hint', 'Search...'), multiline=False, font_size=dp(17), font_name='SourceBold', background_color=theme['input_bg'], foreground_color=theme['input_text'], cursor_color=theme['input_cursor'], hint_text_color=theme['hint_text'], size_hint_y=None, height=dp(28), padding=(dp(3), dp(3)))
+        search_box = TextInput(hint_text=tr.get('search_hint', 'Search...'), multiline=False, font_size=dp(17),
+                               font_name='SourceBold', background_color=theme['input_bg'],
+                               foreground_color=theme['input_text'], cursor_color=theme['input_cursor'],
+                               hint_text_color=theme['hint_text'], size_hint_y=None, height=dp(28),
+                               padding=(dp(3), dp(3)))
         layout.add_widget(search_box)
         scroll = ScrollView(do_scroll_x=False, do_scroll_y=True)
         inner = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(1.5))
         inner.bind(minimum_height=inner.setter('height'))
         scroll.add_widget(inner)
         layout.add_widget(scroll)
+
         def update_buttons(filter_text=""):
             inner.clear_widgets()
             if filter_text:
@@ -3226,14 +3414,20 @@ class MyActionBar(BoxLayout):
             else:
                 filtered = items[:50]
             for word in filtered[:50]:
-                btn = Button(text=word, size_hint_y=None, height=dp(20), font_name='SourceBold', background_color=theme['input_bg'], background_normal='', background_down='', color=theme['input_text'], font_size=dp(17))
+                btn = Button(text=word, size_hint_y=None, height=dp(20), font_name='SourceBold',
+                             background_color=theme['input_bg'], background_normal='', background_down='',
+                             color=theme['input_text'], font_size=dp(17))
                 btn.bind(on_release=lambda b, w=word: self._on_word_selected(w, insert_callback))
                 inner.add_widget(btn)
+
         search_box.bind(text=lambda inst, val: update_buttons(val))
         update_buttons()
-        close_btn = Button(text=tr.get('close', 'Close'), size_hint_y=None, height=dp(28), font_size=dp(17), font_name='SourceBold', background_color=theme['widget_bg'], background_normal='', background_down='', color=theme['text_color'])
+        close_btn = Button(text=tr.get('close', 'Close'), size_hint_y=None, height=dp(28), font_size=dp(17),
+                           font_name='SourceBold', background_color=theme['widget_bg'], background_normal='',
+                           background_down='', color=theme['text_color'])
         layout.add_widget(close_btn)
-        popup = Popup(title=title, title_color=theme['popup_title'],background='', background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), content=layout, size_hint=(0.9, 0.8))
+        popup = Popup(title=title, title_color=theme['popup_title'], background='',
+                      background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), content=layout, size_hint=(0.9, 0.8))
         close_btn.bind(on_release=popup.dismiss)
         return popup
 
@@ -3263,12 +3457,18 @@ class MyActionBar(BoxLayout):
                 import keyword
                 self._keywords_cache = sorted(keyword.kwlist)
             except:
-                self._keywords_cache = ['False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await', 'break', 'class', 'continue', 'def', 'del', 'elif', 'else', 'except', 'finally', 'for', 'from', 'global', 'if', 'import', 'in', 'is', 'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return', 'try', 'while', 'with', 'yield']
+                self._keywords_cache = ['False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await', 'break',
+                                        'class', 'continue', 'def', 'del', 'elif', 'else', 'except', 'finally', 'for',
+                                        'from', 'global', 'if', 'import', 'in', 'is', 'lambda', 'nonlocal', 'not', 'or',
+                                        'pass', 'raise', 'return', 'try', 'while', 'with', 'yield']
         return self._keywords_cache
 
     def _get_autocomplete_list(self):
         if self._autocomplete_cache is None:
-            self._autocomplete_cache = sorted(['abs', 'all', 'any', 'bin', 'bool', 'callable', 'chr', 'dict', 'dir', 'enumerate', 'filter', 'float', 'format', 'input', 'int', 'len', 'list', 'map', 'max', 'min', 'print', 'range', 'round', 'set', 'sorted', 'str', 'sum', 'tuple', 'type', 'zip'])
+            self._autocomplete_cache = sorted(
+                ['abs', 'all', 'any', 'bin', 'bool', 'callable', 'chr', 'dict', 'dir', 'enumerate', 'filter', 'float',
+                 'format', 'input', 'int', 'len', 'list', 'map', 'max', 'min', 'print', 'range', 'round', 'set',
+                 'sorted', 'str', 'sum', 'tuple', 'type', 'zip'])
         return self._autocomplete_cache
 
     def _confirm_clean(self, ti):
@@ -3276,11 +3476,22 @@ class MyActionBar(BoxLayout):
         app = App.get_running_app()
         tr = app.tr if app else TRANSLATIONS['ru']
         content = BoxLayout(orientation='vertical', padding=dp(5), spacing=dp(3))
-        content.add_widget(Label(text=tr.get('clean_confirm', 'Are you sure you want to clear all code?'), color=theme['text_color'], font_size=dp(10), font_name='SourceBold', halign='center', size_hint_y=None, height=dp(20)))
+        content.add_widget(
+            Label(text=tr.get('clean_confirm', 'Are you sure you want to clear all code?'), color=theme['text_color'],
+                  font_size=dp(10), font_name='SourceBold', halign='center', size_hint_y=None, height=dp(20)))
         btn_layout = BoxLayout(size_hint_y=None, height=dp(18), spacing=dp(4))
-        popup = ThemedPopup(title=tr.get('clean', 'Clean'), title_color=theme['popup_title'], title_bg=theme.get('popup_title_bg', theme['widget_bg']), popup_bg=theme.get('popup_bg', theme['widget_bg']), separator_color=theme.get('popup_separator', (0.25, 0.25, 0.25, 1)), content=content, size_hint=(0.8, 0.3), auto_dismiss=False)
-        btn_yes = Button(text=tr.get('yes', 'Yes'), font_name='SourceBold', background_color=theme.get('btn_danger_bg', (0.5, 0.2, 0.2, 1)), background_normal='', background_down='', color=theme['text_color'], font_size=dp(9), on_release=lambda x: self._do_clean(popup, ti))
-        btn_no = Button(text=tr.get('no', 'No'), font_name='SourceBold', background_color=theme['widget_bg'], background_normal='', background_down='', color=theme['text_color'], font_size=dp(9), on_release=lambda x: popup.dismiss())
+        popup = ThemedPopup(title=tr.get('clean', 'Clean'), title_color=theme['popup_title'],
+                            title_bg=theme.get('popup_title_bg', theme['widget_bg']),
+                            popup_bg=theme.get('popup_bg', theme['widget_bg']),
+                            separator_color=theme.get('popup_separator', (0.25, 0.25, 0.25, 1)), content=content,
+                            size_hint=(0.8, 0.3), auto_dismiss=False)
+        btn_yes = Button(text=tr.get('yes', 'Yes'), font_name='SourceBold',
+                         background_color=theme.get('btn_danger_bg', (0.5, 0.2, 0.2, 1)), background_normal='',
+                         background_down='', color=theme['text_color'], font_size=dp(9),
+                         on_release=lambda x: self._do_clean(popup, ti))
+        btn_no = Button(text=tr.get('no', 'No'), font_name='SourceBold', background_color=theme['widget_bg'],
+                        background_normal='', background_down='', color=theme['text_color'], font_size=dp(9),
+                        on_release=lambda x: popup.dismiss())
         btn_layout.add_widget(btn_no)
         btn_layout.add_widget(btn_yes)
         content.add_widget(btn_layout)
@@ -3295,12 +3506,14 @@ class MyActionBar(BoxLayout):
             if app and hasattr(app, 'editor') and app.editor:
                 app.editor.original_lines = ['']
                 app.editor._update_line_panel()
+
             def set_cursor(dt):
                 try:
                     ti.cursor = (0, 0)
                     ti.focus = True
                 except:
                     pass
+
             Clock.schedule_once(set_cursor, 0.1)
             self._refocus(ti)
 
@@ -3337,7 +3550,8 @@ class MySymbolScrollBar(BoxLayout):
         self._saved_sel_start = None
         self._saved_sel_end = None
         ThemeManager.register(self)
-        self.symbols = ['Tab', '#', '( )', '[ ]', '{ }', '" "', "' '", '=', ':', '.', '_', ',', '+', '-', '*', '/', '\\', '%', ')', ']', '}', '<', '>', '!', '|', '&', '@', '~', '?', ';', '$', '^']
+        self.symbols = ['Tab', '#', '( )', '[ ]', '{ }', '" "', "' '", '=', ':', '.', '_', ',', '+', '-', '*', '/',
+                        '\\', '%', ')', ']', '}', '<', '>', '!', '|', '&', '@', '~', '?', ';', '$', '^']
         self._action_map = self._build_action_map()
         self.buttons = []
         self._create_scroll_view()
@@ -3351,8 +3565,10 @@ class MySymbolScrollBar(BoxLayout):
         theme = ThemeManager.get_theme()
         scroll_bar_color = theme.get('scroll_bar_color', (0.4, 0.4, 0.4, 0.7))
         scroll_bar_inactive = theme.get('scroll_bar_inactive', (0.25, 0.25, 0.25, 0.5))
-        self.scroll_view = ScrollView(size_hint=(1, 1), do_scroll_x=True, do_scroll_y=False, bar_width=dp(2), bar_color=scroll_bar_color, bar_inactive_color=scroll_bar_inactive)
-        self.button_container = BoxLayout(orientation='horizontal', size_hint_x=None, spacing=self.spacing, padding=self.padding)
+        self.scroll_view = ScrollView(size_hint=(1, 1), do_scroll_x=True, do_scroll_y=False, bar_width=dp(2),
+                                      bar_color=scroll_bar_color, bar_inactive_color=scroll_bar_inactive)
+        self.button_container = BoxLayout(orientation='horizontal', size_hint_x=None, spacing=self.spacing,
+                                          padding=self.padding)
         self.button_container.bind(minimum_width=self.button_container.setter('width'))
         self.scroll_view.add_widget(self.button_container)
         self.add_widget(self.scroll_view)
@@ -3363,7 +3579,9 @@ class MySymbolScrollBar(BoxLayout):
         default_width = dp(30)
         for symbol in self.symbols:
             width = wide_symbols.get(symbol, default_width)
-            btn = Button(text=symbol, font_name='SourceBold', size_hint=(None, 1), width=width, background_color=theme['symbol_btn_bg'], background_normal='', background_down='', color=theme['symbol_btn_text'], font_size=dp(13))
+            btn = Button(text=symbol, font_name='SourceBold', size_hint=(None, 1), width=width,
+                         background_color=theme['symbol_btn_bg'], background_normal='', background_down='',
+                         color=theme['symbol_btn_text'], font_size=dp(13))
             btn.bind(on_press=self.handle_action)
             self.buttons.append(btn)
 
@@ -3390,8 +3608,10 @@ class MySymbolScrollBar(BoxLayout):
             cursor_pos = ti.cursor_index()
             ti.insert_text(pair)
             ti.cursor = ti.get_cursor_from_index(cursor_pos + 1)
+
         def insert_text(text):
             return lambda ti: ti.insert_text(text)
+
         return {
             'Tab': lambda ti: self._handle_tab_button(ti), '=': insert_text('='), ':': insert_text(':'),
             ',': insert_text(','), '.': insert_text('.'), '_': insert_text('_'), '+': insert_text('+'),
@@ -3447,12 +3667,14 @@ class MySymbolScrollBar(BoxLayout):
                 new_start = start_idx + 4
                 new_end = end_idx + 4 * (end_line - start_line + 1)
                 ti.text = new_text
+
                 def restore(dt):
                     try:
                         ti.focus = True
                         ti.select_text(new_start, new_end)
                     except:
                         pass
+
                 Clock.schedule_once(restore, 0.2)
                 return
             ti.insert_text('    ')
@@ -3502,18 +3724,29 @@ class AIAssistantPopup(BoxLayout):
 
     def _create_ui(self, theme):
         tr = self.tr
-        title_label = Label(text=f'[b]{tr.get("ai_title", "AI Python Assistant")}[/b]', markup=True, color=theme['text_color'], font_size=dp(12), font_name='SourceBold', size_hint_y=None, height=dp(17))
+        title_label = Label(text=f'[b]{tr.get("ai_title", "AI Python Assistant")}[/b]', markup=True,
+                            color=theme['text_color'], font_size=dp(12), font_name='SourceBold', size_hint_y=None,
+                            height=dp(17))
         self.add_widget(title_label)
-        self.question_input = TextInput(hint_text=tr.get('ai_hint', 'Ask me anything about Python...'), multiline=True, font_size=dp(11), font_name='SourceBold', background_color=theme['input_bg'], foreground_color=theme['input_text'], hint_text_color=theme['hint_text'], size_hint_y=None, height=dp(33), padding=(dp(5), dp(5)))
+        self.question_input = TextInput(hint_text=tr.get('ai_hint', 'Ask me anything about Python...'), multiline=True,
+                                        font_size=dp(11), font_name='SourceBold', background_color=theme['input_bg'],
+                                        foreground_color=theme['input_text'], hint_text_color=theme['hint_text'],
+                                        size_hint_y=None, height=dp(33), padding=(dp(5), dp(5)))
         self.add_widget(self.question_input)
-        self.ask_btn = Button(text=tr.get('ai_btn', 'Ask AI'), font_name='SourceBold', size_hint_y=None, height=dp(23), background_color=theme['widget_bg'], background_normal='', background_down='', color=theme['text_color'], font_size=dp(11), bold=True)
+        self.ask_btn = Button(text=tr.get('ai_btn', 'Ask AI'), font_name='SourceBold', size_hint_y=None, height=dp(23),
+                              background_color=theme['widget_bg'], background_normal='', background_down='',
+                              color=theme['text_color'], font_size=dp(11), bold=True)
         self.ask_btn.bind(on_release=self.ask_ai)
         self.add_widget(self.ask_btn)
         self.response_scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False, do_scroll_y=True)
-        self.response_text = TextInput(text=tr.get('ai_placeholder', 'AI response will appear here...'), readonly=True, font_size=dp(10), font_name='SourceBold', background_color=theme['ai_response_bg'], foreground_color=theme['editor_text'], do_wrap=True, padding=(dp(5), dp(5)))
+        self.response_text = TextInput(text=tr.get('ai_placeholder', 'AI response will appear here...'), readonly=True,
+                                       font_size=dp(10), font_name='SourceBold',
+                                       background_color=theme['ai_response_bg'], foreground_color=theme['editor_text'],
+                                       do_wrap=True, padding=(dp(5), dp(5)))
         self.response_scroll.add_widget(self.response_text)
         self.add_widget(self.response_scroll)
-        self.loading_label = Label(text='', color=theme['text_color'], font_size=dp(9), font_name='SourceBold', size_hint_y=None, height=dp(13))
+        self.loading_label = Label(text='', color=theme['text_color'], font_size=dp(9), font_name='SourceBold',
+                                   size_hint_y=None, height=dp(13))
         self.add_widget(self.loading_label)
 
     def ask_ai(self, instance):
@@ -3530,10 +3763,12 @@ class AIAssistantPopup(BoxLayout):
         for attempt in range(self.MAX_RETRIES):
             try:
                 context = ssl._create_unverified_context()
-                prompt = ("You are a helpful Python programming assistant. Provide clear, concise explanations and code examples when appropriate. The user is learning Python on Android.\n\nUser question: " + question + "\n\nAnswer:")
+                prompt = (
+                            "You are a helpful Python programming assistant. Provide clear, concise explanations and code examples when appropriate. The user is learning Python on Android.\n\nUser question: " + question + "\n\nAnswer:")
                 url = f"{self.API_URL}?key={self.api_key}"
                 headers = {'Content-Type': 'application/json'}
-                data = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1024}}
+                data = {"contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1024}}
                 req = urllib.request.Request(url, data=json.dumps(data).encode('utf-8'), headers=headers, method='POST')
                 with urllib.request.urlopen(req, timeout=self.TIMEOUT, context=context) as response:
                     resp_data = json.loads(response.read().decode('utf-8'))
@@ -3544,7 +3779,8 @@ class AIAssistantPopup(BoxLayout):
                 if e.code == 429:
                     if attempt < self.MAX_RETRIES - 1:
                         wait_time = self.BASE_DELAY * (2 ** attempt)
-                        Clock.schedule_once(lambda dt, t=wait_time: self._show_status(f"{tr.get('rate_limit', 'Rate limit. Wait')} {t} {tr.get('sec', 'sec')}..."), 0)
+                        Clock.schedule_once(lambda dt, t=wait_time: self._show_status(
+                            f"{tr.get('rate_limit', 'Rate limit. Wait')} {t} {tr.get('sec', 'sec')}..."), 0)
                         time.sleep(wait_time)
                         continue
                     else:
@@ -3574,6 +3810,7 @@ class AIAssistantPopup(BoxLayout):
 
 class SearchOnlyPopup(BoxLayout):
     """Диалог для поиска текста"""
+
     def __init__(self, text_input, **kwargs):
         super().__init__(**kwargs)
         self.text_input = text_input
@@ -3593,21 +3830,31 @@ class SearchOnlyPopup(BoxLayout):
         tr = self.tr
         with self.canvas.before:
             bg_color = theme['widget_bg']
-            lighter_bg = (bg_color[0] * 0.8 + 1.0 * 0.2, bg_color[1] * 0.8 + 1.0 * 0.2, bg_color[2] * 0.8 + 1.0 * 0.2, bg_color[3])
+            lighter_bg = (bg_color[0] * 0.8 + 1.0 * 0.2, bg_color[1] * 0.8 + 1.0 * 0.2, bg_color[2] * 0.8 + 1.0 * 0.2,
+                          bg_color[3])
             Color(*lighter_bg)
             self.bg_rect = Rectangle(pos=self.pos, size=self.size)
         self.bind(pos=self._update_bg, size=self._update_bg)
         search_row = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(20), spacing=dp(2))
-        self.search_input = TextInput(hint_text=tr.get('find_text', 'Search text'), multiline=False, font_size=dp(10), font_name='SourceBold', background_color=theme['input_bg'], foreground_color=theme['input_text'], cursor_color=theme['input_cursor'], hint_text_color=theme['hint_text'], size_hint_x=0.75)
+        self.search_input = TextInput(hint_text=tr.get('find_text', 'Search text'), multiline=False, font_size=dp(10),
+                                      font_name='SourceBold', background_color=theme['input_bg'],
+                                      foreground_color=theme['input_text'], cursor_color=theme['input_cursor'],
+                                      hint_text_color=theme['hint_text'], size_hint_x=0.75)
         self.search_input.bind(text=self._on_search_text_change)
         search_row.add_widget(self.search_input)
-        btn_close = Button(text=tr.get('close', 'Close'), font_name='SourceBold', size_hint_x=0.25, background_color=theme.get('btn_danger_bg', (0.5, 0.2, 0.2, 1)), background_normal='', background_down='', color=theme['text_color'], font_size=dp(9))
+        btn_close = Button(text=tr.get('close', 'Close'), font_name='SourceBold', size_hint_x=0.25,
+                           background_color=theme.get('btn_danger_bg', (0.5, 0.2, 0.2, 1)), background_normal='',
+                           background_down='', color=theme['text_color'], font_size=dp(9))
         btn_close.bind(on_release=self.dismiss)
         search_row.add_widget(btn_close)
         self.add_widget(search_row)
         nav_layout = BoxLayout(size_hint_y=None, height=dp(15), spacing=dp(3))
-        btn_prev = Button(text='◀', font_name='SourceBold', background_color=theme['widget_bg'], background_normal='', background_down='', color=theme['text_color'], font_size=dp(9), on_release=lambda x: self.find_previous())
-        btn_next = Button(text='▶', font_name='SourceBold', background_color=theme['widget_bg'], background_normal='', background_down='', color=theme['text_color'], font_size=dp(9), on_release=lambda x: self.find_next())
+        btn_prev = Button(text='◀', font_name='SourceBold', background_color=theme['widget_bg'], background_normal='',
+                          background_down='', color=theme['text_color'], font_size=dp(9),
+                          on_release=lambda x: self.find_previous())
+        btn_next = Button(text='▶', font_name='SourceBold', background_color=theme['widget_bg'], background_normal='',
+                          background_down='', color=theme['text_color'], font_size=dp(9),
+                          on_release=lambda x: self.find_next())
         nav_layout.add_widget(btn_prev)
         nav_layout.add_widget(btn_next)
         self.add_widget(nav_layout)
@@ -3712,6 +3959,7 @@ class SearchOnlyPopup(BoxLayout):
 
 class SearchReplacePopup(BoxLayout):
     """Диалог для поиска и замены"""
+
     def __init__(self, text_input, **kwargs):
         super().__init__(**kwargs)
         self.text_input = text_input
@@ -3731,24 +3979,40 @@ class SearchReplacePopup(BoxLayout):
         tr = self.tr
         with self.canvas.before:
             bg_color = theme['widget_bg']
-            lighter_bg = (bg_color[0] * 0.8 + 1.0 * 0.2, bg_color[1] * 0.8 + 1.0 * 0.2, bg_color[2] * 0.8 + 1.0 * 0.2, bg_color[3])
+            lighter_bg = (bg_color[0] * 0.8 + 1.0 * 0.2, bg_color[1] * 0.8 + 1.0 * 0.2, bg_color[2] * 0.8 + 1.0 * 0.2,
+                          bg_color[3])
             Color(*lighter_bg)
             self.bg_rect = Rectangle(pos=self.pos, size=self.size)
         self.bind(pos=self._update_bg, size=self._update_bg)
         search_row = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(18), spacing=dp(2))
-        self.search_input = TextInput(hint_text=tr.get('find_text', 'Find text'), multiline=False, font_size=dp(10), font_name='SourceBold', background_color=theme['input_bg'], foreground_color=theme['input_text'], cursor_color=theme['input_cursor'], hint_text_color=theme['hint_text'], size_hint_x=0.75)
+        self.search_input = TextInput(hint_text=tr.get('find_text', 'Find text'), multiline=False, font_size=dp(10),
+                                      font_name='SourceBold', background_color=theme['input_bg'],
+                                      foreground_color=theme['input_text'], cursor_color=theme['input_cursor'],
+                                      hint_text_color=theme['hint_text'], size_hint_x=0.75)
         self.search_input.bind(text=self._on_search_text_change)
         search_row.add_widget(self.search_input)
-        btn_close = Button(text=tr.get('close', 'Close'), font_name='SourceBold', size_hint_x=0.25, background_color=theme.get('btn_danger_bg', (0.5, 0.2, 0.2, 1)), background_normal='', background_down='', color=theme['text_color'], font_size=dp(9))
+        btn_close = Button(text=tr.get('close', 'Close'), font_name='SourceBold', size_hint_x=0.25,
+                           background_color=theme.get('btn_danger_bg', (0.5, 0.2, 0.2, 1)), background_normal='',
+                           background_down='', color=theme['text_color'], font_size=dp(9))
         btn_close.bind(on_release=self.dismiss)
         search_row.add_widget(btn_close)
         self.add_widget(search_row)
-        self.replace_input = TextInput(hint_text=tr.get('replace_text', 'Replace with'), multiline=False, font_size=dp(10), font_name='SourceBold', background_color=theme['input_bg'], foreground_color=theme['input_text'], cursor_color=theme['input_cursor'], hint_text_color=theme['hint_text'], size_hint_y=None, height=dp(18))
+        self.replace_input = TextInput(hint_text=tr.get('replace_text', 'Replace with'), multiline=False,
+                                       font_size=dp(10), font_name='SourceBold', background_color=theme['input_bg'],
+                                       foreground_color=theme['input_text'], cursor_color=theme['input_cursor'],
+                                       hint_text_color=theme['hint_text'], size_hint_y=None, height=dp(18))
         self.add_widget(self.replace_input)
         btn_layout = BoxLayout(size_hint_y=None, height=dp(17), spacing=dp(3))
-        btn_replace = Button(text=tr.get('replace', 'Replace'), font_name='SourceBold', background_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1)), background_normal='', background_down='', color=theme['text_color'], font_size=dp(9), on_release=lambda x: self.replace_current())
-        btn_next = Button(text='▶', font_name='SourceBold', background_color=theme['widget_bg'], background_normal='', background_down='', color=theme['text_color'], font_size=dp(9), on_release=lambda x: self.find_next())
-        btn_replace_all = Button(text=tr.get('replace_all', 'Replace All'), font_name='SourceBold', background_color=theme['symbol_btn_bg'], background_normal='', background_down='', color=theme['text_color'], font_size=dp(9), on_release=lambda x: self.replace_all())
+        btn_replace = Button(text=tr.get('replace', 'Replace'), font_name='SourceBold',
+                             background_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1)), background_normal='',
+                             background_down='', color=theme['text_color'], font_size=dp(9),
+                             on_release=lambda x: self.replace_current())
+        btn_next = Button(text='▶', font_name='SourceBold', background_color=theme['widget_bg'], background_normal='',
+                          background_down='', color=theme['text_color'], font_size=dp(9),
+                          on_release=lambda x: self.find_next())
+        btn_replace_all = Button(text=tr.get('replace_all', 'Replace All'), font_name='SourceBold',
+                                 background_color=theme['symbol_btn_bg'], background_normal='', background_down='',
+                                 color=theme['text_color'], font_size=dp(9), on_release=lambda x: self.replace_all())
         btn_layout.add_widget(btn_replace)
         btn_layout.add_widget(btn_next)
         btn_layout.add_widget(btn_replace_all)
@@ -3851,6 +4115,7 @@ class SearchReplacePopup(BoxLayout):
 
 class TabManager:
     """Управляет вкладками редактора"""
+
     def __init__(self):
         self.tabs = []
         self.active_index = -1
@@ -3865,6 +4130,7 @@ class TabManager:
             title = tr.get('untitled_tab', 'Новый')
         editor = LineNumberTextInput(size_hint_y=1.0)
         editor.set_text(text)
+
         def set_cursor_to_start(dt):
             try:
                 if editor and hasattr(editor, 'text_input') and editor.text_input:
@@ -3872,6 +4138,7 @@ class TabManager:
                     editor.text_input.focus = True
             except:
                 pass
+
         Clock.schedule_once(set_cursor_to_start, 0.3)
         tab = {'title': title, 'editor': editor, 'file': file_path, 'saved': True}
         self.tabs.append(tab)
@@ -3920,7 +4187,8 @@ class TabManager:
         if 0 <= self.active_index < len(self.tabs):
             tr = self.app.tr if self.app else {}
             self.tabs[self.active_index]['file'] = file_path
-            self.tabs[self.active_index]['title'] = os.path.basename(file_path) if file_path else tr.get('untitled_tab', 'Новый')
+            self.tabs[self.active_index]['title'] = os.path.basename(file_path) if file_path else tr.get('untitled_tab',
+                                                                                                         'Новый')
             self._update_tab_bar()
 
     def set_active_title(self, title):
@@ -3944,15 +4212,21 @@ class TabManager:
             Color(*theme.get('tab_bar_bg', theme['action_bar_bg']))
             self.tab_bg_rect = Rectangle(pos=self.tab_bar.pos, size=self.tab_bar.size)
         self.tab_bar.bind(pos=self._update_tab_bg, size=self._update_tab_bg)
-        self.btn_left = Button(text='◀', font_name='SourceBold', size_hint_x=None, width=dp(20), background_color=theme.get('tab_inactive_bg', theme['widget_bg']), background_normal='', background_down='', color=theme['text_color'], font_size=dp(10), bold=True)
+        self.btn_left = Button(text='◀', font_name='SourceBold', size_hint_x=None, width=dp(20),
+                               background_color=theme.get('tab_inactive_bg', theme['widget_bg']), background_normal='',
+                               background_down='', color=theme['text_color'], font_size=dp(10), bold=True)
         self.btn_left.bind(on_release=lambda x: self._scroll_tabs(-1))
         self.tab_bar.add_widget(self.btn_left)
         self.tab_buttons_container = BoxLayout(spacing=dp(1), size_hint=(1, 1), padding=[dp(0.7), dp(2), dp(0.7), 0])
         self.tab_bar.add_widget(self.tab_buttons_container)
-        self.btn_right = Button(text='▶', font_name='SourceBold', size_hint_x=None, width=dp(20), background_color=theme.get('tab_inactive_bg', theme['widget_bg']), background_normal='', background_down='', color=theme['text_color'], font_size=dp(10), bold=True)
+        self.btn_right = Button(text='▶', font_name='SourceBold', size_hint_x=None, width=dp(20),
+                                background_color=theme.get('tab_inactive_bg', theme['widget_bg']), background_normal='',
+                                background_down='', color=theme['text_color'], font_size=dp(10), bold=True)
         self.btn_right.bind(on_release=lambda x: self._scroll_tabs(1))
         self.tab_bar.add_widget(self.btn_right)
-        btn_add = Button(text='+', font_name='SourceBold', size_hint_x=None, width=dp(25), background_color=theme.get('tab_add_btn_bg', theme['widget_bg']), background_normal='', background_down='', color=theme['text_color'], font_size=dp(17), bold=True)
+        btn_add = Button(text='+', font_name='SourceBold', size_hint_x=None, width=dp(25),
+                         background_color=theme.get('tab_add_btn_bg', theme['widget_bg']), background_normal='',
+                         background_down='', color=theme['text_color'], font_size=dp(17), bold=True)
         btn_add.bind(on_release=lambda x: self._on_add_tab())
         self.tab_bar.add_widget(btn_add)
         self._update_tab_bar()
@@ -4036,23 +4310,30 @@ class TabManager:
                 if theme.get('name') == 'light':
                     bg_color = (base_bg[0] * 0.85, base_bg[1] * 0.85, base_bg[2] * 0.85, 1)
                 else:
-                    bg_color = (base_bg[0] * 1.15 if base_bg[0] * 1.15 <= 1 else 1, base_bg[1] * 1.15 if base_bg[1] * 1.15 <= 1 else 1, base_bg[2] * 1.15 if base_bg[2] * 1.15 <= 1 else 1, 1)
+                    bg_color = (base_bg[0] * 1.15 if base_bg[0] * 1.15 <= 1 else 1,
+                                base_bg[1] * 1.15 if base_bg[1] * 1.15 <= 1 else 1,
+                                base_bg[2] * 1.15 if base_bg[2] * 1.15 <= 1 else 1, 1)
                 text_color = theme['text_color']
             else:
                 bg_color = theme.get('tab_inactive_bg', theme['widget_bg'])
                 text_color = theme['text_color']
             tab_box = BoxLayout(spacing=dp(0.3), size_hint_x=None, width=dp(95))
-            btn_tab = Button(text=title, font_name='SourceBold', background_color=bg_color, background_normal='', background_down='', color=text_color, font_size=dp(11), halign='left', valign='middle', padding=(dp(3), 0))
+            btn_tab = Button(text=title, font_name='SourceBold', background_color=bg_color, background_normal='',
+                             background_down='', color=text_color, font_size=dp(11), halign='left', valign='middle',
+                             padding=(dp(3), 0))
             btn_tab.tab_index = i
             btn_tab.touch_start_time = 0
             btn_tab.touch_start_pos = (0, 0)
+
             def make_touch_down():
                 def handler(instance, touch):
                     if instance.collide_point(*touch.pos):
                         instance.touch_start_time = time.time()
                         instance.touch_start_pos = touch.pos
                     return False
+
                 return handler
+
             def make_touch_up(idx):
                 def handler(instance, touch):
                     if instance.collide_point(*touch.pos):
@@ -4065,12 +4346,16 @@ class TabManager:
                             else:
                                 self._on_tab_press(idx)
                     return False
+
                 return handler
+
             btn_tab.bind(on_touch_down=make_touch_down())
             btn_tab.bind(on_touch_up=make_touch_up(i))
             tab_box.add_widget(btn_tab)
             if len(self.tabs) > 1:
-                btn_close = Button(text='x', font_name='SourceBold', size_hint_x=None, width=dp(20), background_color=bg_color, background_normal='', background_down='', color=theme.get('tab_close_btn_text', text_color), font_size=dp(15))
+                btn_close = Button(text='x', font_name='SourceBold', size_hint_x=None, width=dp(20),
+                                   background_color=bg_color, background_normal='', background_down='',
+                                   color=theme.get('tab_close_btn_text', text_color), font_size=dp(15))
                 btn_close.bind(on_release=lambda x, idx=i: self._on_tab_close(idx))
                 tab_box.add_widget(btn_close)
             self.tab_buttons_container.add_widget(tab_box)
@@ -4079,13 +4364,13 @@ class TabManager:
         """Показывает контекстное меню для вкладки."""
         if not self.app:
             return
-        
+
         tr = self.app.tr
         theme = ThemeManager.get_theme()
-        
+
         if not button or not button.parent:
             return
-        
+
         try:
             if hasattr(button, 'to_window'):
                 wx, wy = button.to_window(*button.pos)
@@ -4093,11 +4378,11 @@ class TabManager:
                 wx, wy = button.pos
         except:
             return
-        
+
         menu = DropDown()
         menu.auto_width = False
         menu.width = dp(100)
-        
+
         btn_rename = Button(
             text=tr.get('rename_tab', 'Переименовать'),
             size_hint_y=None, height=dp(30),
@@ -4107,7 +4392,7 @@ class TabManager:
         )
         btn_rename.bind(on_release=lambda x: self._rename_tab(index, menu))
         menu.add_widget(btn_rename)
-        
+
         btn_duplicate = Button(
             text=tr.get('duplicate_tab', 'Дублировать'),
             size_hint_y=None, height=dp(30),
@@ -4117,7 +4402,7 @@ class TabManager:
         )
         btn_duplicate.bind(on_release=lambda x: self._duplicate_tab(index, menu))
         menu.add_widget(btn_duplicate)
-        
+
         if len(self.tabs) > 1:
             btn_close_others = Button(
                 text=tr.get('close_other_tabs', 'Закрыть другие'),
@@ -4128,7 +4413,7 @@ class TabManager:
             )
             btn_close_others.bind(on_release=lambda x: self._close_other_tabs(index, menu))
             menu.add_widget(btn_close_others)
-        
+
         if len(self.tabs) > 1:
             btn_close_all = Button(
                 text=tr.get('close_all_tabs', 'Закрыть все'),
@@ -4139,7 +4424,7 @@ class TabManager:
             )
             btn_close_all.bind(on_release=lambda x: self._close_all_tabs(menu))
             menu.add_widget(btn_close_all)
-        
+
         try:
             menu.open(button)
         except:
@@ -4207,7 +4492,8 @@ class TabManager:
         try:
             tabs_data = {'active_index': self.active_index, 'tabs': []}
             for tab in self.tabs:
-                tabs_data['tabs'].append({'title': tab['title'], 'file': tab['file'], 'text': tab['editor'].get_text() if tab['editor'] else ''})
+                tabs_data['tabs'].append({'title': tab['title'], 'file': tab['file'],
+                                          'text': tab['editor'].get_text() if tab['editor'] else ''})
             save_path = os.path.join(os.getcwd(), 'tabs.json')
             with open(save_path, 'w', encoding='utf-8') as f:
                 json.dump(tabs_data, f, indent=2)
@@ -4238,7 +4524,8 @@ class TabManager:
                     editor.set_text(text)
                 else:
                     editor.set_text('')
-                tab = {'title': data.get('title', tr.get('untitled_tab', 'Новый')), 'editor': editor, 'file': data.get('file'), 'saved': True}
+                tab = {'title': data.get('title', tr.get('untitled_tab', 'Новый')), 'editor': editor,
+                       'file': data.get('file'), 'saved': True}
                 self.tabs.append(tab)
             if 0 <= active_index < len(self.tabs):
                 self.active_index = active_index
@@ -4252,6 +4539,7 @@ class TabManager:
 
 class AutoCompleteWidget(BoxLayout):
     """Панель автодополнения"""
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.orientation = 'vertical'
@@ -4260,14 +4548,21 @@ class AutoCompleteWidget(BoxLayout):
         self.code_input = None
         self.visible = False
         self.all_words = self._build_word_list()
-        self.suggestions_box = BoxLayout(orientation='horizontal', size_hint_x=None, height=dp(23), spacing=dp(2), padding=[dp(3), dp(3)])
+        self.suggestions_box = BoxLayout(orientation='horizontal', size_hint_x=None, height=dp(23), spacing=dp(2),
+                                         padding=[dp(3), dp(3)])
         self.suggestions_box.bind(minimum_width=self.suggestions_box.setter('width'))
         self.scroll = ScrollView(size_hint=(1, 1), do_scroll_x=True, do_scroll_y=False, bar_width=dp(2))
         self.scroll.add_widget(self.suggestions_box)
         self.add_widget(self.scroll)
 
     def _build_word_list(self):
-        words = ['False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await', 'break', 'class', 'continue', 'def', 'del', 'elif', 'else', 'except', 'finally', 'for', 'from', 'global', 'if', 'import', 'in', 'is', 'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return', 'try', 'while', 'with', 'yield', 'print', 'input', 'len', 'range', 'int', 'str', 'float', 'list', 'dict', 'set', 'tuple', 'open', 'type', 'abs', 'max', 'min', 'sum', 'sorted', 'enumerate', 'zip', 'append', 'extend', 'insert', 'remove', 'pop', 'keys', 'values', 'items', 'get', 'update', 'split', 'join', 'replace', 'strip', 'lower', 'upper', 'startswith', 'endswith', 'self', '__init__', '__name__', '__main__']
+        words = ['False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await', 'break', 'class', 'continue', 'def',
+                 'del', 'elif', 'else', 'except', 'finally', 'for', 'from', 'global', 'if', 'import', 'in', 'is',
+                 'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return', 'try', 'while', 'with', 'yield', 'print',
+                 'input', 'len', 'range', 'int', 'str', 'float', 'list', 'dict', 'set', 'tuple', 'open', 'type', 'abs',
+                 'max', 'min', 'sum', 'sorted', 'enumerate', 'zip', 'append', 'extend', 'insert', 'remove', 'pop',
+                 'keys', 'values', 'items', 'get', 'update', 'split', 'join', 'replace', 'strip', 'lower', 'upper',
+                 'startswith', 'endswith', 'self', '__init__', '__name__', '__main__']
         return sorted(set(words))
 
     def update_words_from_code(self):
@@ -4296,7 +4591,9 @@ class AutoCompleteWidget(BoxLayout):
             return
         theme = ThemeManager.get_theme()
         for word in matches:
-            btn = Button(text=word, size_hint_x=None, width=len(word) * dp(7) + dp(10), height=dp(18), font_size=dp(13), font_name='SourceBold', background_color=theme['widget_bg'], background_normal='', background_down='', color=theme['text_color'])
+            btn = Button(text=word, size_hint_x=None, width=len(word) * dp(7) + dp(10), height=dp(18), font_size=dp(13),
+                         font_name='SourceBold', background_color=theme['widget_bg'], background_normal='',
+                         background_down='', color=theme['text_color'])
             btn.word = word
             btn.bind(on_release=self._on_suggestion_click)
             self.suggestions_box.add_widget(btn)
@@ -4387,30 +4684,30 @@ class PythonLearningApp(MDApp):
     def build(self):
         # Сохраняем основной интерфейс
         main_widget = self._create_main_widget()
-        
+
         # Создаём ScreenManager
         sm = ScreenManager()
-        
+
         # Анимированная заставка
         from animated_splash import AnimatedSplashScreen
         splash = AnimatedSplashScreen(self, name='splash')
         sm.add_widget(splash)
-        
+
         # Главный экран
         main_screen = Screen(name='main')
         main_screen.add_widget(main_widget)
         sm.add_widget(main_screen)
-        
+
         # Стартуем с заставки
         sm.current = 'splash'
-        
+
         return sm
-    
+
     def _create_main_widget(self):
         """Переносим сюда ВЕСЬ код из старого метода build()"""
         # СКОПИРУЙТЕ СЮДА ВЕСЬ КОД ИЗ build()
         # (от self._load_fonts() до return root_layout)
-        
+
         self._load_fonts()
         self._request_android_permissions()
         self._request_storage_permission()
@@ -4418,32 +4715,32 @@ class PythonLearningApp(MDApp):
         Window.bind(on_key_down=self._keyboard_handler)
         theme = ThemeManager.get_theme()
         main_layout = BoxLayout(orientation='vertical', padding=dp(3), spacing=dp(3))
-        
+
         with main_layout.canvas.before:
             self.bg_color = Color(*theme['app_bg'])
             self.bg_rect = Rectangle(size=main_layout.size, pos=main_layout.pos)
         main_layout.bind(size=self._update_bg, pos=self._update_bg)
-        
+
         self.top_bar = self._create_top_bar(theme)
         main_layout.add_widget(self.top_bar)
-        
+
         self.action_bar = MyActionBar(None)
         self.action_bar.app = self
         main_layout.add_widget(self.action_bar)
-        
+
         self.symbol_bar = MySymbolScrollBar(None)
         self.symbol_bar.app = self
         main_layout.add_widget(self.symbol_bar)
-        
+
         tab_bar = self.tab_manager.create_tab_bar(theme)
         main_layout.add_widget(tab_bar)
-        
+
         Clock.schedule_once(self._apply_saved_syntax_style, 0.5)
-        
+
         self.autocomplete = AutoCompleteWidget()
         self.autocomplete.code_input = None
         main_layout.add_widget(self.autocomplete)
-        
+
         tabs_loaded = self.tab_manager.load_all_tabs()
         if not tabs_loaded:
             self.editor = self.tab_manager.add_tab(title=self.tr.get('untitled_tab', 'New'), text="")
@@ -4465,6 +4762,7 @@ class PythonLearningApp(MDApp):
             }
             if saved_font in font_files:
                 self.code_input.font_name = font_files[saved_font]
+
             def set_cursor_to_first_line(dt):
                 try:
                     if hasattr(self, 'code_input') and self.code_input:
@@ -4472,6 +4770,7 @@ class PythonLearningApp(MDApp):
                         self.code_input.focus = True
                 except:
                     pass
+
             Clock.schedule_once(set_cursor_to_first_line, 0.5)
             Clock.schedule_once(set_cursor_to_first_line, 0.7)
         else:
@@ -4496,6 +4795,7 @@ class PythonLearningApp(MDApp):
             }
             if saved_font in font_files:
                 self.code_input.font_name = font_files[saved_font]
+
             def set_cursor_to_first_line(dt):
                 try:
                     if hasattr(self, 'code_input') and self.code_input:
@@ -4503,62 +4803,64 @@ class PythonLearningApp(MDApp):
                         self.code_input.focus = True
                 except:
                     pass
+
             Clock.schedule_once(set_cursor_to_first_line, 0.5)
             Clock.schedule_once(set_cursor_to_first_line, 0.7)
-        
+
         self.editor_container = BoxLayout()
         self.editor_container.add_widget(self.editor)
         main_layout.add_widget(self.editor_container)
-        
+
         self._setup_autosave()
         self._ui_ready = True
         self._process_pending_operations()
-        
+
         main_layout.bind(on_touch_down=self._on_main_touch_down)
         Clock.schedule_once(self._apply_saved_syntax_style, 0.5)
-        
+
         root_layout = FloatLayout()
         root_layout.add_widget(main_layout)
-        
+
         from kivymd.uix.label import MDIcon
         from kivy.uix.behaviors import ButtonBehavior
         run_btn_size = dp(67)
         margin_right = dp(8)
         margin_bottom = dp(67)
-        
+
         class RunButton(ButtonBehavior, FloatLayout):
             pass
-        
+
         self.run_btn = RunButton(size_hint=(None, None), size=(run_btn_size, run_btn_size))
         self.run_btn.always_release = True
-        
+
         if theme.get('name') == 'dark':
             bg_color = theme.get('run_btn_bg', (0.85, 0.88, 0.90, 1))
             icon_color = theme.get('run_btn_text', (0.18, 0.18, 0.19, 1))
         else:
             bg_color = theme.get('run_btn_bg', (0.596, 0.486, 1.0, 1))
             icon_color = theme.get('run_btn_text', (0, 0, 0, 1))
-        
+
         def draw_round_btn(btn, *args):
             btn.canvas.before.clear()
             with btn.canvas.before:
                 Color(*bg_color)
                 Ellipse(pos=btn.pos, size=btn.size)
-        
+
         self.run_btn.bind(pos=draw_round_btn, size=draw_round_btn)
-        play_icon = MDIcon(icon='play', font_size=f"{dp(23)}sp", theme_text_color="Custom", text_color=icon_color, pos_hint={"center_x": 0.5, "center_y": 0.5})
+        play_icon = MDIcon(icon='play', font_size=f"{dp(23)}sp", theme_text_color="Custom", text_color=icon_color,
+                           pos_hint={"center_x": 0.5, "center_y": 0.5})
         self.run_btn.add_widget(play_icon)
-        
+
         def set_btn_pos(instance, value):
             x = root_layout.width - run_btn_size - margin_right
             y = margin_bottom
             self.run_btn.pos = (x, y)
-        
+
         root_layout.bind(size=set_btn_pos, pos=set_btn_pos)
         Clock.schedule_once(lambda dt: set_btn_pos(None, None), 0.3)
         self.run_btn.bind(on_press=self.run_code)
         root_layout.add_widget(self.run_btn)
-        
+
         if platform == 'android':
             def lock_window_position(dt):
                 try:
@@ -4566,19 +4868,20 @@ class PythonLearningApp(MDApp):
                     Window.update_viewport()
                 except:
                     pass
+
             Clock.schedule_once(lock_window_position, 0.2)
             Clock.schedule_once(lock_window_position, 0.5)
             Clock.schedule_once(lock_window_position, 1.0)
-        
+
         Clock.schedule_once(self._fix_layout_on_start, 0.5)
-        
+
         return root_layout
-    
+
     def on_splash_finished(self):
         """Вызывается, когда заставка завершила работу"""
         self.splash_finished = True
         print("✅ Splash screen finished, app ready")
-    
+
     def _request_android_permissions(self):
         """Запрос разрешений на чистом Android."""
         try:
@@ -4595,7 +4898,7 @@ class PythonLearningApp(MDApp):
             # Если заставка ещё не завершена, ждём
             Clock.schedule_once(lambda dt: self.on_start(), 0.5)
             return
-        
+
         Window.clearcolor = ThemeManager.get_theme()['window_bg']
         self._update_ui_language()
         if self._restore_on_start:
@@ -4641,82 +4944,45 @@ class PythonLearningApp(MDApp):
                 self.saved_api_key = SettingsManager.get_api_key()
             except:
                 self.saved_api_key = ''
+
         threading.Thread(target=load_key, daemon=True).start()
 
     def _load_fonts(self):
-        """Регистрирует шрифты для корректного отображения символов."""
+        """Регистрирует шрифты из папки fonts"""
         try:
-            # Системный шрифт Android (всегда доступен)
-            SYSTEM_FONT = '/system/fonts/DroidSans.ttf'
-            
-            LabelBase.register(name='Roboto', fn_regular=SYSTEM_FONT)
-            LabelBase.register(name='JetBrainsMono', fn_regular=SYSTEM_FONT)
-            LabelBase.register(name='FiraCode', fn_regular=SYSTEM_FONT)
-            LabelBase.register(name='CascadiaCode', fn_regular=SYSTEM_FONT)
-            LabelBase.register(name='IBMPlexMono', fn_regular=SYSTEM_FONT)
-            LabelBase.register(name='NotoSansMono', fn_regular=SYSTEM_FONT)
-            LabelBase.register(name='SourceCodePro', fn_regular=SYSTEM_FONT)
-            LabelBase.register(name='DroidMono', fn_regular=SYSTEM_FONT)
-            # Системный шрифт для основного текста
-            cjk_path = '/system/fonts/NotoSansCJK-Regular.ttc'
-            if os.path.exists(cjk_path):
-                LabelBase.register(name='Roboto', fn_regular=cjk_path)
-    
-            # Шрифт для спецсимволов
-            dejavu_paths = [
-                os.path.join(os.getcwd(), 'fonts', 'DejaVuSans.ttf'),
-                '/system/fonts/DejaVuSans.ttf',
-            ]
-            for path in dejavu_paths:
-                if os.path.exists(path):
-                    LabelBase.register(name='DejaVuSans', fn_regular=path)
-                    break
-    
-            # Запасной системный Roboto
-            roboto_path = '/system/fonts/Roboto-Regular.ttf'
-            if os.path.exists(roboto_path):
-                LabelBase.register(name='SystemRoboto', fn_regular=roboto_path)
-    
-            # Жирный шрифт для интерфейса
-            droid_bold = '/system/fonts/DroidSans-Bold.ttf'
-            if os.path.exists(droid_bold):
-                LabelBase.register(name='DroidBold', fn_regular=droid_bold)
-    
-            # Системный моноширинный шрифт (запасной)
-            droid_mono = '/system/fonts/DroidSansMono.ttf'
-            if os.path.exists(droid_mono):
-                LabelBase.register(name='DroidMono', fn_regular=droid_mono)
-    
-            # JetBrains Mono
-            jetbrains_path = os.path.join(os.getcwd(), 'fonts', 'JetBrainsMono.ttf')
-            if os.path.exists(jetbrains_path):
-                LabelBase.register(name='JetBrainsMono', fn_regular=jetbrains_path)
-    
-            # Fira Code
-            fira_path = os.path.join(os.getcwd(), 'fonts', 'FiraCode-Regular.ttf')
-            if os.path.exists(fira_path):
-                LabelBase.register(name='FiraCode', fn_regular=fira_path)
-    
-            # Cascadia Code
-            cascadia_path = os.path.join(os.getcwd(), 'fonts', 'CascadiaCode.ttf')
-            if os.path.exists(cascadia_path):
-                LabelBase.register(name='CascadiaCode', fn_regular=cascadia_path)
-    
-            # IBM Plex Mono
-            ibm_path = os.path.join(os.getcwd(), 'fonts', 'IBMPlexMono-Regular.ttf')
-            if os.path.exists(ibm_path):
-                LabelBase.register(name='IBMPlexMono', fn_regular=ibm_path)
-    
-            # Noto Sans Mono
-            noto_path = os.path.join(os.getcwd(), 'fonts', 'NotoSansMono.ttf')
+            fonts_dir = os.path.join(os.path.dirname(__file__), 'fonts')
+
+            # Базовый шрифт из папки проекта
+            noto_path = os.path.join(fonts_dir, 'NotoSans-Regular.ttf')
             if os.path.exists(noto_path):
-                LabelBase.register(name='NotoSansMono', fn_regular=noto_path)
-    
-            # Source Code Pro
-            source_path = os.path.join(os.getcwd(), 'fonts', 'SourceCodePro-Regular.otf')
-            if os.path.exists(source_path):
-                LabelBase.register(name='SourceCodePro', fn_regular=source_path)
-    
+                LabelBase.register(name='Roboto', fn_regular=noto_path)
+
+            # Регистрируем моноширинные шрифты для редактора
+            font_files = {
+                'JetBrainsMono': 'JetBrainsMono.ttf',
+                'FiraCode': 'FiraCode-Regular.ttf',
+                'CascadiaCode': 'CascadiaCode.ttf',
+                'IBMPlexMono': 'IBMPlexMono-Regular.ttf',
+                'NotoSansMono': 'NotoSansMono.ttf',
+                'SourceCodePro': 'SourceCodePro-Regular.otf',
+                'DroidMono': 'NotoSansMono.ttf',  # fallback
+            }
+
+            for font_name, font_file in font_files.items():
+                font_path = os.path.join(fonts_dir, font_file)
+                if os.path.exists(font_path):
+                    LabelBase.register(name=font_name, fn_regular=font_path)
+
+            # DejaVuSans для спецсимволов
+            dejavu_path = os.path.join(fonts_dir, 'DejaVuSans.ttf')
+            if os.path.exists(dejavu_path):
+                LabelBase.register(name='DejaVuSans', fn_regular=dejavu_path)
+
+            # Жирный шрифт для интерфейса
+            bold_path = os.path.join(fonts_dir, 'SourceSansPro-Bold.ttf')
+            if os.path.exists(bold_path):
+                LabelBase.register(name='SourceBold', fn_regular=bold_path)
+
         except Exception as e:
             log_error(f"Font error: {e}")
 
@@ -4751,6 +5017,7 @@ class PythonLearningApp(MDApp):
                 self.code_input.cursor = (0, 0)
             except:
                 pass
+
         Clock.schedule_once(set_lines, 0.3)
 
     def _restore_autosaved_code(self, dt):
@@ -4768,7 +5035,8 @@ class PythonLearningApp(MDApp):
                     if tabs_data:
                         self.tab_manager.tabs.clear()
                         for tab_info in tabs_data:
-                            editor = self.tab_manager.add_tab(title=tab_info.get('title', 'Untitled'), text=tab_info.get('text', ''))
+                            editor = self.tab_manager.add_tab(title=tab_info.get('title', 'Untitled'),
+                                                              text=tab_info.get('text', ''))
                         active_idx = data.get('active_index', 0)
                         if 0 <= active_idx < len(self.tab_manager.tabs):
                             self.tab_manager.active_index = active_idx
@@ -4819,11 +5087,13 @@ class PythonLearningApp(MDApp):
         if hasattr(self, 'run_btn'):
             bg_color = theme.get('run_btn_bg', (0.85, 0.88, 0.90, 1))
             icon_color = theme.get('run_btn_text', (0.18, 0.18, 0.19, 1))
+
             def update_bg(btn, *args):
                 btn.canvas.before.clear()
                 with btn.canvas.before:
                     Color(*bg_color)
                     Ellipse(pos=btn.pos, size=btn.size)
+
             update_bg(self.run_btn)
             for child in self.run_btn.children:
                 if hasattr(child, 'text_color'):
@@ -4871,11 +5141,19 @@ class PythonLearningApp(MDApp):
             Color(*theme.get('top_bar_bg', theme['widget_bg']))
             self.top_bar_bg_rect = Rectangle(pos=top_bar.pos, size=top_bar.size)
         top_bar.bind(pos=self._update_top_bar_bg, size=self._update_top_bar_bg)
-        self.spinner = ThemedSpinner(text=self.tr.get('examples', 'Examples'), values=self._get_example_titles(), size_hint_x=0.70, background_color=theme['spinner_bg'], background_normal='', background_down='', color=theme['spinner_text'], font_size=dp(18), font_name='SourceBold', dropdown_bg=theme['spinner_dropdown_bg'], dropdown_text_color=theme['spinner_dropdown_text'], dropdown_selected_bg=theme['spinner_dropdown_selected_bg'])
+        self.spinner = ThemedSpinner(text=self.tr.get('examples', 'Examples'), values=self._get_example_titles(),
+                                     size_hint_x=0.70, background_color=theme['spinner_bg'], background_normal='',
+                                     background_down='', color=theme['spinner_text'], font_size=dp(18),
+                                     font_name='SourceBold', dropdown_bg=theme['spinner_dropdown_bg'],
+                                     dropdown_text_color=theme['spinner_dropdown_text'],
+                                     dropdown_selected_bg=theme['spinner_dropdown_selected_bg'])
         self.spinner.bind(text=self.load_example)
         self.spinner.bind(on_press=self._update_spinner_dropdown_colors)
         menu_anchor = AnchorLayout(anchor_x='right', anchor_y='center', size_hint_x=0.15)
-        self.menu_button = Button(text='☰', font_name='DejaVuSans', size_hint=(None, 1), width=dp(60), background_color=theme.get('menu_btn_bg', theme['widget_bg']), background_normal='', background_down='', color=theme.get('menu_btn_text', theme['text_color']), font_size=dp(23), bold=True)
+        self.menu_button = Button(text='☰', font_name='DejaVuSans', size_hint=(None, 1), width=dp(60),
+                                  background_color=theme.get('menu_btn_bg', theme['widget_bg']), background_normal='',
+                                  background_down='', color=theme.get('menu_btn_text', theme['text_color']),
+                                  font_size=dp(23), bold=True)
         self.menu_button.bind(on_release=self.show_context_menu)
         menu_anchor.add_widget(self.menu_button)
         top_bar.add_widget(self.spinner)
@@ -4884,7 +5162,10 @@ class PythonLearningApp(MDApp):
 
     def _get_example_titles(self):
         tr = self.tr
-        return [tr['example_1'], tr['example_2'], tr['example_3'], tr['example_4'], tr['example_5'], tr['example_6'], tr['example_7'], tr['example_8'], tr['example_9'], tr['example_10'], tr['example_11'], tr['example_12'], tr['example_13'], tr['example_14'], tr['example_15'], tr['example_16'], tr['example_17'], tr['example_18']]
+        return [tr['example_1'], tr['example_2'], tr['example_3'], tr['example_4'], tr['example_5'], tr['example_6'],
+                tr['example_7'], tr['example_8'], tr['example_9'], tr['example_10'], tr['example_11'], tr['example_12'],
+                tr['example_13'], tr['example_14'], tr['example_15'], tr['example_16'], tr['example_17'],
+                tr['example_18']]
 
     def _update_spinner_dropdown_colors(self, instance):
         theme = ThemeManager.get_theme()
@@ -4900,6 +5181,7 @@ class PythonLearningApp(MDApp):
             self._menu_dropdown.auto_width = False
             self._menu_dropdown.width = dp(167)
             self._create_menu_items(theme)
+
         def open_dropdown(*args):
             self._menu_dropdown.open(instance)
             win_width, win_height = Window.size
@@ -4911,6 +5193,7 @@ class PythonLearningApp(MDApp):
                 self._menu_dropdown.y = instance.y + instance.height
             elif self._menu_dropdown.y + self._menu_dropdown.height > win_height:
                 self._menu_dropdown.y = instance.y - self._menu_dropdown.height
+
         Clock.schedule_once(open_dropdown, 0.05)
 
     def menu_action(self, button, func):
@@ -4927,18 +5210,28 @@ class PythonLearningApp(MDApp):
             with container.canvas.before:
                 Color(*theme.get('action_bar_bg', theme['widget_bg']))
                 Rectangle(pos=container.pos, size=container.size)
-            container.bind(pos=lambda inst, val: self._update_menu_container_bg(inst, theme), size=lambda inst, val: self._update_menu_container_bg(inst, theme))
-        menu_items = [('file-plus', tr['new'], self.new_file), ('folder-open', tr['load'], self.show_load_dialog), ('content-save', tr['save'], self.show_save_dialog), ('magnify', tr['find'], self.show_search_only_dialog), ('find-replace', tr['find_replace'], self.show_search_replace_dialog), ('history', tr['history'], self.show_history), ('code-tags', tr['format'], self.format_code), ('robot', tr['ai_assistant'], self.show_ai_assistant), ('cog', tr['settings'], self._open_settings_menu)]
+            container.bind(pos=lambda inst, val: self._update_menu_container_bg(inst, theme),
+                           size=lambda inst, val: self._update_menu_container_bg(inst, theme))
+        menu_items = [('file-plus', tr['new'], self.new_file), ('folder-open', tr['load'], self.show_load_dialog),
+                      ('content-save', tr['save'], self.show_save_dialog),
+                      ('magnify', tr['find'], self.show_search_only_dialog),
+                      ('find-replace', tr['find_replace'], self.show_search_replace_dialog),
+                      ('history', tr['history'], self.show_history), ('code-tags', tr['format'], self.format_code),
+                      ('robot', tr['ai_assistant'], self.show_ai_assistant),
+                      ('cog', tr['settings'], self._open_settings_menu)]
         from kivymd.uix.label import MDIcon
         from kivy.uix.behaviors import ButtonBehavior
         btn_bg = theme.get('action_bar_bg', theme['widget_bg'])
         for icon_name, text, func in menu_items:
             class MenuItem(ButtonBehavior, BoxLayout):
                 pass
+
             box = MenuItem(orientation='horizontal', size_hint_y=None, height=dp(35), padding=(dp(8), 0), spacing=dp(5))
-            icon = MDIcon(icon=icon_name, font_size=f"{dp(10)}sp", theme_text_color="Custom", text_color=theme['text_color'], size_hint_x=None, width=dp(17))
+            icon = MDIcon(icon=icon_name, font_size=f"{dp(10)}sp", theme_text_color="Custom",
+                          text_color=theme['text_color'], size_hint_x=None, width=dp(17))
             box.add_widget(icon)
-            lbl = Label(text=text, color=theme['text_color'], font_size=dp(15), font_name='SourceBold', halign='left', valign='middle')
+            lbl = Label(text=text, color=theme['text_color'], font_size=dp(15), font_name='SourceBold', halign='left',
+                        valign='middle')
             box.add_widget(lbl)
             box.canvas.before.clear()
             with box.canvas.before:
@@ -4946,7 +5239,8 @@ class PythonLearningApp(MDApp):
                 Rectangle(pos=box.pos, size=box.size)
                 Color(btn_bg[0] + 0.08, btn_bg[1] + 0.08, btn_bg[2] + 0.08, 1)
                 Line(rectangle=(box.pos[0], box.pos[1], box.size[0], box.size[1]), width=dp(0.5))
-            box.bind(pos=lambda inst, val, bg=btn_bg: self._update_menu_btn_bg(inst, bg), size=lambda inst, val, bg=btn_bg: self._update_menu_btn_bg(inst, bg))
+            box.bind(pos=lambda inst, val, bg=btn_bg: self._update_menu_btn_bg(inst, bg),
+                     size=lambda inst, val, bg=btn_bg: self._update_menu_btn_bg(inst, bg))
             box.bind(on_release=lambda bt, f=func: self.menu_action(bt, f))
             self._menu_dropdown.add_widget(box)
         self._menu_dropdown.width = dp(167)
@@ -4994,6 +5288,7 @@ class PythonLearningApp(MDApp):
         self._has_unsaved_changes = False
         self._update_title_saved()
         Clock.schedule_once(self._autosave_tabs, 1)
+
         def set_cursor_to_first_line(dt):
             try:
                 if hasattr(self, 'code_input') and self.code_input:
@@ -5001,6 +5296,7 @@ class PythonLearningApp(MDApp):
                     self.code_input.focus = True
             except:
                 pass
+
         Clock.schedule_once(set_cursor_to_first_line, 0.5)
         Clock.schedule_once(set_cursor_to_first_line, 0.7)
 
@@ -5009,12 +5305,12 @@ class PythonLearningApp(MDApp):
             self.tab_manager.save_all_tabs()
         except:
             pass
-    
+
     def _setup_autosave(self):
         self._last_autosave_time = 0
         self.code_input.unbind(text=self._on_code_change_for_autosave)
         self.code_input.bind(text=self._on_code_change_for_autosave)
-    
+
     def _on_code_change_for_autosave(self, instance, value):
         self.tab_manager.mark_active_unsaved()
         is_empty = all(line.strip() == '' for line in value.split('\n')) if value else True
@@ -5031,7 +5327,7 @@ class PythonLearningApp(MDApp):
             Clock.unschedule(self._autosave_tabs)
             Clock.schedule_once(self._do_autosave, 3)
             Clock.schedule_once(self._autosave_tabs, 3)
-    
+
     def _do_autosave(self, dt):
         self._last_autosave_time = time.time()
         self._save_autosave()
@@ -5043,26 +5339,27 @@ class PythonLearningApp(MDApp):
                 self._update_title_saved()
             except:
                 pass
-    
+
     def _save_autosave(self):
         try:
             tabs_data = {'active_index': self.tab_manager.active_index, 'tabs': []}
             for tab in self.tab_manager.tabs:
-                tabs_data['tabs'].append({'title': tab['title'], 'file': tab['file'], 'text': tab['editor'].get_text() if tab['editor'] else ''})
+                tabs_data['tabs'].append({'title': tab['title'], 'file': tab['file'],
+                                          'text': tab['editor'].get_text() if tab['editor'] else ''})
             dir_path = os.path.dirname(self._autosave_file)
             os.makedirs(dir_path, exist_ok=True)
             with open(self._autosave_file, 'w', encoding='utf-8') as f:
                 json.dump(tabs_data, f, indent=2)
         except:
             pass
-    
+
     def _update_title_with_unsaved(self):
         if self._current_file:
             filename = os.path.basename(self._current_file)
             self.title = f"*{filename} - {self._original_title}"
         else:
             self.title = f"*Untitled - {self._original_title}"
-    
+
     def _update_title_saved(self):
         self._has_unsaved_changes = False
         if self._current_file:
@@ -5070,14 +5367,14 @@ class PythonLearningApp(MDApp):
             self.title = f"{filename} - {self._original_title}"
         else:
             self.title = self._original_title
-    
+
     def new_file(self, instance=None):
         if self._has_unsaved_changes and self.code_input.text.strip():
             self._pending_new_file = True
             self._show_new_file_confirmation()
             return
         self._do_new_file()
-    
+
     def _do_new_file(self):
         self.code_input.text = ''
         self._current_file = None
@@ -5086,25 +5383,29 @@ class PythonLearningApp(MDApp):
         if hasattr(self, 'editor') and self.editor:
             self.editor.original_lines = ['']
             self.editor._update_line_panel()
+
         def set_cursor(dt):
             try:
                 self.code_input.cursor = (0, 0)
                 self.code_input.focus = True
             except:
                 pass
+
         Clock.schedule_once(set_cursor, 0.5)
         Clock.schedule_once(set_cursor, 0.7)
         self.show_result_popup(self.tr.get('new_file_created', '✓ New file created'))
-    
+
     def show_save_dialog(self, instance=None):
         theme = ThemeManager.get_theme()
-        popup = Popup(title=self.tr.get('save', 'Save'), title_color=theme['popup_title'],background='', background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), size_hint=(0.92, 0.85), auto_dismiss=False)
+        popup = Popup(title=self.tr.get('save', 'Save'), title_color=theme['popup_title'], background='',
+                      background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), size_hint=(0.92, 0.85),
+                      auto_dismiss=False)
         content = FileDialog(callback=self.save_file, cancel=self.dismiss_popup, is_save=True, popup=popup)
         popup.content = content
         self._popup = popup
         self._current_popup_type = 'save'
         popup.open()
-    
+
     def save_file(self, path, filename):
         tr = self.tr
         try:
@@ -5127,7 +5428,7 @@ class PythonLearningApp(MDApp):
             self.show_result_popup(tr.get('error_save', 'X Error') + ': ' + tr.get('no_permission', 'No permission'))
         except Exception as e:
             self.show_result_popup(tr.get('error_save', 'X Error') + f':\n{e}')
-    
+
     def _do_save_file(self, full_path, filename):
         try:
             with open(full_path, 'w', encoding='utf-8') as f:
@@ -5139,16 +5440,18 @@ class PythonLearningApp(MDApp):
             self.show_result_popup(f"✓ {self.tr.get('file_saved', 'Saved')}:\n{filename}")
         except Exception as e:
             self.show_result_popup(f"X {self.tr.get('error_save', 'Error')}:\n{e}")
-    
+
     def show_load_dialog(self, instance=None):
         theme = ThemeManager.get_theme()
-        popup = Popup(title=self.tr.get('open', 'Open'), title_color=theme['popup_title'],background='', background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), size_hint=(0.92, 0.85), auto_dismiss=False)
+        popup = Popup(title=self.tr.get('open', 'Open'), title_color=theme['popup_title'], background='',
+                      background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), size_hint=(0.92, 0.85),
+                      auto_dismiss=False)
         content = FileDialog(callback=self.load_file, cancel=self.dismiss_popup, is_save=False, popup=popup)
         popup.content = content
         self._popup = popup
         self._current_popup_type = 'load'
         popup.open()
-    
+
     def load_file(self, selection):
         tr = self.tr
         if not selection:
@@ -5168,7 +5471,7 @@ class PythonLearningApp(MDApp):
             self.show_result_popup(tr.get('file_loaded', '✓ Loaded') + f':\n{filename}')
         except Exception as e:
             self.show_result_popup(tr.get('error_load', 'X Error') + f':\n{e}')
-    
+
     def _read_file_content(self, file_path):
         with open(file_path, 'rb') as f:
             raw_start = f.read(4)
@@ -5196,23 +5499,27 @@ class PythonLearningApp(MDApp):
             except UnicodeDecodeError:
                 continue
         return None
-    
+
     def _load_large_file(self, file_path, file_size):
         tr = self.tr
         self.show_result_popup(tr.get('file_too_big', '! Большой файл') + f' ({file_size // 1024} KB)\nЗагрузка...')
+
         def load_in_background():
             try:
                 content = self._read_file_content(file_path)
                 if content is None:
-                    Clock.schedule_once(lambda dt: self.show_result_popup(tr.get('encoding_error', 'X Cannot determine encoding')))
+                    Clock.schedule_once(
+                        lambda dt: self.show_result_popup(tr.get('encoding_error', 'X Cannot determine encoding')))
                     return
                 Clock.schedule_once(lambda dt: self._apply_loaded_content(content, file_path))
                 filename = os.path.basename(file_path)
-                Clock.schedule_once(lambda dt: self.show_result_popup(tr.get('file_loaded', '✓ Loaded') + f':\n{filename}'))
+                Clock.schedule_once(
+                    lambda dt: self.show_result_popup(tr.get('file_loaded', '✓ Loaded') + f':\n{filename}'))
             except Exception as e:
                 Clock.schedule_once(lambda dt: self.show_result_popup(tr.get('error_load', 'X Error') + f':\n{e}'))
+
         threading.Thread(target=load_in_background, daemon=True).start()
-    
+
     def _apply_loaded_content(self, content, file_path):
         self.code_input.text = content
         self._current_file = file_path
@@ -5227,7 +5534,7 @@ class PythonLearningApp(MDApp):
         self._has_unsaved_changes = False
         self._update_title_saved()
         self.tab_manager.set_active_file(file_path)
-    
+
     def _show_exit_confirmation(self):
         tr = self.tr
         theme = ThemeManager.get_theme()
@@ -5237,19 +5544,29 @@ class PythonLearningApp(MDApp):
             message += f"\n{tr.get('save_before_exit', 'Save before exit?')} '{os.path.basename(self._current_file)}'?"
         else:
             message += "\n" + tr.get('save_before_exit', 'Save before exit?')
-        content.add_widget(Label(text=message, color=theme['text_color'], font_size=dp(11), font_name='SourceBold', halign='center', size_hint_y=None, height=dp(33)))
+        content.add_widget(
+            Label(text=message, color=theme['text_color'], font_size=dp(11), font_name='SourceBold', halign='center',
+                  size_hint_y=None, height=dp(33)))
         btn_layout = BoxLayout(size_hint_y=None, height=dp(23), spacing=dp(4))
-        popup = Popup(title=tr.get('exit_title', 'Exit'), title_color=theme['popup_title'],background='', background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), content=content, size_hint=(0.85, 0.35), auto_dismiss=False)
-        btn_save = Button(text=tr.get('save_and_exit', 'Save & Exit'), font_name='SourceBold', background_color=(0.2, 0.5, 0.2, 1), background_normal='', background_down='', color=theme['text_color'], font_size=dp(10), on_release=lambda x: self._on_exit_save(popup))
-        btn_exit = Button(text=tr.get('exit_without_save', 'Exit'), font_name='SourceBold', background_color=(0.5, 0.2, 0.2, 1), background_normal='', background_down='', color=theme['text_color'], font_size=dp(10), on_release=lambda x: self._on_exit_force(popup))
-        btn_cancel = Button(text=tr.get('cancel', 'Cancel'), font_name='SourceBold', background_color=theme['widget_bg'], background_normal='', background_down='', color=theme['text_color'], font_size=dp(10), on_release=lambda x: popup.dismiss())
+        popup = Popup(title=tr.get('exit_title', 'Exit'), title_color=theme['popup_title'], background='',
+                      background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), content=content,
+                      size_hint=(0.85, 0.35), auto_dismiss=False)
+        btn_save = Button(text=tr.get('save_and_exit', 'Save & Exit'), font_name='SourceBold',
+                          background_color=(0.2, 0.5, 0.2, 1), background_normal='', background_down='',
+                          color=theme['text_color'], font_size=dp(10), on_release=lambda x: self._on_exit_save(popup))
+        btn_exit = Button(text=tr.get('exit_without_save', 'Exit'), font_name='SourceBold',
+                          background_color=(0.5, 0.2, 0.2, 1), background_normal='', background_down='',
+                          color=theme['text_color'], font_size=dp(10), on_release=lambda x: self._on_exit_force(popup))
+        btn_cancel = Button(text=tr.get('cancel', 'Cancel'), font_name='SourceBold',
+                            background_color=theme['widget_bg'], background_normal='', background_down='',
+                            color=theme['text_color'], font_size=dp(10), on_release=lambda x: popup.dismiss())
         btn_layout.add_widget(btn_save)
         btn_layout.add_widget(btn_exit)
         btn_layout.add_widget(btn_cancel)
         content.add_widget(btn_layout)
         popup.open()
         self._exit_popup = popup
-    
+
     def _on_exit_save(self, popup):
         popup.dismiss()
         if self._current_file:
@@ -5257,49 +5574,66 @@ class PythonLearningApp(MDApp):
         else:
             self._save_before_exit()
         Clock.schedule_once(lambda dt: self._force_exit(), 0.5)
-    
+
     def _on_exit_force(self, popup):
         popup.dismiss()
         self._force_exit()
-    
+
     def _show_new_file_confirmation(self):
         tr = self.tr
         theme = ThemeManager.get_theme()
         content = BoxLayout(orientation='vertical', padding=dp(7), spacing=dp(5))
-        content.add_widget(Label(text=tr.get('new_file_confirm', 'Create without saving?'), color=theme['text_color'], font_size=dp(11), font_name='SourceBold', halign='center', size_hint_y=None, height=dp(27)))
+        content.add_widget(Label(text=tr.get('new_file_confirm', 'Create without saving?'), color=theme['text_color'],
+                                 font_size=dp(11), font_name='SourceBold', halign='center', size_hint_y=None,
+                                 height=dp(27)))
         btn_layout = BoxLayout(size_hint_y=None, height=dp(23), spacing=dp(4))
-        popup = Popup(title=tr.get('confirm_title', 'Confirm'), title_color=theme['popup_title'],background='', background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), content=content, size_hint=(0.8, 0.3), auto_dismiss=False)
-        btn_yes = Button(text=tr.get('yes', 'Yes'), font_name='SourceBold', background_color=(0.2, 0.5, 0.2, 1), background_normal='', background_down='', color=theme['text_color'], font_size=dp(10), on_release=lambda x: self._on_new_file_confirm(popup))
-        btn_no = Button(text=tr.get('no', 'No'), font_name='SourceBold', background_color=theme['widget_bg'], background_normal='', background_down='', color=theme['text_color'], font_size=dp(10), on_release=lambda x: popup.dismiss())
+        popup = Popup(title=tr.get('confirm_title', 'Confirm'), title_color=theme['popup_title'], background='',
+                      background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), content=content, size_hint=(0.8, 0.3),
+                      auto_dismiss=False)
+        btn_yes = Button(text=tr.get('yes', 'Yes'), font_name='SourceBold', background_color=(0.2, 0.5, 0.2, 1),
+                         background_normal='', background_down='', color=theme['text_color'], font_size=dp(10),
+                         on_release=lambda x: self._on_new_file_confirm(popup))
+        btn_no = Button(text=tr.get('no', 'No'), font_name='SourceBold', background_color=theme['widget_bg'],
+                        background_normal='', background_down='', color=theme['text_color'], font_size=dp(10),
+                        on_release=lambda x: popup.dismiss())
         btn_layout.add_widget(btn_yes)
         btn_layout.add_widget(btn_no)
         content.add_widget(btn_layout)
         popup.open()
-    
+
     def _on_new_file_confirm(self, popup):
         popup.dismiss()
         self._do_new_file()
         self._pending_new_file = False
-    
+
     def _confirm_overwrite(self, full_path):
         tr = self.tr
         theme = ThemeManager.get_theme()
         filename = os.path.basename(full_path)
         content = BoxLayout(orientation='vertical', padding=dp(7), spacing=dp(5))
-        content.add_widget(Label(text=f"{tr.get('file_exists', 'File')} '{filename}' {tr.get('already_exists', 'exists')}.\n{tr.get('overwrite_confirm', 'Overwrite?')}", color=theme['text_color'], font_size=dp(11), font_name='SourceBold', halign='center', size_hint_y=None, height=dp(27)))
+        content.add_widget(Label(
+            text=f"{tr.get('file_exists', 'File')} '{filename}' {tr.get('already_exists', 'exists')}.\n{tr.get('overwrite_confirm', 'Overwrite?')}",
+            color=theme['text_color'], font_size=dp(11), font_name='SourceBold', halign='center', size_hint_y=None,
+            height=dp(27)))
         btn_layout = BoxLayout(size_hint_y=None, height=dp(23), spacing=dp(4))
-        popup = Popup(title=tr.get('confirm_title', 'Confirm'), title_color=theme['popup_title'],background='', background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), content=content, size_hint=(0.8, 0.35), auto_dismiss=False)
-        btn_yes = Button(text=tr.get('yes', 'Yes'), font_name='SourceBold', background_color=(0.2, 0.5, 0.2, 1), background_normal='', background_down='', color=theme['text_color'], font_size=dp(10), on_release=lambda x: self._on_overwrite_confirm(popup, full_path, filename))
-        btn_no = Button(text=tr.get('no', 'No'), font_name='SourceBold', background_color=theme['widget_bg'], background_normal='', background_down='', color=theme['text_color'], font_size=dp(10), on_release=lambda x: popup.dismiss())
+        popup = Popup(title=tr.get('confirm_title', 'Confirm'), title_color=theme['popup_title'], background='',
+                      background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), content=content,
+                      size_hint=(0.8, 0.35), auto_dismiss=False)
+        btn_yes = Button(text=tr.get('yes', 'Yes'), font_name='SourceBold', background_color=(0.2, 0.5, 0.2, 1),
+                         background_normal='', background_down='', color=theme['text_color'], font_size=dp(10),
+                         on_release=lambda x: self._on_overwrite_confirm(popup, full_path, filename))
+        btn_no = Button(text=tr.get('no', 'No'), font_name='SourceBold', background_color=theme['widget_bg'],
+                        background_normal='', background_down='', color=theme['text_color'], font_size=dp(10),
+                        on_release=lambda x: popup.dismiss())
         btn_layout.add_widget(btn_yes)
         btn_layout.add_widget(btn_no)
         content.add_widget(btn_layout)
         popup.open()
-    
+
     def _on_overwrite_confirm(self, popup, full_path, filename):
         popup.dismiss()
         self._do_save_file(full_path, filename)
-    
+
     def _save_before_exit(self):
         try:
             save_path = '/storage/emulated/0/Download'
@@ -5316,11 +5650,11 @@ class PythonLearningApp(MDApp):
             self._current_file = full_path
         except:
             pass
-    
+
     def _force_exit(self):
         self._cleanup_resources()
         App.get_running_app().stop()
-    
+
     def _cleanup_resources(self):
         if self._cleanup_scheduled:
             return
@@ -5337,40 +5671,45 @@ class PythonLearningApp(MDApp):
         if hasattr(self, 'symbol_bar') and hasattr(self.symbol_bar, 'cleanup'):
             self.symbol_bar.cleanup()
         ThemeManager.unregister(self)
-    
+
     def run_code(self, instance):
         tr = self.tr
-        code = self.code_input.text        
+        code = self.code_input.text
         if not code.strip():
             self.show_result_popup(tr.get('enter_code', 'X Enter code'))
             return
         instance.disabled = True
-        
+
         def input_handler(prompt=""):
             return self._handle_input(prompt)
-        
+
         def result_callback(result):
             instance.disabled = False
             self._show_result(result)
-        
+
         if not self.code_executor.run(code, input_handler, result_callback):
             instance.disabled = False
-    
+
     def _handle_input(self, prompt=""):
         tr = self.tr
         self.code_executor.clear_input()
         input_result = [None]
         input_event = threading.Event()
-        
+
         def show_popup(dt):
             theme = ThemeManager.get_theme()
             content = BoxLayout(orientation='vertical', padding=dp(5), spacing=dp(4))
-            content.add_widget(Label(text=prompt or tr.get('input_prompt', 'Enter value:'), color=theme['text_color'], font_size=dp(14), font_name='SourceBold', size_hint_y=None, height=dp(25)))
-            text_input = TextInput(multiline=False, font_size=dp(14), font_name='SourceBold', background_color=theme['input_bg'], foreground_color=theme['input_text'], cursor_color=theme['input_cursor'], hint_text=tr.get('input_hint', 'Enter text...'), hint_text_color=theme['hint_text'], size_hint_y=None, height=dp(35), padding=(dp(5), dp(5)))
+            content.add_widget(Label(text=prompt or tr.get('input_prompt', 'Enter value:'), color=theme['text_color'],
+                                     font_size=dp(14), font_name='SourceBold', size_hint_y=None, height=dp(25)))
+            text_input = TextInput(multiline=False, font_size=dp(14), font_name='SourceBold',
+                                   background_color=theme['input_bg'], foreground_color=theme['input_text'],
+                                   cursor_color=theme['input_cursor'], hint_text=tr.get('input_hint', 'Enter text...'),
+                                   hint_text_color=theme['hint_text'], size_hint_y=None, height=dp(35),
+                                   padding=(dp(5), dp(5)))
             self.current_input_widget = text_input
             content.add_widget(text_input)
             buttons = BoxLayout(size_hint_y=None, height=dp(30), spacing=dp(5))
-            
+
             def on_ok(*args):
                 value = text_input.text.strip()
                 input_result[0] = value if value else ""
@@ -5378,44 +5717,63 @@ class PythonLearningApp(MDApp):
                 self.current_input_widget = None
                 popup.dismiss()
                 input_event.set()
-            
+
             def on_cancel(*args):
                 input_result[0] = ""
                 self.code_executor.provide_input("")
                 self.current_input_widget = None
                 popup.dismiss()
                 input_event.set()
-            
-            btn_cancel = Button(text=tr.get('cancel', 'Cancel'), font_name='SourceBold', background_color=theme['widget_bg'], background_normal='', background_down='', color=theme['text_color'], font_size=dp(12), on_release=on_cancel)
-            btn_ok = Button(text=tr.get('ok', 'OK'), font_name='SourceBold', background_color=theme['widget_bg'], background_normal='', background_down='', color=theme['text_color'], font_size=dp(12), on_release=on_ok)
+
+            btn_cancel = Button(text=tr.get('cancel', 'Cancel'), font_name='SourceBold',
+                                background_color=theme['widget_bg'], background_normal='', background_down='',
+                                color=theme['text_color'], font_size=dp(12), on_release=on_cancel)
+            btn_ok = Button(text=tr.get('ok', 'OK'), font_name='SourceBold', background_color=theme['widget_bg'],
+                            background_normal='', background_down='', color=theme['text_color'], font_size=dp(12),
+                            on_release=on_ok)
             buttons.add_widget(btn_cancel)
             buttons.add_widget(btn_ok)
             content.add_widget(buttons)
-            popup = Popup(title=tr.get('input_title', 'Input'), title_color=theme['popup_title'],background='', background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), content=content, size_hint=(0.93, 0.45), pos_hint={'top': 0.95}, auto_dismiss=False)
+            popup = Popup(title=tr.get('input_title', 'Input'), title_color=theme['popup_title'], background='',
+                          background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), content=content,
+                          size_hint=(0.93, 0.45), pos_hint={'top': 0.95}, auto_dismiss=False)
             popup.bind(on_dismiss=lambda *args: input_event.set())
             popup.open()
-            
+
             def focus_input(dt):
                 if text_input and text_input.parent:
                     text_input.focus = True
+
             Clock.schedule_once(focus_input, 0.3)
-        
+
         Clock.schedule_once(show_popup, 0.1)
         input_event.wait(timeout=180)
         return input_result[0] if input_result[0] is not None else ""
-    
+
     def _show_result(self, result):
         self.history.append({"time": datetime.now().strftime("%H:%M:%S"), "out": result})
         if len(self.history) > self._max_history:
             self.history = self.history[-self._max_history:]
         self.show_result_popup(result)
 
-
     def load_example(self, spinner, text):
         if not text or text == self.tr.get('examples', 'Examples'):
             return
         examples = self._examples_cache if self._examples_cache else self._build_examples()
-        example_map = {'1. Hello World': '1. Hello World', '2. Variables': '2. Переменные', '2. Переменные': '2. Переменные', '3. Input': '3. Ввод данных', '3. Ввод': '3. Ввод данных', '4. Conditions': '4. Условия', '4. Условия': '4. Условия', '5. For Loop': '5. Цикл For', '5. Цикл For': '5. Цикл For', '6. While Loop': '6. Цикл While', '6. Цикл While': '6. Цикл While', '7. Lists': '7. Списки', '7. Списки': '7. Списки', '8. List Comprehensions': '8. Генераторы списков', '8. Генераторы списков': '8. Генераторы списков', '9. Dictionaries': '9. Словари', '9. Словари': '9. Словари', '10. Functions': '10. Функции', '10. Функции': '10. Функции', '11. Lambda': '11. Lambda', '12. Classes': '12. Классы', '12. Классы': '12. Классы', '13. Inheritance': '13. Наследование', '13. Наследование': '13. Наследование', '14. Errors': '14. Ошибки', '14. Ошибки': '14. Ошибки', '15. Files': '15. Файлы', '15. Файлы': '15. Файлы', '16. Recursion': '16. Рекурсия', '16. Рекурсия': '16. Рекурсия', '17. Generators': '17. Генераторы', '17. Генераторы': '17. Генераторы', '18. Decorators': '18. Декораторы', '18. Декораторы': '18. Декораторы'}
+        example_map = {'1. Hello World': '1. Hello World', '2. Variables': '2. Переменные',
+                       '2. Переменные': '2. Переменные', '3. Input': '3. Ввод данных', '3. Ввод': '3. Ввод данных',
+                       '4. Conditions': '4. Условия', '4. Условия': '4. Условия', '5. For Loop': '5. Цикл For',
+                       '5. Цикл For': '5. Цикл For', '6. While Loop': '6. Цикл While', '6. Цикл While': '6. Цикл While',
+                       '7. Lists': '7. Списки', '7. Списки': '7. Списки',
+                       '8. List Comprehensions': '8. Генераторы списков',
+                       '8. Генераторы списков': '8. Генераторы списков', '9. Dictionaries': '9. Словари',
+                       '9. Словари': '9. Словари', '10. Functions': '10. Функции', '10. Функции': '10. Функции',
+                       '11. Lambda': '11. Lambda', '12. Classes': '12. Классы', '12. Классы': '12. Классы',
+                       '13. Inheritance': '13. Наследование', '13. Наследование': '13. Наследование',
+                       '14. Errors': '14. Ошибки', '14. Ошибки': '14. Ошибки', '15. Files': '15. Файлы',
+                       '15. Файлы': '15. Файлы', '16. Recursion': '16. Рекурсия', '16. Рекурсия': '16. Рекурсия',
+                       '17. Generators': '17. Генераторы', '17. Генераторы': '17. Генераторы',
+                       '18. Decorators': '18. Декораторы', '18. Декораторы': '18. Декораторы'}
         key = example_map.get(text, text)
         code = examples.get(key, '# Example not found')
         self.code_input.text = code
@@ -5431,9 +5789,11 @@ class PythonLearningApp(MDApp):
         if self._examples_loading:
             return
         self._examples_loading = True
+
         def load_examples():
             self._examples_cache = self._build_examples()
             self._examples_loading = False
+
         threading.Thread(target=load_examples, daemon=True).start()
 
     def _build_examples(self):
@@ -5576,7 +5936,7 @@ print("3 * 4 =", multiply(3, 4))''',
 class Dog:
     def __init__(self, name):
         self.name = name
-    
+
     def bark(self):
         return self.name + " says: Woof!"
 
@@ -5606,7 +5966,8 @@ except ValueError:
 except ZeroDivisionError:
     print("Cannot divide by zero!")''',
 
-                '15. Файлы': '''# Write to file
+                '15. Файлы': '''#
+                Write to file
 with open("test.txt", "w") as f:
     f.write("Hello, World!\\n")
     f.write("This is my file")
@@ -5793,7 +6154,7 @@ print("3 * 4 =", умножить(3, 4))''',
 class Собака:
     def __init__(self, имя):
         self.имя = имя
-    
+
     def гав(self):
         return self.имя + " говорит: Гав!"
 
@@ -5823,7 +6184,8 @@ except ValueError:
 except ZeroDivisionError:
     print("На ноль делить нельзя!")''',
 
-                '15. Файлы': '''# Записываем в файл
+                '15. Файлы': '''#
+                Записываем в файл
 with open("тест.txt", "w") as ф:
     ф.write("Привет, мир!\\n")
     ф.write("Это мой файл")
@@ -5880,7 +6242,9 @@ def пауза():
         search_box = BoxLayout(orientation='vertical', size_hint=(0.95, 0.15), pos_hint={'top': 1.0, 'center_x': 0.5})
         search_box.add_widget(content)
         container.add_widget(search_box)
-        popup = Popup(title='', title_color=(0, 0, 0, 0), separator_color=(0, 0, 0, 0), background='', background_color=(0, 0, 0, 0), content=container, size_hint=(1, 1), auto_dismiss=False, overlay_color=(0, 0, 0, 0))
+        popup = Popup(title='', title_color=(0, 0, 0, 0), separator_color=(0, 0, 0, 0), background='',
+                      background_color=(0, 0, 0, 0), content=container, size_hint=(1, 1), auto_dismiss=False,
+                      overlay_color=(0, 0, 0, 0))
         content.set_popup(popup)
         content.open_popup()
         self.search_popup = popup
@@ -5892,7 +6256,9 @@ def пауза():
         replace_box = BoxLayout(orientation='vertical', size_hint=(0.95, 0.22), pos_hint={'top': 1.0, 'center_x': 0.5})
         replace_box.add_widget(content)
         container.add_widget(replace_box)
-        popup = Popup(title='', title_color=(0, 0, 0, 0), separator_color=(0, 0, 0, 0), background='', background_color=(0, 0, 0, 0), content=container, size_hint=(1, 1), auto_dismiss=False, overlay_color=(0, 0, 0, 0))
+        popup = Popup(title='', title_color=(0, 0, 0, 0), separator_color=(0, 0, 0, 0), background='',
+                      background_color=(0, 0, 0, 0), content=container, size_hint=(1, 1), auto_dismiss=False,
+                      overlay_color=(0, 0, 0, 0))
         content.set_popup(popup)
         content.open_popup()
         self.search_popup = popup
@@ -5956,7 +6322,6 @@ def пауза():
 
         threading.Thread(target=do_format, daemon=True).start()
 
-
     def _basic_format(self, code: str) -> str:
         """Простое форматирование отступов (fallback)"""
         lines = code.split('\n')
@@ -5979,12 +6344,12 @@ def пауза():
             formatted.append(indent + stripped + original_end)
 
             # Увеличиваем отступ
-            if (stripped.endswith(':') and not stripped.startswith(('import', 'from', 'elif', 'else', 'except', 'finally'))) or \
-               stripped.startswith(('def ', 'class ', 'if ', 'for ', 'while ', 'with ', 'try:')):
+            if (stripped.endswith(':') and not stripped.startswith(
+                    ('import', 'from', 'elif', 'else', 'except', 'finally'))) or \
+                    stripped.startswith(('def ', 'class ', 'if ', 'for ', 'while ', 'with ', 'try:')):
                 indent_level += 1
 
         return '\n'.join(formatted)
-
 
     def _apply_formatting(self, formatted):
         """Применение отформатированного кода"""
@@ -6015,7 +6380,6 @@ def пауза():
 
         self.show_result_popup(self.tr.get('formatted_ok', '✓ Code formatted'))
 
-
     def _formatting_error(self, error_msg):
         """Обработка ошибки форматирования"""
         self.run_btn.text = self.tr.get('run', '▶')
@@ -6027,17 +6391,32 @@ def пауза():
         current_key = self.saved_api_key or SettingsManager.get_api_key()
         theme = ThemeManager.get_theme()
         content = BoxLayout(orientation='vertical', padding=dp(5), spacing=dp(3))
-        status_label = Label(text=tr.get('api_ok', '✓ Key set') if current_key else tr.get('api_not_set', '! Key not set'), font_name='SourceBold', color=theme['text_color'], font_size=dp(10), size_hint_y=None, height=dp(15))
+        status_label = Label(
+            text=tr.get('api_ok', '✓ Key set') if current_key else tr.get('api_not_set', '! Key not set'),
+            font_name='SourceBold', color=theme['text_color'], font_size=dp(10), size_hint_y=None, height=dp(15))
         content.add_widget(status_label)
-        key_input = TextInput(text=current_key, font_name='SourceBold', hint_text=tr.get('api_key_hint', 'Paste API key'), multiline=False, font_size=dp(10), background_color=theme['input_bg'], foreground_color=theme['input_text'], hint_text_color=theme['hint_text'], size_hint_y=None, height=dp(27), padding=(dp(5), dp(5)))
+        key_input = TextInput(text=current_key, font_name='SourceBold',
+                              hint_text=tr.get('api_key_hint', 'Paste API key'), multiline=False, font_size=dp(10),
+                              background_color=theme['input_bg'], foreground_color=theme['input_text'],
+                              hint_text_color=theme['hint_text'], size_hint_y=None, height=dp(27),
+                              padding=(dp(5), dp(5)))
         content.add_widget(key_input)
-        info_label = Label(text=tr.get('api_info', 'Get key: aistudio.google.com'), font_name='SourceBold', color=theme['stats_text'], font_size=dp(8), size_hint_y=None, height=dp(13))
+        info_label = Label(text=tr.get('api_info', 'Get key: aistudio.google.com'), font_name='SourceBold',
+                           color=theme['stats_text'], font_size=dp(8), size_hint_y=None, height=dp(13))
         content.add_widget(info_label)
         btn_layout = BoxLayout(size_hint_y=None, height=dp(22), spacing=dp(4))
-        popup = Popup(title=tr.get('api_title', 'API Key'), title_color=theme['popup_title'],background='', background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), content=content, size_hint=(0.9, 0.5), auto_dismiss=True)
-        btn_clear = Button(text=tr.get('delete', 'Delete'), font_name='SourceBold', background_color=(0.3, 0.1, 0.1, 1), background_normal='', background_down='', color=theme['text_color'], font_size=dp(9), on_release=lambda x: self._clear_api_key(key_input, status_label))
-        btn_save = Button(text=tr.get('save', 'Save'), font_name='SourceBold', background_color=theme['widget_bg'], background_normal='', background_down='', color=theme['text_color'], font_size=dp(9), on_release=lambda x: self._save_api_key(key_input, status_label, popup))
-        btn_cancel = Button(text=tr.get('cancel', 'Cancel'), font_name='SourceBold', background_color=theme['widget_bg'], background_normal='', background_down='', color=theme['text_color'], font_size=dp(9), on_release=lambda x: popup.dismiss())
+        popup = Popup(title=tr.get('api_title', 'API Key'), title_color=theme['popup_title'], background='',
+                      background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), content=content, size_hint=(0.9, 0.5),
+                      auto_dismiss=True)
+        btn_clear = Button(text=tr.get('delete', 'Delete'), font_name='SourceBold', background_color=(0.3, 0.1, 0.1, 1),
+                           background_normal='', background_down='', color=theme['text_color'], font_size=dp(9),
+                           on_release=lambda x: self._clear_api_key(key_input, status_label))
+        btn_save = Button(text=tr.get('save', 'Save'), font_name='SourceBold', background_color=theme['widget_bg'],
+                          background_normal='', background_down='', color=theme['text_color'], font_size=dp(9),
+                          on_release=lambda x: self._save_api_key(key_input, status_label, popup))
+        btn_cancel = Button(text=tr.get('cancel', 'Cancel'), font_name='SourceBold',
+                            background_color=theme['widget_bg'], background_normal='', background_down='',
+                            color=theme['text_color'], font_size=dp(9), on_release=lambda x: popup.dismiss())
         btn_layout.add_widget(btn_clear)
         btn_layout.add_widget(btn_save)
         btn_layout.add_widget(btn_cancel)
@@ -6067,7 +6446,9 @@ def пауза():
             return
         content = AIAssistantPopup(api_key=api_key)
         theme = ThemeManager.get_theme()
-        popup = Popup(title=self.tr.get('ai_title', 'AI Assistant'), title_color=theme['popup_title'],background='', background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), content=content, size_hint=(0.95, 0.9))
+        popup = Popup(title=self.tr.get('ai_title', 'AI Assistant'), title_color=theme['popup_title'], background='',
+                      background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), content=content,
+                      size_hint=(0.95, 0.9))
         popup.open()
 
     def switch_language(self, instance=None):
@@ -6092,7 +6473,7 @@ def пауза():
                 # Убираем звёздочку, если есть (несохранённые изменения)
                 has_asterisk = current_title.startswith('*')
                 clean_title = current_title.lstrip('*')
-                
+
                 # Список названий для переименования на разных языках
                 if clean_title in ['Untitled', 'New', 'Новый']:
                     new_title = tr.get('untitled_tab', 'New')
@@ -6100,7 +6481,7 @@ def пауза():
                         new_title = '*' + new_title
                     tab['title'] = new_title
             self.tab_manager._update_tab_bar()
-        
+
         if hasattr(self, 'spinner'):
             try:
                 self.spinner.values = self._get_example_titles()
@@ -6109,7 +6490,8 @@ def пауза():
                 pass
         if hasattr(self, 'action_bar'):
             try:
-                self.action_bar.action_keys = ['undo', 'redo', 'copy', 'paste', 'cut', 'sel_all', 'auto', 'key', 'clean', 'find']
+                self.action_bar.action_keys = ['undo', 'redo', 'copy', 'paste', 'cut', 'sel_all', 'auto', 'key',
+                                               'clean', 'find']
                 self.action_bar._create_buttons()
                 self.action_bar.button_container.clear_widgets()
                 for btn in self.action_bar.buttons:
@@ -6142,20 +6524,20 @@ def пауза():
     def show_result_popup(self, result):
         """Показывает результат в всплывающем окне."""
         tr = self.tr
-    
+
         if len(result) > 50000:
             result = result[:50000] + "\n\n... " + \
-                tr.get('output_truncated', '(truncated)')
-    
+                     tr.get('output_truncated', '(truncated)')
+
         theme = ThemeManager.get_theme()
         content = BoxLayout(orientation='vertical', padding=dp(5), spacing=dp(3))
-    
+
         scroll = ScrollView(size_hint=(1, 0.85),
                             do_scroll_x=False, do_scroll_y=True)
         output_view = TextInput(
             text=str(result),
             readonly=True,
-            font_size=dp(10),
+            font_size=dp(16),
             font_name='SourceBold',
             background_color=theme['result_bg'],
             foreground_color=theme['result_text'],
@@ -6168,9 +6550,9 @@ def пауза():
         output_view.bind(minimum_height=output_view.setter('height'))
         scroll.add_widget(output_view)
         content.add_widget(scroll)
-    
+
         btn_layout = BoxLayout(size_hint_y=None, height=dp(18), spacing=dp(3))
-    
+
         btn_copy = Button(
             text=tr.get('copy_btn', 'Copy'),
             font_name='SourceBold',
@@ -6183,7 +6565,7 @@ def пауза():
             height=dp(33),
             on_release=lambda x: self._copy_result(result)
         )
-    
+
         btn_close = Button(
             text=tr.get('close', 'Close'),
             font_name='SourceBold',
@@ -6195,11 +6577,11 @@ def пауза():
             size_hint_y=None,
             height=dp(33)
         )
-    
+
         btn_layout.add_widget(btn_copy)
         btn_layout.add_widget(btn_close)
         content.add_widget(btn_layout)
-    
+
         popup = ThemedPopup(
             title=tr.get('result_title', 'Result'),
             popup_bg=theme.get('popup_bg', (0.188, 0.204, 0.251, 1)),
@@ -6236,21 +6618,21 @@ def пауза():
         """Показывает диалог переименования вкладки."""
         tr = self.tr
         theme = ThemeManager.get_theme()
-    
+
         if index < 0 or index >= len(self.tab_manager.tabs):
             return
-    
+
         current_title = self.tab_manager.tabs[index]['title']
-    
+
         content = BoxLayout(orientation='vertical', padding=[dp(7), dp(2), dp(7), dp(7)], spacing=dp(33))
-    
+
         content.add_widget(Label(
             text=tr.get('rename_tab', 'Rename tab'),
             color=theme['text_color'], font_size=dp(15),
             font_name='SourceBold',
             size_hint_y=None, height=dp(15)
         ))
-    
+
         name_input = TextInput(
             text=current_title, multiline=False, font_size=dp(15),
             font_name='SourceBold',
@@ -6260,9 +6642,9 @@ def пауза():
             padding=(dp(5), dp(5))
         )
         content.add_widget(name_input)
-    
+
         btn_layout = BoxLayout(size_hint_y=None, height=dp(18), spacing=dp(51))
-    
+
         popup = Popup(
             title=tr.get('rename_tab', 'Rename'),
             title_color=theme['popup_title'],
@@ -6273,7 +6655,7 @@ def пауза():
             pos_hint={'top': 0.80},
             auto_dismiss=False
         )
-    
+
         btn_ok = Button(
             text=tr.get('ok', 'OK'),
             font_name='SourceBold',
@@ -6283,7 +6665,7 @@ def пауза():
             size_hint_y=None, height=dp(30),
             on_release=lambda x: self._rename_tab_confirm(popup, index, name_input)
         )
-        
+
         btn_cancel = Button(
             text=tr.get('cancel', 'Cancel'),
             font_name='SourceBold',
@@ -6293,7 +6675,7 @@ def пауза():
             size_hint_y=None, height=dp(30),
             on_release=lambda x: popup.dismiss()
         )
-    
+
         btn_layout.add_widget(btn_cancel)
         btn_layout.add_widget(btn_ok)
         content.add_widget(btn_layout)
@@ -6317,7 +6699,8 @@ def пауза():
                 pass
         ctrl_pressed = modifier and 'ctrl' in modifier
         if ctrl_pressed:
-            hotkeys = {115: self.show_save_dialog, 111: self.show_load_dialog, 102: self.show_search_only_dialog, 114: self.run_code, 104: self.show_history, 110: self.new_file}
+            hotkeys = {115: self.show_save_dialog, 111: self.show_load_dialog, 102: self.show_search_only_dialog,
+                       114: self.run_code, 104: self.show_history, 110: self.new_file}
             if key in hotkeys:
                 Clock.schedule_once(lambda dt, f=hotkeys[key]: f(None), 0)
                 return True
@@ -6335,243 +6718,3 @@ if __name__ == '__main__':
         except:
             pass
         raise
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
