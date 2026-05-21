@@ -11,7 +11,7 @@ source.exclude_patterns = *.pyc,*.pyo
 version = 3.4.0
 
 # ========== ТРЕБОВАНИЯ ==========
-requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0,kivymd==1.1.1,pygments,autopep8,pycodestyle,plyer,requests
+requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0,kivymd==1.1.1,pygments,autopep8,pycodestyle,plyer,requests,androidstorage4kivy
 
 # ========== ЗАСТАВКИ ==========
 presplash.filename = splash.png
@@ -26,17 +26,19 @@ orientation = portrait
 fullscreen = 0
 
 # ========== ANDROID НАСТРОЙКИ ==========
-android.api = 33
+android.api = 34
 android.minapi = 24
 android.ndk_api = 24
 android.ndk = 25b
 android.archs = arm64-v8a
 
-android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
+android.permissions = INTERNET, VIBRATE
 android.enable_androidx = True
 android.accept_sdk_license = True
 android.statusbar_color = #FFFFFF
 android.navigationbar_color = #FFFFFF
+
+android.private_storage = False
 android.allow_backup = True
 
 entrypoint = main.py
@@ -46,7 +48,6 @@ android.copy_libs = 1
 # ========== НАСТРОЙКИ СТАБИЛЬНОСТИ ==========
 p4a.branch = develop
 p4a.hostpython_version = 3.10.7
-android.private_storage = True
 android.wakelock = False
 p4a.bootstrap = sdl2
 android.release_artifact = apk
