@@ -20,6 +20,22 @@ Python Learning App
 - UI масштабируется через kivy.metrics dp/sp!!!
 - Исправлен хрупкий хак с unbind/bind в _ensure_trailing_empty_lines!!!
 - Смена цветов светлой темы!!!
+- Доступ к файлам роботает!!!
+- Подправленны темы и синтаксис!!!
+- Добавлен виброотклик !!!
+- Splash Screen	Убрали дёрганье клавиатуры
+- Оптимизация редактора	Плавный набор текста
+- Прогрев Pygments	Нет первого фриза при подсветке
+- AI Assistant	Стабильные UI обновления
+- Убрали gc.collect()	Микро-фризы исчезли
+- Добавлена переменная self._code_running
+- Метод _on_tab_changed теперь безопаснее
+- Метод run_code не даёт запустить код дважды
+- Результат выполнения обрезается при большой длине
+- load_file теперь загружает файлы в фоне
+- save_file теперь сохраняет файлы в фоне
+- Добавлен индикатор загрузки/сохранения
+- UI не блокируется при работе с большими файлами
 """
 
 # ====================== ИМПОРТ СТАНДАРТНЫХ БИБЛИОТЕК ======================
@@ -37,6 +53,9 @@ import time
 import re
 import builtins
 from datetime import datetime
+from plyer import vibrator
+# После остальных импортов, добавьте:
+from file_manager import FileManager, FileBrowserPopup
 
 # ====================== ИМПОРТ СТОРОННИХ БИБЛИОТЕК ======================
 try:
@@ -99,6 +118,106 @@ from kivy.utils import platform
 from kivy.metrics import dp, sp
 from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition
 from animated_splash import AnimatedSplashScreen
+from kivymd.uix.button import MDRectangleFlatButton, MDFlatButton
+from kivymd.uix.textfield import MDTextField
+from kivymd.uix.label import MDIcon
+
+# ====================== ИМПОРТ JNIUS (ТОЛЬКО ДЛЯ ANDROID) ======================
+try:
+    from jnius import autoclass, cast
+    JNIUS_AVAILABLE = True
+except ImportError:
+    JNIUS_AVAILABLE = False
+    autoclass = None
+    cast = None
+    print("[INFO] jnius not available (running on desktop)")
+
+# ====================== АДАПТАЦИЯ ПОД РАЗНЫЕ ЭКРАНЫ ======================
+from kivy.core.window import Window
+from kivy.metrics import dp, sp
+from kivy.clock import Clock
+
+_SCREEN_CATEGORY = None
+
+
+def get_screen_category():
+    """Определяет тип экрана по реальной диагонали в дюймах"""
+    global _SCREEN_CATEGORY
+    if _SCREEN_CATEGORY:
+        return _SCREEN_CATEGORY
+
+    width, height = Window.size
+
+    # Получаем реальные пиксели на Android
+    if platform == 'android':
+        try:
+            from jnius import autoclass
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            metrics = PythonActivity.mActivity.getResources().getDisplayMetrics()
+            width = metrics.widthPixels
+            height = metrics.heightPixels
+        except:
+            pass
+
+    diagonal_px = (width ** 2 + height ** 2) ** 0.5
+    diagonal_inch = diagonal_px / dp(160)
+
+    # КАТЕГОРИИ ЭКРАНОВ
+    if diagonal_inch < 5.5:
+        _SCREEN_CATEGORY = 'small_phone'
+    elif diagonal_inch < 7.0:
+        _SCREEN_CATEGORY = 'phone'
+    elif diagonal_inch < 10.0:
+        _SCREEN_CATEGORY = 'large_phone'
+    else:
+        _SCREEN_CATEGORY = 'tablet'
+
+    print(f"[SCREEN] {diagonal_inch:.1f}\" -> {_SCREEN_CATEGORY} ({width}x{height})")
+    return _SCREEN_CATEGORY
+
+
+def reset_screen_cache():
+    """Сбросить кэш (вызывать при повороте экрана)"""
+    global _SCREEN_CATEGORY
+    _SCREEN_CATEGORY = None
+
+
+def adaptive_dp(value):
+    """Адаптивный размер в dp"""
+    category = get_screen_category()
+    if category == 'tablet':
+        return dp(value * 1.6)  # ← ГЛАВНОЕ: увеличен коэффициент для планшетов
+    elif category == 'large_phone':
+        return dp(value * 1.2)
+    else:
+        return dp(value)
+
+
+def adaptive_sp(value):
+    """Адаптивный размер шрифта в sp"""
+    category = get_screen_category()
+    if category == 'tablet':
+        return sp(value * 1.6)  # ← ГЛАВНОЕ: увеличен коэффициент для планшетов
+    elif category == 'large_phone':
+        return sp(value * 1.2)
+    else:
+        return sp(value)
+
+
+def get_tab_count():
+    """Количество видимых вкладок"""
+    category = get_screen_category()
+    if category == 'tablet':
+        return 6
+    elif category == 'large_phone':
+        return 4
+    else:
+        return 3
+
+
+# Переменные для хранения callback
+_pending_file_callback = None
+_pending_save_callback = None
 
 # ====================== ГЛОБАЛЬНЫЙ ФЛАГ ОТЛАДКИ ======================
 DEBUG = True
@@ -408,6 +527,66 @@ TRANSLATIONS = {
         'restart_btn': 'Перезапустить',
         'later_btn': 'Позже',
         'editor_font': 'Шрифт',
+        'select_folder': 'Выбрать папку',
+        'folder_selected': '✓ Папка выбрана',
+        'folder_select_error': ' Ошибка выбора папки',
+        'select_method': 'Выберите способ',
+        'system_dialog': ' Системный диалог (рекомендуется)',
+        'classic_file_manager': ' Классический файловый менеджер',
+        'working_folder': 'Рабочая папка',
+        'working_folder_selected': '✓ Рабочая папка выбрана',
+        'working_folder_saved': '✓ Рабочая папка сохранена',
+        'no_working_folder': ' Рабочая папка не выбрана',
+        # ========== НОВЫЕ КЛЮЧИ ДЛЯ ФАЙЛОВЫХ ОПЕРАЦИЙ ==========
+        'loading_file': 'Загрузка',
+        'saving_file': 'Сохранение',
+        'loading_cancelled': 'Загрузка отменена',
+        'save_cancelled': 'Сохранение отменено',
+        'cancelling': 'Отмена',
+        'loading_large_file': 'Загрузка большого файла',
+        'this_may_take_seconds': 'Это может занять несколько секунд',
+        'cancel_loading': 'Отменить загрузку',
+        'cancel_saving': 'Отменить сохранение',
+        'file_load_error': 'Ошибка загрузки',
+        'file_save_error': 'Ошибка сохранения',
+        'file_success_loaded': 'Загружено',
+        'file_success_saved': 'Сохранено',
+        'overwrite_prompt': 'Файл уже существует. Перезаписать?',
+        'overwrite_title': 'Подтверждение',
+        'overwrite_yes': 'Да, перезаписать',
+        'overwrite_no': 'Нет',
+        # НОВЫЕ КЛЮЧИ ДЛЯ СОХРАНЕНИЯ ФАЙЛОВ
+        'save_file_hint': 'В системном диалоге укажите имя файла с расширением:',
+        'save_python_example': '• script.py — для Python',
+        'save_text_example': '• data.txt — для текста',
+        'save_json_example': '• config.json — для JSON',
+        'save_example_hint': 'Пример: my_code.py',
+        'save_tip_title': 'Подсказка',
+        'save_understand_btn': 'Понятно, продолжить',
+        'file_saved_no_extension': '! Файл сохранён без расширения: {}\nПереименуйте его в файловом менеджере, добавив .py',
+        'file_saved_with_extension': '✓ {}',
+        'file_save_no_extension_warning': 'Добавьте расширение к имени файла\n(например: .py, .txt, .json)',
+        'loading_in_progress': 'Загрузка...',
+        'empty_folder': 'Папка пуста',
+        'renamed': 'Переименован',
+        'delete_confirm': 'Удалить',
+        'cannot_undo': 'Это действие нельзя отменить',
+        'confirm': 'Подтверждение',
+        'deleted': 'Удалён',
+        'loading': 'Загрузка',
+        'saved': 'Сохранён',
+        'select_file': 'Выберите файл (двойной клик)',
+        'file_exists': 'Файл',
+        'overwrite': 'Перезаписать?',
+        'working_folder_saved': 'Рабочая папка сохранена!',
+        'select_working_folder': 'Выбрать рабочую папку',
+        'rename': 'Переименовать',
+        'open_file': 'Открыть файл',
+        'save_file': 'Сохранить файл',
+        'android_only': 'Доступно только на Android',
+        'up_level': 'Наверх',
+        'no_access': 'Нет доступа',
+        'no_permission': 'Нет прав',
     },
     'en': {
         'no_code': 'No code to format',
@@ -559,6 +738,66 @@ TRANSLATIONS = {
         'restart_btn': 'Restart',
         'later_btn': 'Later',
         'editor_font': 'Font',
+        'select_folder': 'Select Folder',
+        'folder_selected': '✓ Folder selected',
+        'folder_select_error': ' Folder selection error',
+        'select_method': 'Select method',
+        'system_dialog': ' System dialog (recommended)',
+        'classic_file_manager': ' Classic file manager',
+        'working_folder': 'Working folder',
+        'working_folder_selected': '✓ Working folder selected',
+        'working_folder_saved': '✓ Working folder saved',
+        'no_working_folder': ' No working folder selected',
+        # ========== NEW KEYS FOR FILE OPERATIONS ==========
+        'loading_file': 'Loading',
+        'saving_file': 'Saving',
+        'loading_cancelled': 'Loading cancelled',
+        'save_cancelled': 'Save cancelled',
+        'cancelling': 'Cancelling',
+        'loading_large_file': 'Loading large file',
+        'this_may_take_seconds': 'This may take a few seconds',
+        'cancel_loading': 'Cancel loading',
+        'cancel_saving': 'Cancel saving',
+        'file_load_error': 'Load error',
+        'file_save_error': 'Save error',
+        'file_success_loaded': 'Loaded',
+        'file_success_saved': 'Saved',
+        'overwrite_prompt': 'File already exists. Overwrite?',
+        'overwrite_title': 'Confirm',
+        'overwrite_yes': 'Yes, overwrite',
+        'overwrite_no': 'No',
+        # NEW KEYS FOR FILE SAVING
+        'save_file_hint': 'In the system dialog, specify the filename with extension:',
+        'save_python_example': '• script.py — for Python',
+        'save_text_example': '• data.txt — for text',
+        'save_json_example': '• config.json — for JSON',
+        'save_example_hint': 'Example: my_code.py',
+        'save_tip_title': 'Tip',
+        'save_understand_btn': 'Got it, continue',
+        'file_saved_no_extension': '! File saved without extension: {}\nRename it in file manager, add .py',
+        'file_saved_with_extension': '✓ {}',
+        'file_save_no_extension_warning': 'Add extension to filename\n(e.g.: .py, .txt, .json)',
+        'loading_in_progress': 'Loading...',
+        'empty_folder': 'Empty folder',
+        'renamed': 'Renamed',
+        'delete_confirm': 'Delete',
+        'cannot_undo': 'This cannot be undone',
+        'confirm': 'Confirm',
+        'deleted': 'Deleted',
+        'loading': 'Loading',
+        'saved': 'Saved',
+        'select_file': 'Select a file (double click)',
+        'file_exists': 'File',
+        'overwrite': 'Overwrite?',
+        'working_folder_saved': 'Working folder saved!',
+        'select_working_folder': 'Select working folder',
+        'rename': 'Rename',
+        'open_file': 'Open file',
+        'save_file': 'Save file',
+        'android_only': 'Available only on Android',
+        'up_level': 'Up',
+        'no_access': 'No access',
+        'no_permission': 'No permission',
     },
 }
 
@@ -834,6 +1073,11 @@ class ThemedSpinner(Spinner):
         self.bind(on_press=self._on_spinner_press)
 
     def _on_spinner_press(self, instance):
+        # ВИБРАЦИЯ
+        app = App.get_running_app()
+        if app and hasattr(app, 'vibrate_short'):
+            app.vibrate_short()
+
         Clock.schedule_once(lambda dt: self._apply_dropdown_theme(), 0.05)
         Clock.schedule_once(lambda dt: self._apply_dropdown_theme(), 0.1)
 
@@ -1052,6 +1296,10 @@ class LanguageSelectMenu:
         Clock.schedule_once(adjust_position, 0.15)
 
     def _on_language_select(self, lang_code):
+        # ВИБРАЦИЯ
+        if hasattr(self.app, 'vibrate_short'):
+            self.app.vibrate_short()
+
         if self._dropdown:
             try:
                 self._dropdown.dismiss()
@@ -1163,6 +1411,10 @@ class ThemeSelectMenu:
         Clock.schedule_once(adjust_position, 0.15)
 
     def _on_theme_select(self, theme_id):
+        # ВИБРАЦИЯ
+        if hasattr(self.app, 'vibrate_short'):
+            self.app.vibrate_short()
+
         if self._dropdown:
             try:
                 self._dropdown.dismiss()
@@ -1170,6 +1422,8 @@ class ThemeSelectMenu:
                 pass
         if theme_id != ThemeManager.get_theme_name():
             success = ThemeManager.switch_theme(theme_id)
+            new_style = SyntaxStyleManager.get_default_style_for_theme(theme_id)
+            SyntaxStyleManager.save_current_style(new_style)
             if success:
                 new_theme = ThemeManager.get_theme()
                 Window.clearcolor = new_theme['window_bg']
@@ -1315,6 +1569,10 @@ class EditorSettingsMenu:
         Clock.schedule_once(adjust_position, 0.15)
 
     def _on_item_click(self, handler):
+        # ВИБРАЦИЯ
+        if hasattr(self.app, 'vibrate_short'):
+            self.app.vibrate_short()
+
         if self._dropdown:
             try:
                 self._dropdown.dismiss()
@@ -1637,6 +1895,27 @@ class SyntaxStyleManager:
         settings_dir = os.path.join(os.getcwd(), 'data')
         return os.path.join(settings_dir, 'python_ide_settings.json')
 
+    @classmethod
+    def get_styles_by_theme(cls, theme_name):
+        """Возвращает список стилей для указанной темы"""
+        dark_styles = ['monokai', 'dracula', 'github-dark', 'one-dark', 'native', 'material', 'xcode-dark',
+                       'stata-dark', 'rainbow_dash']
+        light_styles = ['default', 'xcode', 'friendly', 'github', 'autumn', 'borland', 'trac', 'colorful', 'vs', 'sas',
+                        'arduino']
+
+        if theme_name == 'dark':
+            return [s for s in cls.get_available_styles() if s in dark_styles]
+        else:
+            return [s for s in cls.get_available_styles() if s in light_styles]
+
+    @classmethod
+    def get_default_style_for_theme(cls, theme_name):
+        """Возвращает стиль по умолчанию для темы"""
+        if theme_name == 'dark':
+            return 'monokai'
+        else:
+            return 'arduino'
+
 
 class SyntaxHighlightMenu:
     """Меню выбора стиля подсветки"""
@@ -1653,7 +1932,8 @@ class SyntaxHighlightMenu:
         self._destroy_all_windows()
         theme = ThemeManager.get_theme()  # ← НАПРЯМУЮ
         tr = self._get_translations()
-        styles = SyntaxStyleManager.get_available_styles()
+        current_theme = ThemeManager.get_theme_name()
+        styles = SyntaxStyleManager.get_styles_by_theme(current_theme)
         style_info = SyntaxStyleManager.get_style_display_info()
         current_style = SyntaxStyleManager.get_current_style()
 
@@ -1807,7 +2087,8 @@ class SyntaxHighlightMenu:
         apply_text = tr.get('apply', 'Применить')
         cancel_text = tr.get('cancel', 'Отмена')
         back_text = tr.get('back', '← Назад')
-        btn_back = Button(text=back_text,font_name='DejaVuSans', background_color=theme.get('widget_bg', (0.14, 0.14, 0.15, 1)),
+        btn_back = Button(text=back_text, font_name='DejaVuSans',
+                          background_color=theme.get('widget_bg', (0.14, 0.14, 0.15, 1)),
                           background_normal='', background_down='', color=theme.get('text_color', (0, 0, 0, 1)),
                           font_size=dp(13), on_release=lambda x: self._back_to_menu())
         btn_cancel = Button(text=cancel_text, background_color=theme.get('widget_bg', (0.14, 0.14, 0.15, 1)),
@@ -1955,7 +2236,7 @@ class SyntaxHighlightMenu:
     def _destroy_all_windows(self):
         self._close_menu()
         self._close_preview()
-        gc.collect()
+        # gc.collect()
 
     def _get_theme(self):
         try:
@@ -2029,7 +2310,7 @@ class SettingsMenu:
             ('translate', 'select_language', lambda: self._open_language_submenu(parent_button)),
             ('theme-light-dark', 'theme_settings', lambda: self._open_theme_submenu(parent_button)),
             ('palette', 'syntax_highlight', lambda: self._open_syntax_submenu(parent_button)),
-            ('key', 'api_settings', lambda: self._open_api_settings()),
+            # ('key', 'api_settings', lambda: self._open_api_settings()),
             ('tune', 'editor_settings', lambda: self._open_editor_submenu(parent_button)),
         ]
 
@@ -2075,20 +2356,40 @@ class SettingsMenu:
         handler()
 
     def _open_language_submenu(self, parent_button):
+        # ВИБРАЦИЯ
+        if hasattr(self.app, 'vibrate_short'):
+            self.app.vibrate_short()
+
         self._language_menu.show(parent_button)
 
     def _open_theme_submenu(self, parent_button):
+        # ВИБРАЦИЯ
+        if hasattr(self.app, 'vibrate_short'):
+            self.app.vibrate_short()
+
         self._theme_menu.show(parent_button)
 
     def _open_syntax_submenu(self, parent_button):
+        # ВИБРАЦИЯ
+        if hasattr(self.app, 'vibrate_short'):
+            self.app.vibrate_short()
+
         if not hasattr(self, '_syntax_menu'):
             self._syntax_menu = SyntaxHighlightMenu(self.app)
         self._syntax_menu.show(parent_button)
 
     def _open_editor_submenu(self, parent_button):
+        # ВИБРАЦИЯ
+        if hasattr(self.app, 'vibrate_short'):
+            self.app.vibrate_short()
+
         self._editor_menu.show(parent_button)
 
     def _open_api_settings(self):
+        # ВИБРАЦИЯ
+        if hasattr(self.app, 'vibrate_short'):
+            self.app.vibrate_short()
+
         self.app.show_api_key_settings()
 
     def _update_container_bg(self, instance, theme_colors):
@@ -2263,6 +2564,8 @@ class LineNumberTextInput(BoxLayout):
         self._redo_stack = []
         self._undo_max = 200
         self._undo_lock = False
+        self._redraw_pending = False
+        self._indent_guides_pending = False
         self._create_ui()
         self.apply_theme(ThemeManager.get_theme())
         Window.bind(on_keyboard=self._on_window_keyboard)
@@ -2291,6 +2594,7 @@ class LineNumberTextInput(BoxLayout):
             Clock.schedule_once(self._update_text_width, 0.05)
             Clock.schedule_once(self._update_separator, 0.1)
             Clock.schedule_once(self._update_line_panel, 0.15)
+            Clock.schedule_once(self._force_line_panel_refresh, 0.2)
             if old_cursor <= len(ti.text):
                 Clock.schedule_once(lambda x: setattr(ti, 'cursor', ti.get_cursor_from_index(old_cursor)), 0.25)
         except Exception as e:
@@ -2302,21 +2606,41 @@ class LineNumberTextInput(BoxLayout):
         theme = ThemeManager.get_theme()
         lh = getattr(self.text_input, 'line_height', self._font_size * 1.2)
         n_lines = max(1, len(self.original_lines))
+
+        # Определяем ширину панели
+        category = get_screen_category()
+        if category == 'tablet':
+            panel_width = dp(65)
+        elif category == 'large_phone':
+            panel_width = dp(55)
+        else:
+            panel_width = dp(45)
+
         self.line_panel.clear_widgets()
         for i in range(n_lines):
             row = BoxLayout(orientation='horizontal', size_hint_y=None, height=lh)
-            lbl = Label(text=str(i + 1), font_size=self._font_size, size_hint_x=None, width=dp(33),
+            lbl = Label(text=str(i + 1), font_size=self._font_size, size_hint_x=None, width=panel_width,
                         color=theme.get('panel_text', (0.45, 0.48, 0.50, 1)), halign='right', valign='middle',
                         padding=(0, 0, dp(3), 0))
             row.add_widget(lbl)
             self.line_panel.add_widget(row)
+
         self.line_panel.height = max(self.text_input.height, n_lines * lh)
         self._update_separator()
 
     def apply_theme(self, theme):
+        self.current_theme_name = theme['name']
+        Window.clearcolor = theme['window_bg']
+
+        if hasattr(self, 'bg_color'):
+            self.bg_color.rgba = theme['app_bg']
+
+        # Обновляем верхние панели (только если есть в главном приложении)
+        app = App.get_running_app()
+        if app and hasattr(app, '_update_top_panels'):
+            app._update_top_panels()
         if hasattr(self, 'panel_bg_color'):
             self.panel_bg_color.rgba = theme['panel_bg']
-            self._update_panel_bg()
         if hasattr(self, 'text_input'):
             new_style = ThemeManager.get_syntax_style()
             self.text_input.background_color = theme['editor_bg']
@@ -2424,7 +2748,14 @@ class LineNumberTextInput(BoxLayout):
         Clock.schedule_once(self._bind_scroll_sync, 0.1)
 
     def _create_line_panel_scroll(self):
-        self.line_panel = BoxLayout(orientation='vertical', size_hint=(None, None), width=dp(33), spacing=0)
+        category = get_screen_category()
+        if category == 'tablet':
+            panel_width = dp(65)
+        elif category == 'large_phone':
+            panel_width = dp(55)
+        else:
+            panel_width = dp(45)
+        self.line_panel = BoxLayout(orientation='vertical', size_hint=(None, None), width=panel_width, spacing=0)
         self.line_panel.bind(minimum_height=self.line_panel.setter('height'))
         theme = ThemeManager.get_theme()
         with self.line_panel.canvas.before:
@@ -2434,9 +2765,9 @@ class LineNumberTextInput(BoxLayout):
         theme = ThemeManager.get_theme()
         scroll_bar_color = theme.get('scroll_bar_color', (0.4, 0.4, 0.4, 0.9))
         scroll_bar_inactive = theme.get('scroll_bar_inactive', (0.25, 0.25, 0.25, 0.6))
-        self.line_panel_scroll = ScrollView(size_hint=(None, 1), width=dp(33), do_scroll_x=False, do_scroll_y=True,
+        self.line_panel_scroll = ScrollView(size_hint=(None, 1), width=panel_width, do_scroll_x=False, do_scroll_y=True,
                                             scroll_type=['bars'], bar_width=0, effect_cls='ScrollEffect',
-                                            scroll_distance=dp(17), scroll_timeout=dp(33))
+                                            scroll_distance=dp(17), scroll_timeout=dp(45))
         self.line_panel_scroll.add_widget(self.line_panel)
 
     def _create_code_input_scroll(self):
@@ -2450,7 +2781,13 @@ class LineNumberTextInput(BoxLayout):
             CodeInput = None
         style_name = ThemeManager.get_syntax_style()
         self.current_syntax_style = style_name
-        font_size = dp(12)
+        category = get_screen_category()
+        if category == 'tablet':
+            font_size = dp(16)
+        elif category == 'large_phone':
+            font_size = dp(14)
+        else:
+            font_size = dp(12)
         padding_top = 0
         padding_bottom = 0
         if has_lexer and CodeInput:
@@ -2529,13 +2866,19 @@ class LineNumberTextInput(BoxLayout):
                 app.autocomplete.show_suggestions(current_word)
             except:
                 pass
-        Clock.unschedule(self._delayed_update_panel)
-        Clock.schedule_once(self._delayed_update_panel, 0.05)
-        Clock.schedule_once(self._update_text_width, 0.1)
+
+        # ОПТИМИЗИРОВАННАЯ ЧАСТЬ - только помечаем, что нужно обновление
+        if not self._redraw_pending:
+            self._redraw_pending = True
+            Clock.schedule_once(self._delayed_update_panel, 0.05)
+
+        if not self._indent_guides_pending:
+            self._indent_guides_pending = True
+            Clock.schedule_once(self._draw_indent_guides, 0.15)
+
+        # Убеждаемся, что в конце всегда есть пустые строки
         Clock.unschedule(self._ensure_trailing)
         Clock.schedule_once(self._ensure_trailing, 0)
-        Clock.unschedule(self._draw_indent_guides)
-        Clock.schedule_once(self._draw_indent_guides, 0.3)
 
     def _ensure_trailing(self, dt):
         self._ensure_trailing_empty_lines()
@@ -2590,11 +2933,7 @@ class LineNumberTextInput(BoxLayout):
 
     def _delayed_update_panel(self, dt):
         self._update_line_panel()
-
-    def _update_panel_bg(self, instance=None, value=None):
-        if hasattr(self, 'panel_bg_rect'):
-            self.panel_bg_rect.pos = self.line_panel.pos
-            self.panel_bg_rect.size = self.line_panel.size
+        self._redraw_pending = False
 
     def _update_separator(self, instance=None, value=None):
         if hasattr(self, 'separator_line') and hasattr(self, 'line_panel_scroll'):
@@ -2602,6 +2941,12 @@ class LineNumberTextInput(BoxLayout):
             y1 = self.layout.y
             y2 = self.layout.y + self.layout.height
             self.separator_line.points = [x, y1, x, y2]
+
+    def _update_panel_bg(self, instance, value):
+        """Обновляет фон панели"""
+        if hasattr(self, 'panel_bg_rect'):
+            self.panel_bg_rect.pos = instance.pos
+            self.panel_bg_rect.size = instance.size
 
     def _update_text_width(self, *args):
         if not self.original_lines:
@@ -2621,14 +2966,18 @@ class LineNumberTextInput(BoxLayout):
             lh = self._font_size * 1.2
         theme = ThemeManager.get_theme()
         n_lines = len(self.original_lines)
-        panel_width = dp(33)
+        panel_width = self.line_panel.width
         current_widgets = len(self.line_panel.children)
+
         if current_widgets == n_lines:
+            # Обновляем существующие метки
             for i, child in enumerate(reversed(self.line_panel.children)):
                 if hasattr(child, 'children') and child.children:
                     lbl = child.children[0]
                     if isinstance(lbl, Label):
                         lbl.text = str(i + 1)
+                        lbl.width = panel_width
+                        lbl.text_size = (panel_width - dp(3), None)
             return
         diff = n_lines - current_widgets
         if 0 < diff <= 10:
@@ -2669,6 +3018,31 @@ class LineNumberTextInput(BoxLayout):
             if batch_end < n_lines:
                 Clock.schedule_once(lambda dt: None, 0)
         self.line_panel.height = max(self.text_input.height, n_lines * lh)
+        self._update_separator()
+        Clock.schedule_once(self._force_line_panel_refresh, 0.05)
+
+    def _force_line_panel_refresh(self, dt=None):
+        """Принудительно обновляет ширину и текст всех меток с номерами строк"""
+        if not hasattr(self, 'line_panel') or not self.line_panel.children:
+            return
+
+        # Получаем актуальную ширину панели
+        panel_width = self.line_panel.width
+
+        # Обновляем каждую метку
+        for i, child in enumerate(reversed(self.line_panel.children)):
+            if hasattr(child, 'children') and child.children:
+                lbl = child.children[0]
+                if isinstance(lbl, Label):
+                    # Обновляем текст (номер строки)
+                    lbl.text = str(i + 1)
+                    # Обновляем ширину и размер текста
+                    lbl.width = panel_width
+                    lbl.text_size = (panel_width - dp(3), None)
+                    # Принудительно перерисовываем
+                    lbl.texture_update()
+
+        # Обновляем разделитель
         self._update_separator()
 
     def _on_window_keyboard(self, window, key, scancode, codepoint, modifier):
@@ -2804,6 +3178,7 @@ class LineNumberTextInput(BoxLayout):
             log_error(f"Error showing keyboard: {e}")
 
     def _draw_indent_guides(self, *args):
+        self._indent_guides_pending = False
         if not hasattr(self, 'text_input') or not self.text_input:
             return
         if not self.original_lines:
@@ -2937,221 +3312,61 @@ class LineNumberTextInput(BoxLayout):
         Window.unbind(on_key_down=self._on_window_key_down)
 
 
-class FileDialog(BoxLayout):
-    """Диалог для открытия и сохранения файлов"""
+class ActivityResultHandler:
+    """Обработчик результатов активности для Android"""
 
-    def __init__(self, callback, cancel, is_save=False, popup=None, **kwargs):
-        super().__init__(**kwargs)
-        self.callback = callback
-        self.cancel = cancel
-        self.popup = popup
-        self.is_save = is_save
-        self.orientation = 'vertical'
-        self.padding = dp(7)
-        self.spacing = dp(4)
-        self.selected_file = None
-        theme = ThemeManager.get_theme()
-        app = App.get_running_app()
-        self.tr = app.tr if app else TRANSLATIONS['ru']
-        start_path = self._get_start_path()
-        self.current_path = start_path
-        self._create_navigation_bar(theme)
-        self._create_path_label(theme, start_path)
-        self._create_file_list(theme)
-        self._create_up_button(theme)
-        if is_save:
-            self._create_filename_input(theme)
-        self._create_action_buttons(theme)
-        self._load_files()
+    @staticmethod
+    def start_activity_for_result(intent, request_code, callback):
+        """Запускает активность и сохраняет callback"""
+        global _pending_file_callback
 
-    def _create_navigation_bar(self, theme):
-        nav_box = BoxLayout(size_hint_y=None, height=dp(30), spacing=dp(3))
-        btn_app = Button(text=self.tr.get('app_folder', '[App]'), font_name='SourceBold', size_hint_x=0.33,
-                         background_color=theme['widget_bg'], background_normal='', background_down='',
-                         color=theme['text_color'], font_size=dp(12))
-        btn_app.bind(on_release=lambda x: self._change_path(os.getcwd()))
-        nav_box.add_widget(btn_app)
-        btn_dl = Button(text=self.tr.get('download_folder', '[Download]'), font_name='SourceBold', size_hint_x=0.33,
-                        background_color=theme['widget_bg'], background_normal='', background_down='',
-                        color=theme['text_color'], font_size=dp(12))
-        btn_dl.bind(on_release=lambda x: self._change_path('/storage/emulated/0/Download'))
-        nav_box.add_widget(btn_dl)
-        btn_root = Button(text=self.tr.get('sdcard_folder', '[/sdcard]'), font_name='SourceBold', size_hint_x=0.34,
-                          background_color=theme['widget_bg'], background_normal='', background_down='',
-                          color=theme['text_color'], font_size=dp(12))
-        btn_root.bind(on_release=lambda x: self._change_path('/storage/emulated/0'))
-        nav_box.add_widget(btn_root)
-        self.add_widget(nav_box)
-
-    def _create_path_label(self, theme, start_path):
-        self.path_label = Label(text=start_path, font_name='SourceBold', color=theme['stats_text'], font_size=dp(11),
-                                size_hint_y=None, height=dp(17), halign='left', valign='middle',
-                                text_size=(None, dp(17)), shorten=True, shorten_from='left')
-        self.add_widget(self.path_label)
-
-    def _create_file_list(self, theme):
-        self.file_list_scroll = ScrollView()
-        self.file_list = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(1))
-        self.file_list.bind(minimum_height=self.file_list.setter('height'))
-        self.file_list_scroll.add_widget(self.file_list)
-        self.add_widget(self.file_list_scroll)
-
-    def _create_up_button(self, theme):
-        btn_up = Button(text=self.tr.get('up_level', 'A На уровень выше'), font_name='SourceBold', size_hint_y=None,
-                        height=dp(23), background_color=theme['widget_bg'], background_normal='', background_down='',
-                        color=theme['text_color'], font_size=dp(12))
-        btn_up.bind(on_release=self._go_up)
-        self.add_widget(btn_up)
-
-    def _create_filename_input(self, theme):
-        self.file_name_input = TextInput(
-            text='script.py', font_name='SourceBold',
-            multiline=False, size_hint_y=None, height=dp(33),
-            font_size=dp(12), background_color=theme['input_bg'],
-            foreground_color=theme['input_text'],
-            cursor_color=theme['input_cursor'],
-            hint_text=self.tr.get('file_name', 'Имя файла...'),
-            hint_text_color=theme['hint_text'], padding=(dp(7), dp(7))
-        )
-        # При фокусе — поднимаем окно
-        self.file_name_input.bind(focus=self._on_filename_focus)
-        self.add_widget(self.file_name_input)
-
-    def _create_action_buttons(self, theme):
-        btns = BoxLayout(size_hint_y=None, height=dp(33), spacing=dp(5))
-        btn_cancel = Button(text=self.tr.get('cancel', 'Отмена'), font_name='SourceBold',
-                            background_color=theme['widget_bg'], background_normal='', background_down='',
-                            color=theme['text_color'], font_size=dp(12))
-        btn_cancel.bind(on_release=self._on_cancel)
-        action_text = self.tr.get('save_file') if self.is_save else self.tr.get('open', 'Открыть')
-        btn_action = Button(text=action_text, font_name='SourceBold', background_color=theme['widget_bg'],
-                            background_normal='', background_down='', color=theme['text_color'], font_size=dp(12))
-        btn_action.bind(on_release=self._on_action)
-        btns.add_widget(btn_cancel)
-        btns.add_widget(btn_action)
-        self.add_widget(btns)
-
-    def _get_start_path(self):
-        if PLYER_AVAILABLE:
-            try:
-                path = storagepath.get_downloads_dir()
-                if path and os.path.exists(path):
-                    return path
-            except:
-                pass
-        if ANV_AVAILABLE and androidstorage:
-            try:
-                path = androidstorage.get_external_storage_path()
-                if path:
-                    download = path + '/Download'
-                    if os.path.exists(download):
-                        return download
-                    return path
-            except:
-                pass
-        paths = ['/storage/emulated/0/Download', '/storage/emulated/0', os.getcwd()]
-        for p in paths:
-            if os.path.exists(p):
-                return p
-        return os.getcwd()
-
-    def _change_path(self, path):
-        if os.path.exists(path):
-            self.current_path = path
-            self.selected_file = None
-            self._load_files()
-
-    def _go_up(self, instance):
-        parent = os.path.dirname(self.current_path)
-        if parent and parent != self.current_path:
-            self.current_path = parent
-            self.selected_file = None
-            self._load_files()
-
-    def _load_files(self):
-        self.file_list.clear_widgets()
-        self.path_label.text = self.current_path
-        theme = ThemeManager.get_theme()
         try:
-            items = os.listdir(self.current_path)
-        except:
-            self.file_list.add_widget(
-                Label(text=self.tr.get('no_access', '[Нет доступа к папке]'), font_name='SourceBold',
-                      color=theme['stats_text'], font_size=dp(11), size_hint_y=None, height=dp(20)))
-            return
-        items.sort(key=str.lower)
-        folders = []
-        files = []
-        for item in items:
-            full = os.path.join(self.current_path, item)
-            try:
-                if os.path.isdir(full):
-                    folders.append(item)
-                else:
-                    files.append(item)
-            except:
-                pass
-        for folder in folders:
-            full = os.path.join(self.current_path, folder)
-            btn = Button(text=f'[+] {folder}', font_name='SourceBold', size_hint_y=None, height=dp(23),
-                         background_color=theme['widget_bg'], background_normal='', background_down='',
-                         color=theme['text_color'], font_size=dp(11), halign='left', valign='middle',
-                         padding=(dp(7), 0))
-            btn.bind(on_release=lambda x, p=full: self._change_path(p))
-            self.file_list.add_widget(btn)
-        for file in files:
-            full = os.path.join(self.current_path, file)
-            btn = Button(text=f'  {file}', font_name='SourceBold', size_hint_y=None, height=dp(23),
-                         background_color=theme['input_bg'], background_normal='', background_down='',
-                         color=theme['input_text'], font_size=dp(11), halign='left', valign='middle',
-                         padding=(dp(7), 0))
-            btn.bind(on_release=lambda x, p=full: self._select_file(p))
-            self.file_list.add_widget(btn)
-        if not folders and not files:
-            self.file_list.add_widget(
-                Label(text=self.tr.get('empty', '[Пусто]'), font_name='SourceBold', color=theme['stats_text'],
-                      font_size=dp(11), size_hint_y=None, height=dp(20)))
+            from jnius import autoclass, cast
+            from android import activity
 
-    def _select_file(self, path):
-        self.selected_file = path
-        theme = ThemeManager.get_theme()
-        target_name = os.path.basename(path)
-        for child in self.file_list.children:
-            if isinstance(child, Button):
-                if child.text.startswith('  '):
-                    child.background_color = theme['input_bg']
-                elif child.text.startswith('[+]'):
-                    child.background_color = theme['widget_bg']
-        for child in self.file_list.children:
-            if isinstance(child, Button):
-                if child.text == f'  {target_name}':
-                    child.background_color = theme.get('btn_selected_file_bg', (0.3, 0.5, 0.3, 1))
-                    break
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
 
-    def _on_filename_focus(self, instance, focused):
-        """Поднимает окно при фокусе на поле ввода имени файла."""
-        if focused and self.popup:
-            # Поднимаем окно выше, когда клавиатура открыта
-            self.popup.pos_hint = {'top': 1.25}  # ← больше число = выше окно
-        elif not focused and self.popup:
-            # Возвращаем на место, когда клавиатура закрыта
-            self.popup.pos_hint = {'top': 0.95}
+            # Сохраняем callback
+            _pending_file_callback = callback
 
-    def _on_cancel(self, instance):
-        if self.popup:
-            self.popup.dismiss()
-        if self.cancel:
-            self.cancel()
+            # Запускаем активность
+            current_activity = cast('android.app.Activity', PythonActivity.mActivity)
+            current_activity.startActivityForResult(intent, request_code)
 
-    def _on_action(self, instance):
-        if self.popup:
-            self.popup.dismiss()
-        if self.is_save:
-            if self.callback:
-                self.callback(self.current_path, self.file_name_input.text)
-        else:
-            if self.selected_file and self.callback:
-                self.callback([self.selected_file])
+            # Привязываем обработчик к активности
+            ActivityResultHandler._bind_result_handler()
+
+        except Exception as e:
+            log_error(f"startActivityForResult error: {e}")
+            if callback:
+                callback(None, None, None)
+
+    @staticmethod
+    def _bind_result_handler():
+        """Привязывает обработчик результата к активности"""
+        try:
+            from jnius import autoclass, PythonJavaClass, java_method, cast
+            from android import activity
+
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            current_activity = cast('android.app.Activity', PythonActivity.mActivity)
+
+            # Создаём слушатель
+            class ActivityResultListener(PythonJavaClass):
+                __javainterfaces__ = ['android/content/DialogInterface$OnClickListener']
+
+                @java_method('(Landroid/content/DialogInterface;I)V')
+                def onClick(self, dialog, which):
+                    pass
+
+            # Проверяем, есть ли уже обработчик
+            if not hasattr(current_activity, '_kivy_result_handler'):
+                # Создаём и сохраняем обработчик
+                handler = ActivityResultListener()
+                current_activity._kivy_result_handler = handler
+
+        except Exception as e:
+            log_error(f"Bind result handler error: {e}")
 
 
 class MyActionBar(BoxLayout):
@@ -3176,9 +3391,19 @@ class MyActionBar(BoxLayout):
         super().__init__(**kwargs)
         self.orientation = 'horizontal'
         self.size_hint_y = None
-        self.height = dp(38)
-        self.spacing = dp(12)
-        self.padding = [dp(2), dp(2), dp(2), dp(2)]
+        category = get_screen_category()
+        if category == 'tablet':
+            self.height = dp(52)
+            self.spacing = dp(18)
+            self.padding = [dp(4), dp(4), dp(4), dp(4)]
+        elif category == 'large_phone':
+            self.height = dp(45)
+            self.spacing = dp(15)
+            self.padding = [dp(3), dp(3), dp(3), dp(3)]
+        else:
+            self.height = dp(38)
+            self.spacing = dp(12)
+            self.padding = [dp(2), dp(2), dp(2), dp(2)]
         self.app = None
         self.text_input = text_input
         ThemeManager.register(self)
@@ -3260,6 +3485,10 @@ class MyActionBar(BoxLayout):
             btn.color = theme['symbol_btn_text']
 
     def handle_action(self, instance):
+        # ВИБРАЦИЯ
+        if self.app and hasattr(self.app, 'vibrate_short'):
+            self.app.vibrate_short()
+
         try:
             ti = self._get_active_text_input()
             if not ti:
@@ -3542,9 +3771,19 @@ class MySymbolScrollBar(BoxLayout):
         super().__init__(**kwargs)
         self.orientation = 'horizontal'
         self.size_hint_y = None
-        self.height = dp(30)
-        self.spacing = dp(2)
-        self.padding = [dp(2), dp(2), dp(2), dp(2)]
+        category = get_screen_category()
+        if category == 'tablet':
+            self.height = dp(42)
+            self.spacing = dp(4)
+            self.padding = [dp(4), dp(4), dp(4), dp(4)]
+        elif category == 'large_phone':
+            self.height = dp(36)
+            self.spacing = dp(3)
+            self.padding = [dp(3), dp(3), dp(3), dp(3)]
+        else:
+            self.height = dp(30)
+            self.spacing = dp(2)
+            self.padding = [dp(2), dp(2), dp(2), dp(2)]
         self.app = None
         self.text_input = text_input
         self._saved_sel_start = None
@@ -3633,6 +3872,10 @@ class MySymbolScrollBar(BoxLayout):
             btn.color = theme['symbol_btn_text']
 
     def handle_action(self, instance):
+        # ВИБРАЦИЯ
+        if self.app and hasattr(self.app, 'vibrate_short'):
+            self.app.vibrate_short()
+
         if instance.text != 'Tab':
             self._saved_sel_start = None
             self._saved_sel_end = None
@@ -3724,29 +3967,69 @@ class AIAssistantPopup(BoxLayout):
 
     def _create_ui(self, theme):
         tr = self.tr
+
+        # Адаптивные размеры для AI Assistant
+        category = get_screen_category()
+        if category == 'tablet':
+            title_height = dp(24)
+            title_font = dp(16)
+            input_height = dp(50)
+            input_font = dp(14)
+            btn_height = dp(38)
+            btn_font = dp(14)
+            response_font = dp(13)
+            loading_height = dp(20)
+            loading_font = dp(11)
+        elif category == 'large_phone':
+            title_height = dp(20)
+            title_font = dp(14)
+            input_height = dp(42)
+            input_font = dp(12)
+            btn_height = dp(30)
+            btn_font = dp(12)
+            response_font = dp(11)
+            loading_height = dp(16)
+            loading_font = dp(10)
+        else:
+            title_height = dp(17)
+            title_font = dp(12)
+            input_height = dp(33)
+            input_font = dp(11)
+            btn_height = dp(23)
+            btn_font = dp(11)
+            response_font = dp(10)
+            loading_height = dp(13)
+            loading_font = dp(9)
+
         title_label = Label(text=f'[b]{tr.get("ai_title", "AI Python Assistant")}[/b]', markup=True,
-                            color=theme['text_color'], font_size=dp(12), font_name='SourceBold', size_hint_y=None,
-                            height=dp(17))
+                            color=theme['text_color'], font_size=title_font, font_name='SourceBold', size_hint_y=None,
+                            height=title_height)
         self.add_widget(title_label)
+
         self.question_input = TextInput(hint_text=tr.get('ai_hint', 'Ask me anything about Python...'), multiline=True,
-                                        font_size=dp(11), font_name='SourceBold', background_color=theme['input_bg'],
+                                        font_size=input_font, font_name='SourceBold',
+                                        background_color=theme['input_bg'],
                                         foreground_color=theme['input_text'], hint_text_color=theme['hint_text'],
-                                        size_hint_y=None, height=dp(33), padding=(dp(5), dp(5)))
+                                        size_hint_y=None, height=input_height, padding=(dp(5), dp(5)))
         self.add_widget(self.question_input)
-        self.ask_btn = Button(text=tr.get('ai_btn', 'Ask AI'), font_name='SourceBold', size_hint_y=None, height=dp(23),
+
+        self.ask_btn = Button(text=tr.get('ai_btn', 'Ask AI'), font_name='SourceBold', size_hint_y=None,
+                              height=btn_height,
                               background_color=theme['widget_bg'], background_normal='', background_down='',
-                              color=theme['text_color'], font_size=dp(11), bold=True)
+                              color=theme['text_color'], font_size=btn_font, bold=True)
         self.ask_btn.bind(on_release=self.ask_ai)
         self.add_widget(self.ask_btn)
+
         self.response_scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False, do_scroll_y=True)
         self.response_text = TextInput(text=tr.get('ai_placeholder', 'AI response will appear here...'), readonly=True,
-                                       font_size=dp(10), font_name='SourceBold',
+                                       font_size=response_font, font_name='SourceBold',
                                        background_color=theme['ai_response_bg'], foreground_color=theme['editor_text'],
                                        do_wrap=True, padding=(dp(5), dp(5)))
         self.response_scroll.add_widget(self.response_text)
         self.add_widget(self.response_scroll)
-        self.loading_label = Label(text='', color=theme['text_color'], font_size=dp(9), font_name='SourceBold',
-                                   size_hint_y=None, height=dp(13))
+
+        self.loading_label = Label(text='', color=theme['text_color'], font_size=loading_font, font_name='SourceBold',
+                                   size_hint_y=None, height=loading_height)
         self.add_widget(self.loading_label)
 
     def ask_ai(self, instance):
@@ -3764,7 +4047,7 @@ class AIAssistantPopup(BoxLayout):
             try:
                 context = ssl._create_unverified_context()
                 prompt = (
-                            "You are a helpful Python programming assistant. Provide clear, concise explanations and code examples when appropriate. The user is learning Python on Android.\n\nUser question: " + question + "\n\nAnswer:")
+                        "You are a helpful Python programming assistant. Provide clear, concise explanations and code examples when appropriate. The user is learning Python on Android.\n\nUser question: " + question + "\n\nAnswer:")
                 url = f"{self.API_URL}?key={self.api_key}"
                 headers = {'Content-Type': 'application/json'}
                 data = {"contents": [{"parts": [{"text": prompt}]}],
@@ -3781,7 +4064,7 @@ class AIAssistantPopup(BoxLayout):
                         wait_time = self.BASE_DELAY * (2 ** attempt)
                         Clock.schedule_once(lambda dt, t=wait_time: self._show_status(
                             f"{tr.get('rate_limit', 'Rate limit. Wait')} {t} {tr.get('sec', 'sec')}..."), 0)
-                        time.sleep(wait_time)
+                        threading.Event().wait(wait_time)
                         continue
                     else:
                         msg = tr.get('rate_limit_exceeded', 'Rate limit exceeded. Try later.')
@@ -3944,6 +4227,11 @@ class SearchOnlyPopup(BoxLayout):
             return False
 
     def dismiss(self, *args):
+        # ВИБРАЦИЯ
+        app = App.get_running_app()
+        if app and hasattr(app, 'vibrate_short'):
+            app.vibrate_short()
+
         if self.popup:
             self.popup.dismiss()
 
@@ -4100,6 +4388,11 @@ class SearchReplacePopup(BoxLayout):
             return False
 
     def dismiss(self, *args):
+        # ВИБРАЦИЯ
+        app = App.get_running_app()
+        if app and hasattr(app, 'vibrate_short'):
+            app.vibrate_short()
+
         if self.popup:
             self.popup.dismiss()
 
@@ -4122,7 +4415,7 @@ class TabManager:
         self.tab_bar = None
         self.app = None
         self.tab_offset = 0
-        self.max_visible = 3
+        self.max_visible = get_tab_count()
 
     def add_tab(self, title=None, text="", file_path=None):
         if title is None:
@@ -4207,28 +4500,48 @@ class TabManager:
             self._update_tab_bar()
 
     def create_tab_bar(self, theme):
-        self.tab_bar = BoxLayout(size_hint_y=None, height=dp(30), spacing=dp(1), padding=[dp(1), dp(1), dp(1), dp(1)])
+        category = get_screen_category()
+        if category == 'tablet':
+            tab_height = dp(42)
+            tab_font_size = dp(13)
+            close_btn_size = dp(24)
+        elif category == 'large_phone':
+            tab_height = dp(36)
+            tab_font_size = dp(12)
+            close_btn_size = dp(22)
+        else:
+            tab_height = dp(30)
+            tab_font_size = dp(11)
+            close_btn_size = dp(20)
+
+        self.tab_bar = BoxLayout(size_hint_y=None, height=tab_height, spacing=dp(1),
+                                 padding=[dp(1), dp(1), dp(1), dp(1)])
         with self.tab_bar.canvas.before:
             Color(*theme.get('tab_bar_bg', theme['action_bar_bg']))
             self.tab_bg_rect = Rectangle(pos=self.tab_bar.pos, size=self.tab_bar.size)
         self.tab_bar.bind(pos=self._update_tab_bg, size=self._update_tab_bg)
+
         self.btn_left = Button(text='◀', font_name='SourceBold', size_hint_x=None, width=dp(20),
                                background_color=theme.get('tab_inactive_bg', theme['widget_bg']), background_normal='',
-                               background_down='', color=theme['text_color'], font_size=dp(10), bold=True)
+                               background_down='', color=theme['text_color'], font_size=tab_font_size, bold=True)
         self.btn_left.bind(on_release=lambda x: self._scroll_tabs(-1))
         self.tab_bar.add_widget(self.btn_left)
+
         self.tab_buttons_container = BoxLayout(spacing=dp(1), size_hint=(1, 1), padding=[dp(0.7), dp(2), dp(0.7), 0])
         self.tab_bar.add_widget(self.tab_buttons_container)
+
         self.btn_right = Button(text='▶', font_name='SourceBold', size_hint_x=None, width=dp(20),
                                 background_color=theme.get('tab_inactive_bg', theme['widget_bg']), background_normal='',
-                                background_down='', color=theme['text_color'], font_size=dp(10), bold=True)
+                                background_down='', color=theme['text_color'], font_size=tab_font_size, bold=True)
         self.btn_right.bind(on_release=lambda x: self._scroll_tabs(1))
         self.tab_bar.add_widget(self.btn_right)
+
         btn_add = Button(text='+', font_name='SourceBold', size_hint_x=None, width=dp(25),
                          background_color=theme.get('tab_add_btn_bg', theme['widget_bg']), background_normal='',
-                         background_down='', color=theme['text_color'], font_size=dp(17), bold=True)
+                         background_down='', color=theme['text_color'], font_size=tab_font_size + 6, bold=True)
         btn_add.bind(on_release=lambda x: self._on_add_tab())
         self.tab_bar.add_widget(btn_add)
+
         self._update_tab_bar()
         return self.tab_bar
 
@@ -4243,16 +4556,28 @@ class TabManager:
         self._update_tab_bar()
 
     def _on_add_tab(self):
+        # ВИБРАЦИЯ
+        if self.app and hasattr(self.app, 'vibrate_short'):
+            self.app.vibrate_short()
+
         editor = self.add_tab()
         if self.app:
             self.app._on_tab_changed(editor)
 
     def _on_tab_press(self, index):
+        # ВИБРАЦИЯ
+        if self.app and hasattr(self.app, 'vibrate_short'):
+            self.app.vibrate_short()
+
         editor = self.switch_to_tab(index)
         if editor and self.app:
             self.app._on_tab_changed(editor)
 
     def _on_tab_close(self, index):
+        # ВИБРАЦИЯ
+        if self.app and hasattr(self.app, 'vibrate_short'):
+            self.app.vibrate_short()
+
         if self.close_tab(index):
             editor = self.get_active_editor()
             if editor and self.app:
@@ -4383,6 +4708,7 @@ class TabManager:
         menu.auto_width = False
         menu.width = dp(100)
 
+        # ========== ПЕРЕИМЕНОВАТЬ ==========
         btn_rename = Button(
             text=tr.get('rename_tab', 'Переименовать'),
             size_hint_y=None, height=dp(30),
@@ -4393,6 +4719,7 @@ class TabManager:
         btn_rename.bind(on_release=lambda x: self._rename_tab(index, menu))
         menu.add_widget(btn_rename)
 
+        # ========== ДУБЛИРОВАТЬ ==========
         btn_duplicate = Button(
             text=tr.get('duplicate_tab', 'Дублировать'),
             size_hint_y=None, height=dp(30),
@@ -4400,10 +4727,11 @@ class TabManager:
             background_normal='', background_down='',
             color=theme['text_color'], font_size=dp(11)
         )
-        btn_duplicate.bind(on_release=lambda x: self._duplicate_tab(index, menu))
+        btn_duplicate.bind(on_release=lambda x: self._duplicate_tab(index, menu))  # ← ИСПРАВЛЕНО
         menu.add_widget(btn_duplicate)
 
         if len(self.tabs) > 1:
+            # ========== ЗАКРЫТЬ ДРУГИЕ ==========
             btn_close_others = Button(
                 text=tr.get('close_other_tabs', 'Закрыть другие'),
                 size_hint_y=None, height=dp(30),
@@ -4411,10 +4739,10 @@ class TabManager:
                 background_normal='', background_down='',
                 color=theme['text_color'], font_size=dp(11)
             )
-            btn_close_others.bind(on_release=lambda x: self._close_other_tabs(index, menu))
+            btn_close_others.bind(on_release=lambda x: self._close_other_tabs(index, menu))  # ← ИСПРАВЛЕНО
             menu.add_widget(btn_close_others)
 
-        if len(self.tabs) > 1:
+            # ========== ЗАКРЫТЬ ВСЕ ==========
             btn_close_all = Button(
                 text=tr.get('close_all_tabs', 'Закрыть все'),
                 size_hint_y=None, height=dp(30),
@@ -4422,7 +4750,7 @@ class TabManager:
                 background_normal='', background_down='',
                 color=theme['text_color'], font_size=dp(11)
             )
-            btn_close_all.bind(on_release=lambda x: self._close_all_tabs(menu))
+            btn_close_all.bind(on_release=lambda x: self._close_all_tabs(menu))  # ← ИСПРАВЛЕНО
             menu.add_widget(btn_close_all)
 
         try:
@@ -4435,11 +4763,19 @@ class TabManager:
                     pass
 
     def _rename_tab(self, index, menu):
+        # ВИБРАЦИЯ
+        if self.app and hasattr(self.app, 'vibrate_short'):
+            self.app.vibrate_short()
+
         menu.dismiss()
         if self.app:
             self.app._show_rename_tab_dialog(index)
 
     def _duplicate_tab(self, index, menu):
+        # ВИБРАЦИЯ
+        if self.app and hasattr(self.app, 'vibrate_short'):
+            self.app.vibrate_short()
+
         menu.dismiss()
         if 0 <= index < len(self.tabs):
             tab = self.tabs[index]
@@ -4462,6 +4798,10 @@ class TabManager:
                 self.app._on_tab_changed(editor)
 
     def _close_other_tabs(self, index, menu):
+        # ВИБРАЦИЯ
+        if self.app and hasattr(self.app, 'vibrate_short'):
+            self.app.vibrate_short()
+
         menu.dismiss()
         if 0 <= index < len(self.tabs):
             tab = self.tabs[index]
@@ -4476,6 +4816,10 @@ class TabManager:
                 self.app._on_tab_changed(tab['editor'])
 
     def _close_all_tabs(self, menu):
+        # ВИБРАЦИЯ
+        if self.app and hasattr(self.app, 'vibrate_short'):
+            self.app.vibrate_short()
+
         menu.dismiss()
         for tab in self.tabs:
             if hasattr(tab['editor'], 'cleanup'):
@@ -4591,9 +4935,24 @@ class AutoCompleteWidget(BoxLayout):
             return
         theme = ThemeManager.get_theme()
         for word in matches:
-            btn = Button(text=word, size_hint_x=None, width=len(word) * dp(7) + dp(10), height=dp(18), font_size=dp(13),
-                         font_name='SourceBold', background_color=theme['widget_bg'], background_normal='',
-                         background_down='', color=theme['text_color'])
+            # Адаптивные размеры для автодополнения
+            category = get_screen_category()
+            if category == 'tablet':
+                btn_height = dp(26)
+                btn_font_size = dp(16)
+                char_width = dp(9)
+            elif category == 'large_phone':
+                btn_height = dp(22)
+                btn_font_size = dp(14)
+                char_width = dp(8)
+            else:
+                btn_height = dp(18)
+                btn_font_size = dp(13)
+                char_width = dp(7)
+
+            btn = Button(text=word, size_hint_x=None, width=len(word) * char_width + dp(10), height=btn_height,
+                         font_size=btn_font_size, font_name='SourceBold', background_color=theme['widget_bg'],
+                         background_normal='', background_down='', color=theme['text_color'])
             btn.word = word
             btn.bind(on_release=self._on_suggestion_click)
             self.suggestions_box.add_widget(btn)
@@ -4658,10 +5017,47 @@ class PythonLearningApp(MDApp):
         self._ui_ready = False
         self._pending_operations = []
         self._cleanup_scheduled = False
+        self._code_running = False
+        self._file_operation_cancel = False
+        self._current_file_operation = None
+        # Инициализация файлового менеджера
+        self.file_manager = FileManager(self)
+
+        # === НОВОЕ: Инициализация пути для файлового менеджера ===
+        self.current_path = self.get_external_storage_path()
+
         ThemeManager.apply_saved_theme()
         ThemeManager.register(self)
         self._load_api_key_async()
         self.splash_finished = False
+
+    def get_external_storage_path(self):
+        """Возвращает путь к основному хранилищу на Android"""
+        if platform == 'android':
+            try:
+                # Импортируем только на Android
+                from android.storage import primary_external_storage_path
+                path = primary_external_storage_path()
+                if path and os.path.exists(path):
+                    return path
+            except Exception as e:
+                log_error(f"primary_external_storage_path failed: {e}")
+
+            # Fallback пути
+            fallback_paths = [
+                '/storage/emulated/0',
+                '/sdcard',
+                '/storage/emulated/0/Download',
+                '/storage/emulated/0/Documents'
+            ]
+            for p in fallback_paths:
+                if os.path.exists(p):
+                    return p
+
+            return '/storage/emulated/0'
+
+        # Для ПК / тестирования
+        return os.path.expanduser('~')
 
     def _load_language(self):
         try:
@@ -4682,32 +5078,51 @@ class PythonLearningApp(MDApp):
         return 'en'
 
     def build(self):
-        # Сохраняем основной интерфейс
         main_widget = self._create_main_widget()
-
-        # Создаём ScreenManager
         sm = ScreenManager()
 
-        # Анимированная заставка
-        from animated_splash import AnimatedSplashScreen
         splash = AnimatedSplashScreen(self, name='splash')
         sm.add_widget(splash)
 
-        # Главный экран
         main_screen = Screen(name='main')
         main_screen.add_widget(main_widget)
         sm.add_widget(main_screen)
 
-        # Стартуем с заставки
         sm.current = 'splash'
+
+        Window.bind(on_resize=self.on_resize)
+
+        # Только ОДИН РАЗ привязываем обработчик
+        if platform == 'android':
+            try:
+                from android import activity
+                activity.bind(on_activity_result=self.on_activity_result)
+            except Exception as e:
+                print(f"[ERROR] Failed to bind: {e}")
+
+        # ===== ПРОГРЕВ ПОДСВЕТКИ СИНТАКСИСА (убираем первый фриз) =====
+        def warmup_pygments(dt):
+            try:
+                from pygments.lexers import PythonLexer
+                from pygments.styles import get_style_by_name
+                # Загружаем стиль по умолчанию в фоне
+                default_style = ThemeManager.get_syntax_style()
+                get_style_by_name(default_style)
+                # Создаём временный лексер (он закеширует RegexLexer)
+                lexer = PythonLexer()
+                # Простейшая проверка, чтобы Pygments "прогрелся"
+                list(lexer.get_tokens("def foo(): pass"))
+                print("[OK] Pygments warmed up successfully")
+            except Exception as e:
+                print(f"[WARN] Pygments warmup failed: {e}")
+
+        # Запускаем прогрев через 0.5 секунды после старта приложения
+        Clock.schedule_once(warmup_pygments, 0.5)
+        # =============================================================
 
         return sm
 
     def _create_main_widget(self):
-        """Переносим сюда ВЕСЬ код из старого метода build()"""
-        # СКОПИРУЙТЕ СЮДА ВЕСЬ КОД ИЗ build()
-        # (от self._load_fonts() до return root_layout)
-
         self._load_fonts()
         self._request_android_permissions()
         self._request_storage_permission()
@@ -4721,8 +5136,8 @@ class PythonLearningApp(MDApp):
             self.bg_rect = Rectangle(size=main_layout.size, pos=main_layout.pos)
         main_layout.bind(size=self._update_bg, pos=self._update_bg)
 
-        self.top_bar = self._create_top_bar(theme)
-        main_layout.add_widget(self.top_bar)
+        self.top_section = self._create_top_bar(theme)
+        main_layout.add_widget(self.top_section)
 
         self.action_bar = MyActionBar(None)
         self.action_bar.app = self
@@ -4823,9 +5238,22 @@ class PythonLearningApp(MDApp):
 
         from kivymd.uix.label import MDIcon
         from kivy.uix.behaviors import ButtonBehavior
-        run_btn_size = dp(67)
-        margin_right = dp(8)
-        margin_bottom = dp(67)
+        category = get_screen_category()
+        if category == 'tablet':
+            run_btn_size = dp(90)
+            margin_right = dp(12)
+            margin_bottom = dp(90)
+            icon_size = dp(32)
+        elif category == 'large_phone':
+            run_btn_size = dp(78)
+            margin_right = dp(10)
+            margin_bottom = dp(78)
+            icon_size = dp(28)
+        else:
+            run_btn_size = dp(67)
+            margin_right = dp(8)
+            margin_bottom = dp(67)
+            icon_size = dp(23)
 
         class RunButton(ButtonBehavior, FloatLayout):
             pass
@@ -4847,7 +5275,8 @@ class PythonLearningApp(MDApp):
                 Ellipse(pos=btn.pos, size=btn.size)
 
         self.run_btn.bind(pos=draw_round_btn, size=draw_round_btn)
-        play_icon = MDIcon(icon='play', font_size=f"{dp(23)}sp", theme_text_color="Custom", text_color=icon_color,
+        play_icon = MDIcon(icon='play', font_size=f"{dp(icon_size)}sp", theme_text_color="Custom",
+                           text_color=icon_color,
                            pos_hint={"center_x": 0.5, "center_y": 0.5})
         self.run_btn.add_widget(play_icon)
 
@@ -4880,30 +5309,34 @@ class PythonLearningApp(MDApp):
     def on_splash_finished(self):
         """Вызывается, когда заставка завершила работу"""
         self.splash_finished = True
-        print("✅ Splash screen finished, app ready")
+        print("✓ Splash screen finished, app ready")
 
     def _request_android_permissions(self):
-        """Запрос разрешений на чистом Android."""
         try:
             from android.permissions import request_permissions, Permission
-            request_permissions([
-                Permission.READ_EXTERNAL_STORAGE,
-                Permission.WRITE_EXTERNAL_STORAGE
-            ])
+            permissions = [Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE]
+            # MANAGE_EXTERNAL_STORAGE может не быть, добавляем осторожно
+            if hasattr(Permission, 'MANAGE_EXTERNAL_STORAGE'):
+                permissions.append(Permission.MANAGE_EXTERNAL_STORAGE)
+            request_permissions(permissions)
         except:
             pass
 
     def on_start(self):
-        if not self.splash_finished:
-            # Если заставка ещё не завершена, ждём
-            Clock.schedule_once(lambda dt: self.on_start(), 0.5)
-            return
+        if platform == 'android':
+            from android.permissions import request_permissions, Permission
+            from kivy.clock import Clock
 
-        Window.clearcolor = ThemeManager.get_theme()['window_bg']
-        self._update_ui_language()
-        if self._restore_on_start:
-            Clock.schedule_once(self._restore_autosaved_code, 0.3)
-        Clock.schedule_once(lambda dt: self._preload_examples(), 0.5)
+            def perm_callback(permissions, results):
+                if all(results):
+                    Clock.schedule_once(lambda dt: self.refresh_file_list(), 1.0)
+                else:
+                    self.show_result_popup("Нет доступа к файлам!\nРазрешите в настройках приложения.")
+
+            request_permissions([
+                Permission.READ_EXTERNAL_STORAGE,
+                Permission.WRITE_EXTERNAL_STORAGE
+            ], perm_callback)
 
     def _fix_layout_on_start(self, dt):
         try:
@@ -4913,12 +5346,139 @@ class PythonLearningApp(MDApp):
         except:
             pass
 
+    def on_resize(self, window, width, height):
+        """Обработчик изменения размера окна (при повороте экрана)"""
+        Clock.schedule_once(lambda dt: self._refresh_ui_after_resize(), 0.1)
+
+    def _refresh_ui_after_resize(self):
+        """Обновляет UI после поворота экрана"""
+
+        reset_screen_cache()
+
+        # ========== ОБНОВЛЯЕМ ВЕРХНИЕ ПАНЕЛИ (Примеры и Меню) ==========
+        if hasattr(self, '_update_top_panels'):
+            self._update_top_panels()
+        elif hasattr(self, 'top_section') and hasattr(self, '_create_top_bar'):
+            # Если нет отдельного метода, пересоздаём панели
+            theme = ThemeManager.get_theme()
+            old_top = self.top_section
+            new_top = self._create_top_bar(theme)
+
+            if old_top and old_top.parent:
+                index = old_top.parent.children.index(old_top)
+                old_top.parent.remove_widget(old_top)
+                old_top.parent.add_widget(new_top, index=index)
+
+            self.top_section = new_top
+
+        # Обновляем спиннер, если он существует отдельно
+        if hasattr(self, 'spinner'):
+            try:
+                self.spinner.values = self._get_example_titles()
+                self.spinner.text = self.tr.get('examples', 'Примеры')
+                theme = ThemeManager.get_theme()
+                self.spinner.background_color = theme['spinner_bg']
+                self.spinner.color = theme['spinner_text']
+            except:
+                pass
+
+        # Обновляем кнопку меню
+        if hasattr(self, 'menu_button'):
+            try:
+                theme = ThemeManager.get_theme()
+                self.menu_button.background_color = theme.get('menu_btn_bg', theme['widget_bg'])
+                self.menu_button.color = theme.get('menu_btn_text', theme['text_color'])
+            except:
+                pass
+
+        # Обновляем кнопку запуска
+        if hasattr(self, 'run_btn'):
+            category = get_screen_category()
+            if category == 'tablet':
+                run_btn_size = dp(90)
+                margin_bottom = dp(90)
+                icon_size = dp(32)
+            elif category == 'large_phone':
+                run_btn_size = dp(78)
+                margin_bottom = dp(78)
+                icon_size = dp(28)
+            else:
+                run_btn_size = dp(67)
+                margin_bottom = dp(67)
+                icon_size = dp(23)
+
+            self.run_btn.size = (run_btn_size, run_btn_size)
+            for child in self.run_btn.children:
+                if hasattr(child, 'font_size'):
+                    child.font_size = f"{dp(icon_size)}sp"
+
+            # Обновляем позицию кнопки
+            if hasattr(self, 'root_layout'):
+                x = self.root_layout.width - run_btn_size - dp(12)
+                y = margin_bottom
+                self.run_btn.pos = (x, y)
+
+            # Восстанавливаем иконку на кнопке запуска
+            if hasattr(self, 'play_icon') and self.play_icon not in self.run_btn.children:
+                self.run_btn.add_widget(self.play_icon)
+            if hasattr(self, 'play_icon'):
+                self.play_icon.icon = 'play'
+
+        # Обновляем панель вкладок
+        if hasattr(self, 'tab_manager'):
+            self.tab_manager.max_visible = get_tab_count()
+            self.tab_manager._update_tab_bar()
+            theme = ThemeManager.get_theme()
+            self.tab_manager.update_tab_bar_theme(theme)
+
+        # Обновляем action_bar (панель с кнопками undo/redo и т.д.)
+        if hasattr(self, 'action_bar'):
+            try:
+                category = get_screen_category()
+                if category == 'tablet':
+                    self.action_bar.height = dp(52)
+                    self.action_bar.spacing = dp(18)
+                elif category == 'large_phone':
+                    self.action_bar.height = dp(45)
+                    self.action_bar.spacing = dp(15)
+                else:
+                    self.action_bar.height = dp(38)
+                    self.action_bar.spacing = dp(12)
+            except:
+                pass
+
+        # Обновляем symbol_bar (панель с символами)
+        if hasattr(self, 'symbol_bar'):
+            try:
+                category = get_screen_category()
+                if category == 'tablet':
+                    self.symbol_bar.height = dp(42)
+                    self.symbol_bar.spacing = dp(4)
+                elif category == 'large_phone':
+                    self.symbol_bar.height = dp(36)
+                    self.symbol_bar.spacing = dp(3)
+                else:
+                    self.symbol_bar.height = dp(30)
+                    self.symbol_bar.spacing = dp(2)
+            except:
+                pass
+
+        # Обновляем панель номеров строк
+        if hasattr(self, 'editor') and self.editor:
+            Clock.schedule_once(self.editor._force_line_panel_refresh, 0.2)
+            Clock.schedule_once(lambda dt: self.editor._update_line_panel(), 0.3)
+            Clock.schedule_once(lambda dt: self.editor._update_text_width(), 0.4)
+
     def on_pause(self):
         self.tab_manager.save_all_tabs()
         return True
 
     def on_resume(self):
-        pass
+        """Вызывается при возврате в приложение"""
+        reset_screen_cache()  # Сбросить кэш категории экрана
+        Clock.schedule_once(lambda dt: self._refresh_ui_after_resize(), 0.1)
+        Clock.schedule_once(lambda dt: self._restore_run_button(), 0.2)
+        return True
 
     def on_stop(self):
         self.tab_manager.save_all_tabs()
@@ -5118,6 +5678,16 @@ class PythonLearningApp(MDApp):
             self.top_bar_bg_rect.pos = instance.pos
             self.top_bar_bg_rect.size = instance.size
 
+    def _update_panel_bg(self, instance=None, value=None):
+        """Обновляет фон панели"""
+        if hasattr(self, 'panel_bg_rect'):
+            if instance:
+                self.panel_bg_rect.pos = instance.pos
+                self.panel_bg_rect.size = instance.size
+            else:
+                self.panel_bg_rect.pos = self.line_panel.pos
+                self.panel_bg_rect.size = self.line_panel.size
+
     def _on_main_touch_down(self, instance, touch):
         if hasattr(self, 'editor') and hasattr(self.editor, 'text_input'):
             editor = self.editor.text_input
@@ -5136,29 +5706,265 @@ class PythonLearningApp(MDApp):
             pass
 
     def _create_top_bar(self, theme):
-        top_bar = BoxLayout(size_hint_y=0.10, spacing=0, padding=[dp(3), dp(3), dp(3), dp(3)])
+        category = get_screen_category()
+
+        if category == 'tablet':
+            top_bar_height = 0.08
+            spinner_font = adaptive_sp(18)
+            menu_font = adaptive_sp(24)
+        elif category == 'large_phone':
+            top_bar_height = 0.09
+            spinner_font = adaptive_sp(16)
+            menu_font = adaptive_sp(22)
+        else:
+            top_bar_height = 0.10
+            spinner_font = adaptive_sp(14)
+            menu_font = adaptive_sp(20)
+
+        top_bar = BoxLayout(orientation='horizontal', size_hint_y=top_bar_height, spacing=dp(10),
+                            padding=[dp(5), dp(5), dp(5), dp(5)])
+
         with top_bar.canvas.before:
             Color(*theme.get('top_bar_bg', theme['widget_bg']))
             self.top_bar_bg_rect = Rectangle(pos=top_bar.pos, size=top_bar.size)
         top_bar.bind(pos=self._update_top_bar_bg, size=self._update_top_bar_bg)
-        self.spinner = ThemedSpinner(text=self.tr.get('examples', 'Examples'), values=self._get_example_titles(),
-                                     size_hint_x=0.70, background_color=theme['spinner_bg'], background_normal='',
-                                     background_down='', color=theme['spinner_text'], font_size=dp(18),
-                                     font_name='SourceBold', dropdown_bg=theme['spinner_dropdown_bg'],
-                                     dropdown_text_color=theme['spinner_dropdown_text'],
-                                     dropdown_selected_bg=theme['spinner_dropdown_selected_bg'])
+
+        # Spinner "Примеры" - слева
+        self.spinner = ThemedSpinner(
+            text=self.tr.get('examples', 'Examples'),
+            values=self._get_example_titles(),
+            size_hint_x=0.7,
+            background_color=theme['spinner_bg'],
+            background_normal='',
+            background_down='',
+            color=theme['spinner_text'],
+            font_size=spinner_font,
+            font_name='SourceBold',
+            dropdown_bg=theme['spinner_dropdown_bg'],
+            dropdown_text_color=theme['spinner_dropdown_text'],
+            dropdown_selected_bg=theme['spinner_dropdown_selected_bg']
+        )
         self.spinner.bind(text=self.load_example)
         self.spinner.bind(on_press=self._update_spinner_dropdown_colors)
-        menu_anchor = AnchorLayout(anchor_x='right', anchor_y='center', size_hint_x=0.15)
-        self.menu_button = Button(text='☰', font_name='DejaVuSans', size_hint=(None, 1), width=dp(60),
-                                  background_color=theme.get('menu_btn_bg', theme['widget_bg']), background_normal='',
-                                  background_down='', color=theme.get('menu_btn_text', theme['text_color']),
-                                  font_size=dp(23), bold=True)
-        self.menu_button.bind(on_release=self.show_context_menu)
-        menu_anchor.add_widget(self.menu_button)
         top_bar.add_widget(self.spinner)
-        top_bar.add_widget(menu_anchor)
+
+        # Кнопка меню - справа
+        self.menu_button = Button(
+            text='☰',
+            font_name='DejaVuSans',
+            size_hint_x=0.15,
+            background_color=theme.get('menu_btn_bg', theme['widget_bg']),
+            background_normal='',
+            background_down='',
+            color=theme.get('menu_btn_text', theme['text_color']),
+            font_size=menu_font,
+            bold=True
+        )
+        self.menu_button.bind(on_release=self.show_context_menu)
+        top_bar.add_widget(self.menu_button)
+
         return top_bar
+
+    def _create_examples_panel(self, theme, category):
+        """Создаёт панель с выпадающим списком примеров"""
+        # Определяем размеры панели
+        if category == 'tablet':
+            panel_height = dp(48)
+            spinner_font = adaptive_sp(20)
+            padding = [dp(10), dp(5), dp(10), dp(5)]
+        elif category == 'large_phone':
+            panel_height = dp(42)
+            spinner_font = adaptive_sp(18)
+            padding = [dp(8), dp(4), dp(8), dp(4)]
+        else:
+            panel_height = dp(38)
+            spinner_font = adaptive_sp(16)
+            padding = [dp(6), dp(3), dp(6), dp(3)]
+
+        # Контейнер панели
+        panel = BoxLayout(
+            orientation='horizontal',
+            size_hint_y=None,
+            height=panel_height,
+            padding=padding,
+            spacing=dp(5)
+        )
+
+        # Добавляем иконку слева (опционально)
+        from kivymd.uix.label import MDIcon
+        icon = MDIcon(
+            icon='code-tags',
+            font_size=f"{adaptive_sp(18)}sp",
+            theme_text_color="Custom",
+            text_color=theme.get('spinner_text', theme['text_color']),
+            size_hint_x=None,
+            width=adaptive_dp(30)
+        )
+        panel.add_widget(icon)
+
+        # Spinner (выпадающий список примеров)
+        self.spinner = ThemedSpinner(
+            text=self.tr.get('examples', 'Примеры'),
+            values=self._get_example_titles(),
+            size_hint_x=1.0,
+            background_color=theme['spinner_bg'],
+            background_normal='',
+            background_down='',
+            color=theme['spinner_text'],
+            font_size=spinner_font,
+            font_name='SourceBold',
+            dropdown_bg=theme['spinner_dropdown_bg'],
+            dropdown_text_color=theme['spinner_dropdown_text'],
+            dropdown_selected_bg=theme['spinner_dropdown_selected_bg']
+        )
+        self.spinner.bind(text=self.load_example)
+        self.spinner.bind(on_press=self._update_spinner_dropdown_colors)
+        panel.add_widget(self.spinner)
+
+        # Рамка для панели (опционально)
+        with panel.canvas.before:
+            Color(*theme.get('action_bar_bg', theme['widget_bg']))
+            Rectangle(pos=panel.pos, size=panel.size)
+            # Тонкая граница снизу
+            Color(*theme.get('separator_color', (0.5, 0.5, 0.5, 0.3)))
+            Line(rectangle=(panel.x, panel.y, panel.width, panel.height), width=dp(0.5))
+
+        panel.bind(pos=self._update_panel_bg, size=self._update_panel_bg)
+
+        return panel
+
+    def _create_menu_panel(self, theme, category):
+        """Создаёт панель с кнопкой меню (☰) и дополнительными кнопками"""
+        # Определяем размеры панели
+        if category == 'tablet':
+            panel_height = dp(38)
+            menu_font = adaptive_sp(32)
+            btn_width = dp(100)
+            padding = [dp(10), dp(3), dp(10), dp(3)]
+        elif category == 'large_phone':
+            panel_height = dp(32)
+            menu_font = adaptive_sp(28)
+            btn_width = dp(80)
+            padding = [dp(8), dp(2), dp(8), dp(2)]
+        else:
+            panel_height = dp(28)
+            menu_font = adaptive_sp(24)
+            btn_width = dp(70)
+            padding = [dp(6), dp(2), dp(6), dp(2)]
+
+        # Контейнер панели
+        panel = BoxLayout(
+            orientation='horizontal',
+            size_hint_y=None,
+            height=panel_height,
+            padding=padding,
+            spacing=dp(8)
+        )
+
+        # Добавляем "Растяжку" слева, чтобы кнопка меню была справа
+        spacer = Widget(size_hint_x=0.7)
+        panel.add_widget(spacer)
+
+        # Контейнер для кнопок справа
+        right_buttons = BoxLayout(
+            orientation='horizontal',
+            size_hint_x=0.3,
+            spacing=dp(5)
+        )
+
+        # Кнопка меню (☰)
+        self.menu_button = Button(
+            text='☰',
+            font_name='DejaVuSans',
+            size_hint=(1, 1),
+            background_color=theme.get('menu_btn_bg', theme['widget_bg']),
+            background_normal='',
+            background_down='',
+            color=theme.get('menu_btn_text', theme['text_color']),
+            font_size=menu_font,
+            bold=True
+        )
+        self.menu_button.bind(on_release=self.show_context_menu)
+        right_buttons.add_widget(self.menu_button)
+
+        # Дополнительная кнопка (например, быстрый доступ)
+        # Можно добавить позже при необходимости
+        # btn_quick = Button(...)
+        # right_buttons.add_widget(btn_quick)
+
+        panel.add_widget(right_buttons)
+
+        # Фон панели
+        with panel.canvas.before:
+            Color(*theme.get('action_bar_bg', theme['widget_bg']))
+            Rectangle(pos=panel.pos, size=panel.size)
+
+        panel.bind(pos=self._update_panel_bg, size=self._update_panel_bg)
+
+        return panel
+
+    def _restore_run_button(self):
+        """Восстанавливает иконку на кнопке запуска"""
+        print(f"[DEBUG] _restore_run_button called, run_btn={hasattr(self, 'run_btn')}")
+
+        if not hasattr(self, 'run_btn') or self.run_btn is None:
+            print("[DEBUG] run_btn не существует!")
+            return
+
+        print(f"[DEBUG] run_btn.children = {self.run_btn.children}")
+
+        # Очищаем и пересоздаём иконку принудительно
+        self.run_btn.clear_widgets()
+
+        from kivymd.uix.label import MDIcon
+        category = get_screen_category()
+        if category == 'tablet':
+            icon_size = dp(32)
+        elif category == 'large_phone':
+            icon_size = dp(28)
+        else:
+            icon_size = dp(23)
+
+        theme = ThemeManager.get_theme()
+        if theme.get('name') == 'dark':
+            icon_color = theme.get('run_btn_text', (0.18, 0.18, 0.19, 1))
+        else:
+            icon_color = theme.get('run_btn_text', (0, 0, 0, 1))
+
+        play_icon = MDIcon(
+            icon='play',
+            font_size=f"{icon_size}sp",
+            theme_text_color="Custom",
+            text_color=icon_color,
+            pos_hint={"center_x": 0.5, "center_y": 0.5}
+        )
+        self.run_btn.add_widget(play_icon)
+        self.run_btn.canvas.ask_update()
+        print("[DEBUG] Иконка добавлена")
+
+    def _update_top_panels(self):
+        """Обновляет обе верхние панели (при смене темы, языка или повороте)"""
+        if not hasattr(self, 'top_section') or self.top_section is None:
+            return
+
+        theme = ThemeManager.get_theme()
+
+        # Просто обновляем существующие виджеты, без пересоздания (БЕЗОПАСНЫЙ ВАРИАНТ)
+        if hasattr(self, 'spinner'):
+            try:
+                self.spinner.text = self.tr.get('examples', 'Примеры')
+                self.spinner.values = self._get_example_titles()
+                self.spinner.background_color = theme['spinner_bg']
+                self.spinner.color = theme['spinner_text']
+            except:
+                pass
+
+        if hasattr(self, 'menu_button'):
+            try:
+                self.menu_button.background_color = theme.get('menu_btn_bg', theme['widget_bg'])
+                self.menu_button.color = theme.get('menu_btn_text', theme['text_color'])
+            except:
+                pass
 
     def _get_example_titles(self):
         tr = self.tr
@@ -5175,6 +5981,10 @@ class PythonLearningApp(MDApp):
             self.spinner.dropdown_selected_bg = theme['spinner_dropdown_selected_bg']
 
     def show_context_menu(self, instance):
+        # ВИБРАЦИЯ
+        if hasattr(self, 'vibrate_short'):
+            self.vibrate_short()
+
         theme = ThemeManager.get_theme()
         if not hasattr(self, '_menu_dropdown') or not self._menu_dropdown:
             self._menu_dropdown = DropDown()
@@ -5197,6 +6007,9 @@ class PythonLearningApp(MDApp):
         Clock.schedule_once(open_dropdown, 0.05)
 
     def menu_action(self, button, func):
+        # ВИБРАЦИЯ
+        self.vibrate_short()
+
         if hasattr(self, '_menu_dropdown'):
             self._menu_dropdown.dismiss()
         func(None)
@@ -5204,6 +6017,8 @@ class PythonLearningApp(MDApp):
     def _create_menu_items(self, theme):
         self._menu_dropdown.clear_widgets()
         tr = self.tr
+
+        # Стилизация фона выпадающего меню
         if hasattr(self._menu_dropdown, 'container'):
             container = self._menu_dropdown.container
             container.canvas.before.clear()
@@ -5212,38 +6027,170 @@ class PythonLearningApp(MDApp):
                 Rectangle(pos=container.pos, size=container.size)
             container.bind(pos=lambda inst, val: self._update_menu_container_bg(inst, theme),
                            size=lambda inst, val: self._update_menu_container_bg(inst, theme))
-        menu_items = [('file-plus', tr['new'], self.new_file), ('folder-open', tr['load'], self.show_load_dialog),
-                      ('content-save', tr['save'], self.show_save_dialog),
-                      ('magnify', tr['find'], self.show_search_only_dialog),
-                      ('find-replace', tr['find_replace'], self.show_search_replace_dialog),
-                      ('history', tr['history'], self.show_history), ('code-tags', tr['format'], self.format_code),
-                      ('robot', tr['ai_assistant'], self.show_ai_assistant),
-                      ('cog', tr['settings'], self._open_settings_menu)]
+
+        # ========== СПИСОК ПУНКТОВ МЕНЮ ==========
+        menu_items = [
+            ('folder-open', tr['load'], self.show_load_dialog),
+            ('content-save', tr['save'], self.show_save_dialog),
+            ('magnify', tr['find'], self.show_search_only_dialog),
+            ('find-replace', tr['find_replace'], self.show_search_replace_dialog),
+            ('history', tr['history'], self.show_history),
+            ('code-tags', tr['format'], self.format_code),
+            # ('robot', tr['ai_assistant'], self.show_ai_assistant),
+            ('cog', tr['settings'], self._open_settings_menu),
+        ]
+
         from kivymd.uix.label import MDIcon
         from kivy.uix.behaviors import ButtonBehavior
         btn_bg = theme.get('action_bar_bg', theme['widget_bg'])
+
         for icon_name, text, func in menu_items:
             class MenuItem(ButtonBehavior, BoxLayout):
                 pass
 
-            box = MenuItem(orientation='horizontal', size_hint_y=None, height=dp(35), padding=(dp(8), 0), spacing=dp(5))
+            box = MenuItem(orientation='horizontal', size_hint_y=None, height=dp(35),
+                           padding=(dp(8), 0), spacing=dp(5))
+
             icon = MDIcon(icon=icon_name, font_size=f"{dp(10)}sp", theme_text_color="Custom",
                           text_color=theme['text_color'], size_hint_x=None, width=dp(17))
+
+            lbl = Label(text=text, color=theme['text_color'], font_size=dp(15),
+                        font_name='SourceBold', halign='left', valign='middle')
+
             box.add_widget(icon)
-            lbl = Label(text=text, color=theme['text_color'], font_size=dp(15), font_name='SourceBold', halign='left',
-                        valign='middle')
             box.add_widget(lbl)
+
+            # Фон и обводка
             box.canvas.before.clear()
             with box.canvas.before:
                 Color(*btn_bg)
                 Rectangle(pos=box.pos, size=box.size)
                 Color(btn_bg[0] + 0.08, btn_bg[1] + 0.08, btn_bg[2] + 0.08, 1)
                 Line(rectangle=(box.pos[0], box.pos[1], box.size[0], box.size[1]), width=dp(0.5))
+
             box.bind(pos=lambda inst, val, bg=btn_bg: self._update_menu_btn_bg(inst, bg),
                      size=lambda inst, val, bg=btn_bg: self._update_menu_btn_bg(inst, bg))
+
             box.bind(on_release=lambda bt, f=func: self.menu_action(bt, f))
             self._menu_dropdown.add_widget(box)
+
         self._menu_dropdown.width = dp(167)
+
+    def _load_saved_folder(self):
+        """Загружает сохранённую рабочую папку при старте"""
+        try:
+            settings = SettingsManager.load()
+            folder_uri = settings.get('working_folder_uri')
+            if folder_uri and not hasattr(self, '_saved_uris'):
+                self._saved_uris = {}
+            if folder_uri:
+                from jnius import autoclass
+                Uri = autoclass('android.net.Uri')
+                self._saved_uris['folder'] = Uri.parse(folder_uri)
+                print(f"[INFO] Loaded saved folder: {folder_uri}")
+        except Exception as e:
+            log_error(f"Load saved folder error: {e}")
+
+    def _select_working_folder(self, instance=None):
+        """Выбор рабочей папки для приложения"""
+        tr = self.tr
+
+        if platform == 'android':
+            # Показываем информационный диалог перед выбором
+            theme = ThemeManager.get_theme()
+            content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(8))
+
+            info_label = Label(
+                text=tr.get('working_folder', 'Working folder') + '\n\n' +
+                     "Android will ask you to select a folder.\n" +
+                     "The app will remember this folder.",
+                color=theme['text_color'],
+                font_size=dp(12),
+                font_name='SourceBold',
+                halign='center',
+                valign='middle',
+                size_hint_y=None,
+                height=dp(60)
+            )
+            info_label.bind(width=lambda inst, val: setattr(inst, 'text_size', (val, None)))
+            content.add_widget(info_label)
+
+            btn_layout = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(10))
+
+            btn_ok = Button(
+                text=tr.get('ok', 'OK'),
+                font_name='SourceBold',
+                background_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1)),
+                background_normal='', background_down='',
+                color=(1, 1, 1, 1),
+                font_size=dp(14)
+            )
+
+            btn_cancel = Button(
+                text=tr.get('cancel', 'Cancel'),
+                font_name='SourceBold',
+                background_color=theme['widget_bg'],
+                background_normal='', background_down='',
+                color=theme['text_color'],
+                font_size=dp(14)
+            )
+
+            btn_layout.add_widget(btn_ok)
+            btn_layout.add_widget(btn_cancel)
+            content.add_widget(btn_layout)
+
+            category = get_screen_category()
+            if category == 'tablet':
+                size_hint = (0.70, 0.30)
+            elif category == 'large_phone':
+                size_hint = (0.78, 0.32)
+            else:
+                size_hint = (0.85, 0.35)
+
+            popup = Popup(
+                title=tr.get('select_folder', 'Select Folder'),
+                title_color=theme['popup_title'],
+                background='',
+                background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)),
+                content=content,
+                size_hint=size_hint,
+                auto_dismiss=False
+            )
+
+            btn_ok.bind(on_release=lambda x: self._start_folder_picker(popup))
+            btn_cancel.bind(on_release=popup.dismiss)
+
+            popup.open()
+
+        else:
+            self.show_result_popup(tr.get('folder_select_error', 'Folder selection is only available on Android'))
+
+    def _start_folder_picker(self, info_popup):
+        """Запускает выбор папки после закрытия информационного диалога"""
+        info_popup.dismiss()
+        AndroidFilePicker.open_directory(self._on_folder_selected)
+
+    def _on_folder_selected(self, uri):
+        """Обработчик выбранной папки"""
+        tr = self.tr
+
+        if uri:
+            self._saved_uris['folder'] = uri
+
+            # Сохраняем URI в настройки
+            try:
+                settings = SettingsManager.load()
+                settings['working_folder_uri'] = str(uri)
+                SettingsManager.save(settings)
+            except:
+                pass
+
+            # Получаем имя папки для отображения
+            folder_name = get_file_name_from_uri(uri) if uri else "Unknown"
+
+            self.show_result_popup(f"{tr.get('working_folder_selected', '✓ Working folder selected')}: {folder_name}")
+        else:
+            self.show_result_popup(tr.get('folder_select_error', ' Folder selection error'))
 
     def _update_menu_container_bg(self, instance, theme):
         if not hasattr(instance, 'canvas'):
@@ -5264,6 +6211,32 @@ class PythonLearningApp(MDApp):
             Line(rectangle=(instance.pos[0], instance.pos[1], instance.size[0], instance.size[1]), width=dp(0.5))
 
     def _on_tab_changed(self, new_editor):
+        # Добавляем защиту от None
+        if not new_editor:
+            print("[WARN] _on_tab_changed called with None editor")
+            return
+
+        if not hasattr(self, 'editor_container') or not self.editor_container:
+            print("[WARN] editor_container not ready")
+            return
+
+        self.editor_container.clear_widgets()
+        self.editor = new_editor
+
+        if not hasattr(new_editor, 'text_input') or not new_editor.text_input:
+            print("[WARN] new_editor has no text_input")
+            return
+
+        self.code_input = new_editor.text_input
+        self.editor_container.add_widget(new_editor)
+
+        # Проверяем существование action_bar и symbol_bar
+        if hasattr(self, 'action_bar') and self.action_bar:
+            self.action_bar.text_input = self.code_input
+        if hasattr(self, 'symbol_bar') and self.symbol_bar:
+            self.symbol_bar.text_input = self.code_input
+        if hasattr(self, 'autocomplete') and self.autocomplete:
+            self.autocomplete.code_input = self.code_input
         self.editor_container.clear_widgets()
         self.editor = new_editor
         self.code_input = new_editor.text_input
@@ -5299,6 +6272,9 @@ class PythonLearningApp(MDApp):
 
         Clock.schedule_once(set_cursor_to_first_line, 0.5)
         Clock.schedule_once(set_cursor_to_first_line, 0.7)
+
+        # Восстанавливаем кнопку запуска
+        self._restore_run_button()
 
     def _autosave_tabs(self, dt=None):
         try:
@@ -5368,66 +6344,27 @@ class PythonLearningApp(MDApp):
         else:
             self.title = self._original_title
 
-    def new_file(self, instance=None):
-        if self._has_unsaved_changes and self.code_input.text.strip():
-            self._pending_new_file = True
-            self._show_new_file_confirmation()
-            return
-        self._do_new_file()
+    def cancel_file_operation(self):
+        """Отменяет текущую файловую операцию"""
+        tr = self.tr
+        if self._current_file_operation:
+            self._file_operation_cancel = True
+            operation_name = "загрузка" if self._current_file_operation == "load" else "сохранение"
+            self.show_result_popup(f"[i] {tr.get('cancelling', 'Cancelling')} {operation_name}...")
 
-    def _do_new_file(self):
-        self.code_input.text = ''
-        self._current_file = None
+    def _on_save_success(self, full_path, filename):
+        """Обработчик успешного сохранения (главный поток)"""
+        tr = self.tr
+        self._current_file = full_path
         self._has_unsaved_changes = False
         self._update_title_saved()
-        if hasattr(self, 'editor') and self.editor:
-            self.editor.original_lines = ['']
-            self.editor._update_line_panel()
+        self.tab_manager.set_active_file(full_path)
 
-        def set_cursor(dt):
-            try:
-                self.code_input.cursor = (0, 0)
-                self.code_input.focus = True
-            except:
-                pass
+        # Показываем успех с переводом
+        self.show_result_popup(f"[+] {tr.get('file_success_saved', 'Saved')}:\n{filename}")
 
-        Clock.schedule_once(set_cursor, 0.5)
-        Clock.schedule_once(set_cursor, 0.7)
-        self.show_result_popup(self.tr.get('new_file_created', '✓ New file created'))
-
-    def show_save_dialog(self, instance=None):
-        theme = ThemeManager.get_theme()
-        popup = Popup(title=self.tr.get('save', 'Save'), title_color=theme['popup_title'], background='',
-                      background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), size_hint=(0.92, 0.85),
-                      auto_dismiss=False)
-        content = FileDialog(callback=self.save_file, cancel=self.dismiss_popup, is_save=True, popup=popup)
-        popup.content = content
-        self._popup = popup
-        self._current_popup_type = 'save'
-        popup.open()
-
-    def save_file(self, path, filename):
-        tr = self.tr
-        try:
-            if not filename or not filename.strip():
-                filename = 'script.py'
-            if not filename.endswith('.py'):
-                filename += '.py'
-            filename = filename.strip()
-            invalid_chars = '<>:"/\\|?*'
-            for char in invalid_chars:
-                filename = filename.replace(char, '_')
-            if not os.path.exists(path):
-                os.makedirs(path, exist_ok=True)
-            full_path = os.path.join(path, filename)
-            if os.path.exists(full_path):
-                self._confirm_overwrite(full_path)
-                return
-            self._do_save_file(full_path, filename)
-        except PermissionError:
-            self.show_result_popup(tr.get('error_save', 'X Error') + ': ' + tr.get('no_permission', 'No permission'))
-        except Exception as e:
-            self.show_result_popup(tr.get('error_save', 'X Error') + f':\n{e}')
+        # Восстанавливаем кнопку запуска
+        self._restore_run_button()
 
     def _do_save_file(self, full_path, filename):
         try:
@@ -5442,63 +6379,254 @@ class PythonLearningApp(MDApp):
             self.show_result_popup(f"X {self.tr.get('error_save', 'Error')}:\n{e}")
 
     def show_load_dialog(self, instance=None):
-        theme = ThemeManager.get_theme()
-        popup = Popup(title=self.tr.get('open', 'Open'), title_color=theme['popup_title'], background='',
-                      background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), size_hint=(0.92, 0.85),
-                      auto_dismiss=False)
-        content = FileDialog(callback=self.load_file, cancel=self.dismiss_popup, is_save=False, popup=popup)
-        popup.content = content
-        self._popup = popup
-        self._current_popup_type = 'load'
-        popup.open()
+        """Открывает диалог выбора файла через новый файловый менеджер"""
+        browser = FileBrowserPopup(
+            self,
+            self.file_manager,
+            title=self.tr.get('open', 'Open file'),
+            mode="open"
+        )
+        browser.show(self._on_file_loaded)
 
-    def load_file(self, selection):
-        tr = self.tr
-        if not selection:
+    def _on_file_loaded(self, file_path, content):
+        """Обработчик загруженного файла"""
+        if not content:
             return
-        file_path = selection[0]
+
+        filename = os.path.basename(file_path)
+
+        # Создаём новую вкладку
+        if hasattr(self, 'tab_manager') and self.tab_manager:
+            editor = self.tab_manager.add_tab(title=filename, text=content)
+            self._on_tab_changed(editor)
+        else:
+            # Fallback
+            self.code_input.text = content
+            if hasattr(self, 'editor') and self.editor:
+                self.editor.original_lines = content.split('\n')
+                self.editor._update_line_panel()
+
+        self._current_file = file_path
+        self._has_unsaved_changes = False
+        self._update_title_saved()
+        self.show_result_popup(f"Loaded: {filename}")
+
+    def show_save_dialog(self, instance=None):
+        """Открывает диалог сохранения файла"""
+        suggested_name = "script.py"
+        if self._current_file:
+            suggested_name = os.path.basename(self._current_file)
+
+        browser = FileBrowserPopup(
+            self,
+            self.file_manager,
+            title=self.tr.get('save', 'Save file'),
+            mode="save"
+        )
+        browser.show(self._on_file_saved, save_filename=suggested_name)
+
+    def _on_file_saved(self, file_path, content):
+        """Обработчик сохранённого файла"""
+        filename = os.path.basename(file_path)
+
+        self._current_file = file_path
+        self._has_unsaved_changes = False
+        self._update_title_saved()
+
+        if hasattr(self, 'tab_manager') and self.tab_manager:
+            self.tab_manager.set_active_file(file_path)
+            self.tab_manager.set_active_title(filename)
+
+        self.show_result_popup(f"Saved: {filename}")
+
+    def _show_filename_input_dialog(self):
+        """Показывает диалог ввода имени файла перед сохранением"""
+        theme = ThemeManager.get_theme()
+        tr = self.tr
+
+        content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(8))
+
+        # Предлагаемое имя файла
+        suggested_name = "script.py"
+        if self._current_file and isinstance(self._current_file, str):
+            filename = os.path.basename(self._current_file)
+            if filename:
+                suggested_name = filename
+
+        # Поле ввода
+        filename_input = TextInput(
+            text=suggested_name,
+            multiline=False,
+            font_size=dp(14),
+            font_name='SourceBold',
+            background_color=theme['input_bg'],
+            foreground_color=theme['input_text'],
+            cursor_color=theme['input_cursor'],
+            hint_text="имя_файла.py",
+            size_hint_y=None,
+            height=dp(40),
+            padding=(dp(8), dp(8))
+        )
+        content.add_widget(filename_input)
+
+        # Информационная метка
+        info_label = Label(
+            text="Расширение .py добавится автоматически, если не указано другое",
+            color=theme['stats_text'],
+            font_size=dp(9),
+            font_name='SourceBold',
+            size_hint_y=None,
+            height=dp(20)
+        )
+        content.add_widget(info_label)
+
+        # Кнопки
+        btn_layout = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
+
+        popup = Popup(
+            title="Сохранить файл",
+            title_color=theme['popup_title'],
+            background='',
+            background_color=theme.get('popup_bg', (1, 1, 1, 1)),
+            content=content,
+            size_hint=(0.85, 0.40),
+            auto_dismiss=False
+        )
+
+        def on_save(btn):
+            name = filename_input.text.strip()
+            if not name:
+                name = "script"
+
+            # Убираем недопустимые символы
+            invalid_chars = '<>:"/\\|?*'
+            for char in invalid_chars:
+                name = name.replace(char, '_')
+
+            #  ДОБАВЛЯЕМ .py ТОЛЬКО ЕСЛИ НЕТ РАСШИРЕНИЯ
+            if '.' not in name:
+                name += '.py'
+
+            popup.dismiss()
+            self._start_saf_save(name)
+
+        def on_cancel(btn):
+            popup.dismiss()
+
+        # Стилизация кнопок
+        btn_save = Button(
+            text=tr.get('save', 'Сохранить'),
+            font_name='SourceBold',
+            background_color=(0.2, 0.5, 0.2, 1),
+            background_normal='',
+            background_down='',
+            color=(1, 1, 1, 1),
+            font_size=dp(12),
+            on_release=on_save
+        )
+
+        btn_cancel = Button(
+            text=tr.get('cancel', 'Отмена'),
+            font_name='SourceBold',
+            background_color=theme['widget_bg'],
+            background_normal='',
+            background_down='',
+            color=theme['text_color'],
+            font_size=dp(12),
+            on_release=on_cancel
+        )
+
+        btn_layout.add_widget(btn_cancel)
+        btn_layout.add_widget(btn_save)
+        content.add_widget(btn_layout)
+
+        # Фокус на поле ввода
+        Clock.schedule_once(lambda dt: setattr(filename_input, 'focus', True), 0.3)
+
+        popup.open()
+        self._popup = popup
+
+    def on_activity_result(self, request_code, result_code, intent):
+        """Обработка результатов системных диалогов Android (SAF) - через FileManager"""
+        if result_code != -1 or intent is None:
+            return
+
         try:
-            file_size = os.path.getsize(file_path)
-            if file_size > 1_000_000:
-                self._load_large_file(file_path, file_size)
+            uri = intent.getData()
+            if not uri:
                 return
-            content = self._read_file_content(file_path)
-            if content is None:
-                self.show_result_popup(tr.get('encoding_error', 'X Cannot determine encoding'))
+
+            # Выбор папки для рабочей директории
+            if request_code == 1004:
+                if hasattr(self, 'file_manager'):
+                    self.file_manager.save_working_folder(str(uri))
+                    self.show_result_popup("Working folder saved!")
                 return
-            self._apply_loaded_content(content, file_path)
-            filename = os.path.basename(file_path)
-            self.show_result_popup(tr.get('file_loaded', '✓ Loaded') + f':\n{filename}')
+
+            # Для загрузки и сохранения используем file_manager
+            if hasattr(self, 'file_manager'):
+                if request_code == 1001:  # Открытие файла
+                    self.file_manager.read_uri(uri, self._on_file_loaded)
+                elif request_code == 1002:  # Сохранение файла
+                    self.file_manager.write_uri(uri, self.code_input.text, self._on_save_complete)
+
         except Exception as e:
-            self.show_result_popup(tr.get('error_load', 'X Error') + f':\n{e}')
+            log_error(f"on_activity_result error: {e}")
+
+    def force_ui_update(self):
+        """Принудительно обновляет UI"""
+        Clock.schedule_once(lambda dt: None, 0.01)
+
+    def _show_loading_progress(self, message, file_size):
+        """Показывает прогресс загрузки большого файла"""
+        # ОБЯЗАТЕЛЬНО через Clock.schedule_once для UI в главном потоке
+        Clock.schedule_once(lambda dt: self.show_result_popup(message), 0)
 
     def _read_file_content(self, file_path):
-        with open(file_path, 'rb') as f:
-            raw_start = f.read(4)
-        if raw_start.startswith(b'\xef\xbb\xbf'):
-            encoding = 'utf-8-sig'
-        elif raw_start.startswith(b'\xff\xfe'):
-            encoding = 'utf-16-le'
-        elif raw_start.startswith(b'\xfe\xff'):
-            encoding = 'utf-16-be'
-        elif raw_start.startswith(b'\x00\x00\xfe\xff'):
-            encoding = 'utf-32-be'
-        elif raw_start.startswith(b'\xff\xfe\x00\x00'):
-            encoding = 'utf-32-le'
-        else:
-            encoding = 'utf-8'
+        """Читает содержимое файла с поддержкой отмены"""
         try:
-            with open(file_path, 'r', encoding=encoding) as f:
-                return f.read()
-        except UnicodeDecodeError:
-            pass
-        for encoding in ['cp1251', 'latin-1', 'windows-1251']:
-            try:
-                with open(file_path, 'r', encoding=encoding) as f:
-                    return f.read()
-            except UnicodeDecodeError:
-                continue
-        return None
+            with open(file_path, 'rb') as f:
+                # Определяем кодировку по BOM
+                raw_start = f.read(4)
+                f.seek(0)
+
+                if raw_start.startswith(b'\xef\xbb\xbf'):
+                    encoding = 'utf-8-sig'
+                elif raw_start.startswith(b'\xff\xfe'):
+                    encoding = 'utf-16-le'
+                elif raw_start.startswith(b'\xfe\xff'):
+                    encoding = 'utf-16-be'
+                elif raw_start.startswith(b'\x00\x00\xfe\xff'):
+                    encoding = 'utf-32-be'
+                elif raw_start.startswith(b'\xff\xfe\x00\x00'):
+                    encoding = 'utf-32-le'
+                else:
+                    encoding = 'utf-8'
+
+                # Читаем с проверкой отмены
+                try:
+                    content = f.read().decode(encoding)
+                    return content
+                except UnicodeDecodeError:
+                    pass
+
+                # Пробуем другие кодировки
+                for enc in ['cp1251', 'latin-1', 'windows-1251', 'koi8-r']:
+                    if self._file_operation_cancel:
+                        return None
+                    f.seek(0)
+                    try:
+                        return f.read().decode(enc)
+                    except UnicodeDecodeError:
+                        continue
+
+                # Fallback: заменяем ошибки
+                f.seek(0)
+                return f.read().decode('utf-8', errors='replace')
+
+        except Exception as e:
+            log_error(f"Read file error: {e}")
+            return None
 
     def _load_large_file(self, file_path, file_size):
         tr = self.tr
@@ -5548,9 +6676,17 @@ class PythonLearningApp(MDApp):
             Label(text=message, color=theme['text_color'], font_size=dp(11), font_name='SourceBold', halign='center',
                   size_hint_y=None, height=dp(33)))
         btn_layout = BoxLayout(size_hint_y=None, height=dp(23), spacing=dp(4))
+        category = get_screen_category()
+        if category == 'tablet':
+            size_hint = (0.70, 0.30)
+        elif category == 'large_phone':
+            size_hint = (0.78, 0.32)
+        else:
+            size_hint = (0.85, 0.35)
+
         popup = Popup(title=tr.get('exit_title', 'Exit'), title_color=theme['popup_title'], background='',
                       background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), content=content,
-                      size_hint=(0.85, 0.35), auto_dismiss=False)
+                      size_hint=size_hint, auto_dismiss=False)
         btn_save = Button(text=tr.get('save_and_exit', 'Save & Exit'), font_name='SourceBold',
                           background_color=(0.2, 0.5, 0.2, 1), background_normal='', background_down='',
                           color=theme['text_color'], font_size=dp(10), on_release=lambda x: self._on_exit_save(popup))
@@ -5579,52 +6715,45 @@ class PythonLearningApp(MDApp):
         popup.dismiss()
         self._force_exit()
 
-    def _show_new_file_confirmation(self):
-        tr = self.tr
-        theme = ThemeManager.get_theme()
-        content = BoxLayout(orientation='vertical', padding=dp(7), spacing=dp(5))
-        content.add_widget(Label(text=tr.get('new_file_confirm', 'Create without saving?'), color=theme['text_color'],
-                                 font_size=dp(11), font_name='SourceBold', halign='center', size_hint_y=None,
-                                 height=dp(27)))
-        btn_layout = BoxLayout(size_hint_y=None, height=dp(23), spacing=dp(4))
-        popup = Popup(title=tr.get('confirm_title', 'Confirm'), title_color=theme['popup_title'], background='',
-                      background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), content=content, size_hint=(0.8, 0.3),
-                      auto_dismiss=False)
-        btn_yes = Button(text=tr.get('yes', 'Yes'), font_name='SourceBold', background_color=(0.2, 0.5, 0.2, 1),
-                         background_normal='', background_down='', color=theme['text_color'], font_size=dp(10),
-                         on_release=lambda x: self._on_new_file_confirm(popup))
-        btn_no = Button(text=tr.get('no', 'No'), font_name='SourceBold', background_color=theme['widget_bg'],
-                        background_normal='', background_down='', color=theme['text_color'], font_size=dp(10),
-                        on_release=lambda x: popup.dismiss())
-        btn_layout.add_widget(btn_yes)
-        btn_layout.add_widget(btn_no)
-        content.add_widget(btn_layout)
-        popup.open()
-
-    def _on_new_file_confirm(self, popup):
-        popup.dismiss()
-        self._do_new_file()
-        self._pending_new_file = False
-
     def _confirm_overwrite(self, full_path):
         tr = self.tr
         theme = ThemeManager.get_theme()
         filename = os.path.basename(full_path)
+
         content = BoxLayout(orientation='vertical', padding=dp(7), spacing=dp(5))
         content.add_widget(Label(
-            text=f"{tr.get('file_exists', 'File')} '{filename}' {tr.get('already_exists', 'exists')}.\n{tr.get('overwrite_confirm', 'Overwrite?')}",
-            color=theme['text_color'], font_size=dp(11), font_name='SourceBold', halign='center', size_hint_y=None,
-            height=dp(27)))
+            text=f"{tr.get('file_exists', 'File')} '{filename}' {tr.get('already_exists', 'exists')}.\n{tr.get('overwrite_prompt', 'Overwrite?')}",
+            color=theme['text_color'], font_size=dp(11), font_name='SourceBold',
+            halign='center', size_hint_y=None, height=dp(27)))
+
         btn_layout = BoxLayout(size_hint_y=None, height=dp(23), spacing=dp(4))
-        popup = Popup(title=tr.get('confirm_title', 'Confirm'), title_color=theme['popup_title'], background='',
-                      background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), content=content,
-                      size_hint=(0.8, 0.35), auto_dismiss=False)
-        btn_yes = Button(text=tr.get('yes', 'Yes'), font_name='SourceBold', background_color=(0.2, 0.5, 0.2, 1),
-                         background_normal='', background_down='', color=theme['text_color'], font_size=dp(10),
-                         on_release=lambda x: self._on_overwrite_confirm(popup, full_path, filename))
-        btn_no = Button(text=tr.get('no', 'No'), font_name='SourceBold', background_color=theme['widget_bg'],
-                        background_normal='', background_down='', color=theme['text_color'], font_size=dp(10),
-                        on_release=lambda x: popup.dismiss())
+
+        popup = Popup(
+            title=tr.get('overwrite_title', 'Confirm'),
+            title_color=theme['popup_title'],
+            background='',
+            background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)),
+            content=content,
+            size_hint=(0.8, 0.35),
+            auto_dismiss=False
+        )
+
+        btn_yes = Button(
+            text=tr.get('overwrite_yes', 'Yes'),
+            font_name='SourceBold',
+            background_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1)),
+            background_normal='', background_down='',
+            color=theme['text_color'], font_size=dp(10),
+            on_release=lambda x: self._on_overwrite_confirm(popup, full_path, filename))
+
+        btn_no = Button(
+            text=tr.get('overwrite_no', 'No'),
+            font_name='SourceBold',
+            background_color=theme['widget_bg'],
+            background_normal='', background_down='',
+            color=theme['text_color'], font_size=dp(10),
+            on_release=lambda x: popup.dismiss())
+
         btn_layout.add_widget(btn_yes)
         btn_layout.add_widget(btn_no)
         content.add_widget(btn_layout)
@@ -5673,21 +6802,39 @@ class PythonLearningApp(MDApp):
         ThemeManager.unregister(self)
 
     def run_code(self, instance):
+        # Защита от повторного запуска
+        if hasattr(self, '_code_running') and self._code_running:
+            self.show_result_popup("Код уже выполняется...")
+            return
+
+        self.vibrate_short()
+
         tr = self.tr
+
+        # Проверка наличия редактора
+        if not hasattr(self, 'code_input') or not self.code_input:
+            self.show_result_popup("Ошибка: редактор не инициализирован")
+            return
+
         code = self.code_input.text
         if not code.strip():
             self.show_result_popup(tr.get('enter_code', 'X Enter code'))
             return
+
+        # Устанавливаем флаг, что код запущен
+        self._code_running = True
         instance.disabled = True
 
         def input_handler(prompt=""):
             return self._handle_input(prompt)
 
         def result_callback(result):
+            self._code_running = False  # Сбрасываем флаг
             instance.disabled = False
             self._show_result(result)
 
         if not self.code_executor.run(code, input_handler, result_callback):
+            self._code_running = False  # Сбрасываем флаг при ошибке
             instance.disabled = False
 
     def _handle_input(self, prompt=""):
@@ -5734,9 +6881,17 @@ class PythonLearningApp(MDApp):
             buttons.add_widget(btn_cancel)
             buttons.add_widget(btn_ok)
             content.add_widget(buttons)
+            category = get_screen_category()
+            if category == 'tablet':
+                size_hint = (0.80, 0.40)
+            elif category == 'large_phone':
+                size_hint = (0.88, 0.42)
+            else:
+                size_hint = (0.93, 0.45)
+
             popup = Popup(title=tr.get('input_title', 'Input'), title_color=theme['popup_title'], background='',
                           background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)), content=content,
-                          size_hint=(0.93, 0.45), pos_hint={'top': 0.95}, auto_dismiss=False)
+                          size_hint=size_hint, pos_hint={'top': 0.95}, auto_dismiss=False)
             popup.bind(on_dismiss=lambda *args: input_event.set())
             popup.open()
 
@@ -5751,12 +6906,20 @@ class PythonLearningApp(MDApp):
         return input_result[0] if input_result[0] is not None else ""
 
     def _show_result(self, result):
+        # Ограничиваем длину результата для производительности
+        MAX_RESULT_LENGTH = 50000
+        if len(result) > MAX_RESULT_LENGTH:
+            result = result[:MAX_RESULT_LENGTH] + "\n\n... (вывод обрезан)"
+
         self.history.append({"time": datetime.now().strftime("%H:%M:%S"), "out": result})
         if len(self.history) > self._max_history:
             self.history = self.history[-self._max_history:]
         self.show_result_popup(result)
 
     def load_example(self, spinner, text):
+        # ВИБРАЦИЯ
+        self.vibrate_short()
+
         if not text or text == self.tr.get('examples', 'Examples'):
             return
         examples = self._examples_cache if self._examples_cache else self._build_examples()
@@ -6239,11 +7402,21 @@ def пауза():
         self.dismiss_search()
         content = SearchOnlyPopup(self.code_input)
         container = FloatLayout()
-        search_box = BoxLayout(orientation='vertical', size_hint=(0.95, 0.15), pos_hint={'top': 1.0, 'center_x': 0.5})
+
+        # Адаптивный размер окна поиска
+        category = get_screen_category()
+        if category == 'tablet':
+            size_hint = (0.70, 0.20)
+        elif category == 'large_phone':
+            size_hint = (0.80, 0.18)
+        else:
+            size_hint = (0.95, 0.15)
+
+        search_box = BoxLayout(orientation='vertical', size_hint=size_hint, pos_hint={'top': 1.0, 'center_x': 0.5})
         search_box.add_widget(content)
         container.add_widget(search_box)
         popup = Popup(title='', title_color=(0, 0, 0, 0), separator_color=(0, 0, 0, 0), background='',
-                      background_color=(0, 0, 0, 0), content=container, size_hint=(1, 1), auto_dismiss=False,
+                      background_color=(0, 0, 0, 0), content=container, size_hint=size_hint, auto_dismiss=False,
                       overlay_color=(0, 0, 0, 0))
         content.set_popup(popup)
         content.open_popup()
@@ -6253,11 +7426,21 @@ def пауза():
         self.dismiss_search()
         content = SearchReplacePopup(self.code_input)
         container = FloatLayout()
-        replace_box = BoxLayout(orientation='vertical', size_hint=(0.95, 0.22), pos_hint={'top': 1.0, 'center_x': 0.5})
+
+        # Адаптивный размер окна поиска и замены
+        category = get_screen_category()
+        if category == 'tablet':
+            size_hint = (0.75, 0.30)
+        elif category == 'large_phone':
+            size_hint = (0.85, 0.26)
+        else:
+            size_hint = (0.95, 0.22)
+
+        replace_box = BoxLayout(orientation='vertical', size_hint=size_hint, pos_hint={'top': 1.0, 'center_x': 0.5})
         replace_box.add_widget(content)
         container.add_widget(replace_box)
         popup = Popup(title='', title_color=(0, 0, 0, 0), separator_color=(0, 0, 0, 0), background='',
-                      background_color=(0, 0, 0, 0), content=container, size_hint=(1, 1), auto_dismiss=False,
+                      background_color=(0, 0, 0, 0), content=container, size_hint=size_hint, auto_dismiss=False,
                       overlay_color=(0, 0, 0, 0))
         content.set_popup(popup)
         content.open_popup()
@@ -6466,6 +7649,7 @@ def пауза():
     def _update_ui_language(self):
         tr = self.tr
         self._examples_cache = None
+
         if hasattr(self, 'tab_manager'):
             # Переименовываем вкладки при смене языка
             for tab in self.tab_manager.tabs:
@@ -6482,12 +7666,18 @@ def пауза():
                     tab['title'] = new_title
             self.tab_manager._update_tab_bar()
 
+        # ========== ОБНОВЛЕНИЕ ВЕРХНИХ ПАНЕЛЕЙ ==========
+        if hasattr(self, '_update_top_panels'):
+            self._update_top_panels()  # ← ГЛАВНОЕ: обновляем обе панели
+
+        # Для обратной совместимости (если старый код)
         if hasattr(self, 'spinner'):
             try:
                 self.spinner.values = self._get_example_titles()
                 self.spinner.text = tr.get('examples', 'Examples')
             except:
                 pass
+
         if hasattr(self, 'action_bar'):
             try:
                 self.action_bar.action_keys = ['undo', 'redo', 'copy', 'paste', 'cut', 'sel_all', 'auto', 'key',
@@ -6498,16 +7688,27 @@ def пауза():
                     self.action_bar.button_container.add_widget(btn)
             except:
                 pass
+
         if hasattr(self, 'run_btn'):
             try:
                 self.run_btn.text = tr.get('run', '▶')
             except:
                 pass
+
         if hasattr(self, '_menu_dropdown'):
             try:
                 self._create_menu_items(ThemeManager.get_theme())
             except:
                 pass
+
+        # Обновляем заголовок меню (Settings) при смене языка
+        if hasattr(self, '_settings_menu') and self._settings_menu:
+            try:
+                # Пересоздаём меню настроек с новым языком
+                self._settings_menu = SettingsMenu(self)
+            except:
+                pass
+
         try:
             if self._has_unsaved_changes:
                 self._update_title_with_unsaved()
@@ -6523,6 +7724,9 @@ def пауза():
 
     def show_result_popup(self, result):
         """Показывает результат в всплывающем окне."""
+        # ВИБРАЦИЯ
+        self.vibrate_short()
+
         tr = self.tr
 
         if len(result) > 50000:
@@ -6566,6 +7770,9 @@ def пауза():
             on_release=lambda x: self._copy_result(result)
         )
 
+        # ВИБРАЦИЯ ДЛЯ КНОПКИ COPY
+        btn_copy.bind(on_press=lambda x: self.vibrate_short())
+
         btn_close = Button(
             text=tr.get('close', 'Close'),
             font_name='SourceBold',
@@ -6578,9 +7785,21 @@ def пауза():
             height=dp(33)
         )
 
+        # ВИБРАЦИЯ ДЛЯ КНОПКИ CLOSE
+        btn_close.bind(on_press=lambda x: self.vibrate_short())
+
         btn_layout.add_widget(btn_copy)
         btn_layout.add_widget(btn_close)
         content.add_widget(btn_layout)
+
+        # Адаптивный размер Popup
+        category = get_screen_category()
+        if category == 'tablet':
+            size_hint = (0.75, 0.70)
+        elif category == 'large_phone':
+            size_hint = (0.85, 0.76)
+        else:
+            size_hint = (0.90, 0.82)
 
         popup = ThemedPopup(
             title=tr.get('result_title', 'Result'),
@@ -6588,7 +7807,7 @@ def пауза():
             title_bg=theme.get('popup_title_bg', (0.188, 0.204, 0.251, 1)),
             title_color=theme['popup_title'],
             content=content,
-            size_hint=(0.90, 0.82),
+            size_hint=size_hint,  # <--- ИСПОЛЬЗУЕМ ПЕРЕМЕННУЮ
             auto_dismiss=False,
             separator_color=theme.get('popup_separator', (0.25, 0.25, 0.25, 1))
         )
@@ -6604,6 +7823,9 @@ def пауза():
         self.show_result_popup(self.tr.get('result_copied', '✓ Copied'))
 
     def dismiss_popup(self, *args):
+        # ВИБРАЦИЯ
+        self.vibrate_short()
+
         if self._popup:
             try:
                 if hasattr(self._popup, 'dismiss'):
@@ -6700,11 +7922,20 @@ def пауза():
         ctrl_pressed = modifier and 'ctrl' in modifier
         if ctrl_pressed:
             hotkeys = {115: self.show_save_dialog, 111: self.show_load_dialog, 102: self.show_search_only_dialog,
-                       114: self.run_code, 104: self.show_history, 110: self.new_file}
+                       114: self.run_code, 104: self.show_history}
             if key in hotkeys:
                 Clock.schedule_once(lambda dt, f=hotkeys[key]: f(None), 0)
                 return True
         return False
+
+    def vibrate_short(self):
+        """Вызывает короткую вибрацию устройства, если это возможно."""
+        try:
+            # Время вибрации в секундах, 0.02 = 100 миллисекунд
+            vibrator.vibrate(0.02)
+        except NotImplementedError:
+            # Тихая обработка ошибки, если функция не поддерживается (например, на ПК)
+            pass
 
 
 if __name__ == '__main__':
@@ -6718,3 +7949,5 @@ if __name__ == '__main__':
         except:
             pass
         raise
+
+
