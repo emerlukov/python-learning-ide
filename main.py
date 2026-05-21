@@ -587,6 +587,8 @@ TRANSLATIONS = {
         'up_level': 'Наверх',
         'no_access': 'Нет доступа',
         'no_permission': 'Нет прав',
+        'actions': 'Действия',
+        'error': 'Ошибка',
     },
     'en': {
         'no_code': 'No code to format',
@@ -798,6 +800,8 @@ TRANSLATIONS = {
         'up_level': 'Up',
         'no_access': 'No access',
         'no_permission': 'No permission',
+        'actions': 'Actions',
+        'error': 'Error',
     },
 }
 
@@ -5022,6 +5026,7 @@ class PythonLearningApp(MDApp):
         self._current_file_operation = None
         # Инициализация файлового менеджера
         self.file_manager = FileManager(self)
+        self._current_file_popup = None
 
         # === НОВОЕ: Инициализация пути для файлового менеджера ===
         self.current_path = self.get_external_storage_path()
@@ -5668,6 +5673,12 @@ class PythonLearningApp(MDApp):
         if hasattr(self, 'tab_manager'):
             self.tab_manager.update_tab_bar_theme(theme)
 
+        # Обновляем тему файлового менеджера, если он открыт
+        if hasattr(self, 'file_manager') and self.file_manager:
+            # Если есть открытый попап файлового менеджера, обновляем его
+            if hasattr(self, '_current_file_popup') and self._current_file_popup:
+                self._current_file_popup.update_theme()
+
     def _update_bg(self, instance, value):
         if hasattr(self, 'bg_rect'):
             self.bg_rect.size = instance.size
@@ -6076,122 +6087,6 @@ class PythonLearningApp(MDApp):
 
         self._menu_dropdown.width = dp(167)
 
-    def _load_saved_folder(self):
-        """Загружает сохранённую рабочую папку при старте"""
-        try:
-            settings = SettingsManager.load()
-            folder_uri = settings.get('working_folder_uri')
-            if folder_uri and not hasattr(self, '_saved_uris'):
-                self._saved_uris = {}
-            if folder_uri:
-                from jnius import autoclass
-                Uri = autoclass('android.net.Uri')
-                self._saved_uris['folder'] = Uri.parse(folder_uri)
-                print(f"[INFO] Loaded saved folder: {folder_uri}")
-        except Exception as e:
-            log_error(f"Load saved folder error: {e}")
-
-    def _select_working_folder(self, instance=None):
-        """Выбор рабочей папки для приложения"""
-        tr = self.tr
-
-        if platform == 'android':
-            # Показываем информационный диалог перед выбором
-            theme = ThemeManager.get_theme()
-            content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(8))
-
-            info_label = Label(
-                text=tr.get('working_folder', 'Working folder') + '\n\n' +
-                     "Android will ask you to select a folder.\n" +
-                     "The app will remember this folder.",
-                color=theme['text_color'],
-                font_size=dp(12),
-                font_name='SourceBold',
-                halign='center',
-                valign='middle',
-                size_hint_y=None,
-                height=dp(60)
-            )
-            info_label.bind(width=lambda inst, val: setattr(inst, 'text_size', (val, None)))
-            content.add_widget(info_label)
-
-            btn_layout = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(10))
-
-            btn_ok = Button(
-                text=tr.get('ok', 'OK'),
-                font_name='SourceBold',
-                background_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1)),
-                background_normal='', background_down='',
-                color=(1, 1, 1, 1),
-                font_size=dp(14)
-            )
-
-            btn_cancel = Button(
-                text=tr.get('cancel', 'Cancel'),
-                font_name='SourceBold',
-                background_color=theme['widget_bg'],
-                background_normal='', background_down='',
-                color=theme['text_color'],
-                font_size=dp(14)
-            )
-
-            btn_layout.add_widget(btn_ok)
-            btn_layout.add_widget(btn_cancel)
-            content.add_widget(btn_layout)
-
-            category = get_screen_category()
-            if category == 'tablet':
-                size_hint = (0.70, 0.30)
-            elif category == 'large_phone':
-                size_hint = (0.78, 0.32)
-            else:
-                size_hint = (0.85, 0.35)
-
-            popup = Popup(
-                title=tr.get('select_folder', 'Select Folder'),
-                title_color=theme['popup_title'],
-                background='',
-                background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)),
-                content=content,
-                size_hint=size_hint,
-                auto_dismiss=False
-            )
-
-            btn_ok.bind(on_release=lambda x: self._start_folder_picker(popup))
-            btn_cancel.bind(on_release=popup.dismiss)
-
-            popup.open()
-
-        else:
-            self.show_result_popup(tr.get('folder_select_error', 'Folder selection is only available on Android'))
-
-    def _start_folder_picker(self, info_popup):
-        """Запускает выбор папки после закрытия информационного диалога"""
-        info_popup.dismiss()
-        AndroidFilePicker.open_directory(self._on_folder_selected)
-
-    def _on_folder_selected(self, uri):
-        """Обработчик выбранной папки"""
-        tr = self.tr
-
-        if uri:
-            self._saved_uris['folder'] = uri
-
-            # Сохраняем URI в настройки
-            try:
-                settings = SettingsManager.load()
-                settings['working_folder_uri'] = str(uri)
-                SettingsManager.save(settings)
-            except:
-                pass
-
-            # Получаем имя папки для отображения
-            folder_name = get_file_name_from_uri(uri) if uri else "Unknown"
-
-            self.show_result_popup(f"{tr.get('working_folder_selected', '✓ Working folder selected')}: {folder_name}")
-        else:
-            self.show_result_popup(tr.get('folder_select_error', ' Folder selection error'))
-
     def _update_menu_container_bg(self, instance, theme):
         if not hasattr(instance, 'canvas'):
             return
@@ -6387,6 +6282,8 @@ class PythonLearningApp(MDApp):
             mode="open"
         )
         browser.show(self._on_file_loaded)
+        # Сохраняем ссылку для обновления темы
+        self._current_file_popup = browser
 
     def _on_file_loaded(self, file_path, content):
         """Обработчик загруженного файла"""
@@ -6424,6 +6321,8 @@ class PythonLearningApp(MDApp):
             mode="save"
         )
         browser.show(self._on_file_saved, save_filename=suggested_name)
+        # Сохраняем ссылку для обновления темы
+        self._current_file_popup = browser
 
     def _on_file_saved(self, file_path, content):
         """Обработчик сохранённого файла"""
@@ -6547,7 +6446,7 @@ class PythonLearningApp(MDApp):
         self._popup = popup
 
     def on_activity_result(self, request_code, result_code, intent):
-        """Обработка результатов системных диалогов Android (SAF) - через FileManager"""
+        """Обработка результатов системных диалогов Android (SAF)"""
         if result_code != -1 or intent is None:
             return
 
@@ -6558,17 +6457,14 @@ class PythonLearningApp(MDApp):
 
             # Выбор папки для рабочей директории
             if request_code == 1004:
-                if hasattr(self, 'file_manager'):
-                    self.file_manager.save_working_folder(str(uri))
-                    self.show_result_popup("Working folder saved!")
+                self.show_result_popup("Working folder selection is not supported in this version")
                 return
 
-            # Для загрузки и сохранения используем file_manager
-            if hasattr(self, 'file_manager'):
-                if request_code == 1001:  # Открытие файла
-                    self.file_manager.read_uri(uri, self._on_file_loaded)
-                elif request_code == 1002:  # Сохранение файла
-                    self.file_manager.write_uri(uri, self.code_input.text, self._on_save_complete)
+            # Для загрузки и сохранения используем существующие методы
+            if request_code == 1001:  # Открытие файла
+                self._read_file_from_uri(uri)  # Этот метод уже есть в main.py
+            elif request_code == 1002:  # Сохранение файла
+                self._save_file_to_uri(uri)  # Этот метод уже есть в main.py
 
         except Exception as e:
             log_error(f"on_activity_result error: {e}")
