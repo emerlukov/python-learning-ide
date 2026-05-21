@@ -7,6 +7,8 @@ from kivy.uix.popup import Popup
 from kivy.clock import Clock
 from kivy.metrics import dp
 from kivy.utils import platform
+from kivy.uix.behaviors import ButtonBehavior
+from kivy.graphics import Color, Rectangle
 
 from kivymd.uix.label import MDIcon
 from kivymd.uix.button import MDRectangleFlatButton, MDIconButton
@@ -14,11 +16,23 @@ from kivymd.uix.textfield import MDTextField
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.scrollview import MDScrollView
 
+# ====================== ИМПОРТ ТЕМ ======================
+try:
+    from main import DARK_THEME, LIGHT_THEME, ThemeManager
+except ImportError:
+    DARK_THEME = {'name': 'dark'}
+    LIGHT_THEME = {'name': 'light'}
+    ThemeManager = None
+
 # Расширения текстовых файлов
 TEXT_EXTENSIONS = {
     '.py', '.txt', '.md', '.json', '.xml', '.html', '.htm', '.css', '.js',
     '.csv', '.log', '.ini', '.yaml', '.yml', '.toml', '.env', '.gitignore'
 }
+
+
+class ClickableRow(ButtonBehavior, MDBoxLayout):
+    pass
 
 
 class FileNode:
@@ -169,23 +183,56 @@ class FileBrowserPopup:
         self.popup = None
         self.callback = None
         self._current_items = []
-        self._selected_path = None
-        self._last_touch_time = 0
-        self._last_touch_path = None
+        self._selected_item = None
         self._title = title or ("Open file" if mode == "open" else "Save file")
 
+    def _tr(self, key, fallback=""):
+        """Получает перевод из приложения"""
+        if hasattr(self.app, 'tr') and self.app.tr:
+            return self.app.tr.get(key, fallback)
+        return fallback
+
     def _get_theme(self):
+        """Надёжное получение текущей темы"""
         try:
-            from main import ThemeManager
-            return ThemeManager.get_theme()
+            if ThemeManager is not None:
+                theme = ThemeManager.get_theme()
+                if theme and isinstance(theme, dict) and 'name' in theme:
+                    return theme
+        except Exception as e:
+            print(f"[FileBrowser] ThemeManager error: {e}")
+
+        try:
+            if hasattr(self.app, 'current_theme_name'):
+                if self.app.current_theme_name == 'light':
+                    return LIGHT_THEME
         except:
-            return {
-                'text_color': (0, 0, 0, 1),
-                'widget_bg': (0.95, 0.95, 0.95, 1),
-                'app_bg': (1, 1, 1, 1),
-                'separator_color': (0.5, 0.5, 0.5, 0.3),
-                'btn_success_bg': (0.2, 0.5, 0.2, 1),
-            }
+            pass
+
+        return DARK_THEME
+
+    def apply_theme(self):
+        """Принудительное обновление темы попапа (вызывается из main.py при смене темы)"""
+        try:
+            theme = self._get_theme()
+
+            if self.popup:
+                # Обновляем цвета попапа
+                self.popup.background_color = theme.get('popup_bg', (1, 1, 1, 1))
+                self.popup.title_color = theme.get('popup_title', (0, 0, 0, 1))
+                self.popup.separator_color = theme.get('separator_color', (0.5, 0.5, 0.5, 1))
+
+            # Обновляем путь
+            if hasattr(self, 'path_label'):
+                self.path_label.color = theme.get('stats_text', (0.6, 0.6, 0.6, 1))
+
+            # Перерисовываем список файлов
+            self._refresh_list()
+
+            print(f"[FileBrowser] Theme updated to {theme.get('name', 'unknown')}")
+
+        except Exception as e:
+            print(f"[FileBrowser] apply_theme error: {e}")
 
     def show(self, callback, save_filename="script.py"):
         self.callback = callback
@@ -194,13 +241,23 @@ class FileBrowserPopup:
 
     def _show_browser(self):
         theme = self._get_theme()
+        text_color = theme.get('text_color', (0, 0, 0, 1))
+        tr = self._tr
 
         content = MDBoxLayout(orientation='vertical', padding=dp(5), spacing=dp(5))
+
+        # Устанавливаем фон
+        with content.canvas.before:
+            self._bg_color = Color(*theme.get('app_bg', (1, 1, 1, 1)))
+            self._bg_rect = Rectangle(pos=content.pos, size=content.size)
+        content.bind(pos=self._update_bg, size=self._update_bg)
 
         # Путь
         self.path_label = Label(
             text=self.fm.current_path,
             font_size=dp(10),
+            font_name='SourceBold',
+            color=theme.get('stats_text', (0.6, 0.6, 0.6, 1)),
             size_hint_y=None,
             height=dp(25),
             shorten=True,
@@ -216,7 +273,13 @@ class FileBrowserPopup:
         content.add_widget(self.file_list)
 
         # Кнопка "Наверх"
-        up_btn = MDRectangleFlatButton(text="Up", size_hint_y=None, height=dp(30))
+        up_btn = MDRectangleFlatButton(
+            text=tr('up_level', 'Up'),
+            size_hint_y=None,
+            height=dp(30),
+            line_color=theme.get('separator_color', (0.5, 0.5, 0.5, 0.5)),
+            text_color=text_color
+        )
         up_btn.bind(on_release=lambda x: self._go_up())
         content.add_widget(up_btn)
 
@@ -224,24 +287,31 @@ class FileBrowserPopup:
         if self.mode == "save":
             self.filename_input = MDTextField(
                 text=self.save_filename,
-                hint_text="File name...",
+                hint_text=tr('file_name', 'File name...'),
                 size_hint_y=None,
                 height=dp(45),
                 mode="rectangle"
             )
+            self.filename_input.line_color_normal = theme.get('separator_color', (0.5, 0.5, 0.5, 0.5))
+            self.filename_input.text_color = text_color
+            self.filename_input.hint_text_color = theme.get('stats_text', (0.5, 0.5, 0.5, 1))
             content.add_widget(self.filename_input)
 
         # Кнопки
         btn_layout = MDBoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
 
-        cancel_btn = MDRectangleFlatButton(text="Cancel")
+        cancel_btn = MDRectangleFlatButton(
+            text=tr('cancel', 'Cancel'),
+            line_color=theme.get('separator_color', (0.5, 0.5, 0.5, 0.5)),
+            text_color=text_color
+        )
         cancel_btn.bind(on_release=lambda x: self._dismiss())
 
-        action_text = "Save" if self.mode == "save" else "Open"
+        action_text = tr('save', 'Save') if self.mode == "save" else tr('open', 'Open')
         action_btn = MDRectangleFlatButton(
             text=action_text,
-            md_bg_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1)),
-            text_color=(1, 1, 1, 1)
+            text_color=(1, 1, 1, 1),
+            md_bg_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1))
         )
         action_btn.bind(on_release=lambda x: self._on_action())
 
@@ -251,6 +321,11 @@ class FileBrowserPopup:
 
         self.popup = Popup(
             title=self._title,
+            title_color=theme.get('popup_title', (0, 0, 0, 1)),
+            title_size=dp(14),
+            separator_color=theme.get('separator_color', (0.5, 0.5, 0.5, 1)),
+            background='',
+            background_color=theme.get('popup_bg', (1, 1, 1, 1)),
             content=content,
             size_hint=(0.92, 0.85),
             auto_dismiss=False
@@ -259,26 +334,39 @@ class FileBrowserPopup:
         self.popup.open()
         self._refresh_list()
 
+    def _update_bg(self, instance, value):
+        if hasattr(self, '_bg_rect'):
+            self._bg_rect.pos = instance.pos
+            self._bg_rect.size = instance.size
+
     def _go_up(self):
         if self.fm.go_up():
             self._refresh_list()
 
     def _refresh_list(self):
-        self.file_container.clear_widgets()
-        self.path_label.text = self.fm.current_path
+        if self.file_container:
+            self.file_container.clear_widgets()
+        if self.path_label:
+            self.path_label.text = self.fm.current_path
         self.fm.list_files(self._update_list)
 
     def _update_list(self, items, current_path, error):
+        if not self.file_container:
+            return
+
         self.file_container.clear_widgets()
         self.path_label.text = current_path
         self._current_items = items
 
         theme = self._get_theme()
         text_color = theme.get('text_color', (0, 0, 0, 1))
+        selected_bg = theme.get('btn_selected_file_bg', (0.3, 0.5, 0.3, 0.5))
+        widget_bg = theme.get('widget_bg', (0.95, 0.95, 0.95, 1))
+        tr = self._tr
 
         if error:
             self.file_container.add_widget(Label(
-                text=f"Error: {error}",
+                text=error,
                 size_hint_y=None,
                 height=dp(40),
                 color=(0.8, 0.2, 0.2, 1)
@@ -287,20 +375,34 @@ class FileBrowserPopup:
 
         if not items:
             self.file_container.add_widget(Label(
-                text="Empty folder",
+                text=tr('empty_folder', 'Empty folder'),
                 size_hint_y=None,
-                height=dp(50)
+                height=dp(50),
+                color=text_color
             ))
             return
 
         for item in items:
-            row = MDBoxLayout(
+            row = ClickableRow(
                 orientation='horizontal',
                 size_hint_y=None,
                 height=dp(44),
                 spacing=dp(8),
                 padding=[dp(8), dp(4), dp(8), dp(4)]
             )
+
+            # Фон строки
+            with row.canvas.before:
+                Color(*widget_bg)
+                row._bg_rect = Rectangle(pos=row.pos, size=row.size)
+            row.bind(pos=self._update_row_bg, size=self._update_row_bg)
+
+            # Подсветка выбранного файла
+            if self._selected_item == item.path:
+                with row.canvas.after:
+                    Color(*selected_bg)
+                    row._selected_rect = Rectangle(pos=row.pos, size=row.size)
+                row.bind(pos=self._update_selected_rect, size=self._update_selected_rect)
 
             icon = MDIcon(
                 icon=item.icon_name,
@@ -325,7 +427,7 @@ class FileBrowserPopup:
                 size_label = Label(
                     text=item.format_size(),
                     font_size=dp(9),
-                    color=(0.5, 0.5, 0.5, 1),
+                    color=theme.get('stats_text', (0.5, 0.5, 0.5, 1)),
                     size_hint_x=None,
                     width=dp(50),
                     halign='right'
@@ -336,45 +438,84 @@ class FileBrowserPopup:
                 icon='dots-vertical',
                 icon_size=dp(20),
                 size_hint_x=None,
-                width=dp(40)
+                width=dp(40),
+                theme_icon_color="Custom",
+                icon_color=text_color
             )
             menu_btn.bind(on_release=lambda btn, it=item: self._show_menu(btn, it))
             row.add_widget(menu_btn)
 
             if item.is_dir:
-                row.bind(on_touch_down=lambda touch, p=item.path: self._on_folder_click(touch, p))
+                row.bind(on_release=lambda x, p=item.path: self._open_folder(p))
             else:
-                row.bind(on_touch_down=lambda touch, p=item.path: self._on_file_click(touch, p))
+                row.bind(on_release=lambda x, p=item.path: self._select_file(p))
 
             self.file_container.add_widget(row)
 
+    def _update_row_bg(self, instance, value):
+        if hasattr(instance, '_bg_rect'):
+            instance._bg_rect.pos = instance.pos
+            instance._bg_rect.size = instance.size
+
+    def _update_selected_rect(self, instance, value):
+        if hasattr(instance, '_selected_rect'):
+            instance._selected_rect.pos = instance.pos
+            instance._selected_rect.size = instance.size
+
+    def _open_folder(self, path):
+        self.fm.navigate_to(path)
+        self._refresh_list()
+        self._selected_item = None
+
+    def _select_file(self, path):
+        self._selected_item = path
+        self._refresh_list()
+
     def _show_menu(self, button, item):
         theme = self._get_theme()
+        text_color = theme.get('text_color', (0, 0, 0, 1))
+        tr = self._tr
 
         content = MDBoxLayout(orientation='vertical', padding=dp(8), spacing=dp(5), size_hint_y=None)
         content.height = dp(130)
 
         if not item.is_dir:
-            btn_open = MDRectangleFlatButton(text="Open", size_hint_y=None, height=dp(40))
+            btn_open = MDRectangleFlatButton(
+                text=tr('open', 'Open'),
+                size_hint_y=None,
+                height=dp(40),
+                line_color=theme.get('separator_color', (0.5, 0.5, 0.5, 0.5)),
+                text_color=text_color
+            )
             btn_open.bind(on_release=lambda x: self._open_item(item))
             content.add_widget(btn_open)
 
-        btn_rename = MDRectangleFlatButton(text="Rename", size_hint_y=None, height=dp(40))
+        btn_rename = MDRectangleFlatButton(
+            text=tr('rename', 'Rename'),
+            size_hint_y=None,
+            height=dp(40),
+            line_color=theme.get('separator_color', (0.5, 0.5, 0.5, 0.5)),
+            text_color=text_color
+        )
         btn_rename.bind(on_release=lambda x: self._rename_item(item))
         content.add_widget(btn_rename)
 
         btn_delete = MDRectangleFlatButton(
-            text="Delete",
+            text=tr('delete', 'Delete'),
             size_hint_y=None,
             height=dp(40),
-            md_bg_color=(0.5, 0.2, 0.2, 1),
+            md_bg_color=theme.get('btn_danger_bg', (0.5, 0.2, 0.2, 1)),
             text_color=(1, 1, 1, 1)
         )
         btn_delete.bind(on_release=lambda x: self._delete_item(item))
         content.add_widget(btn_delete)
 
         menu_popup = Popup(
-            title="Actions",
+            title=tr('actions', 'Actions'),
+            title_color=theme.get('popup_title', (0, 0, 0, 1)),
+            separator_color=theme.get('separator_color', (0.5, 0.5, 0.5, 1)),
+            background='',
+            background_color=theme.get('popup_bg', (1, 1, 1, 1)),
             content=content,
             size_hint=(0.6, None),
             height=dp(190) if not item.is_dir else dp(150),
@@ -386,21 +527,44 @@ class FileBrowserPopup:
         if item.is_dir:
             self.fm.navigate_to(item.path)
             self._refresh_list()
+            self._selected_item = None
         else:
             self._load_and_close(item.path)
 
     def _rename_item(self, item):
         theme = self._get_theme()
+        text_color = theme.get('text_color', (0, 0, 0, 1))
+        tr = self._tr
 
         content = MDBoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
-        content.add_widget(Label(text=f"Rename: {item.name}"))
+        content.add_widget(Label(
+            text=f"{tr('rename', 'Rename')}: {item.name}",
+            color=text_color,
+            font_size=dp(12)
+        ))
 
-        name_input = MDTextField(text=item.name, size_hint_y=None, height=dp(45), mode="rectangle")
+        name_input = MDTextField(
+            text=item.name,
+            size_hint_y=None,
+            height=dp(45),
+            mode="rectangle"
+        )
+        name_input.line_color_normal = theme.get('separator_color', (0.5, 0.5, 0.5, 0.5))
+        name_input.text_color = text_color
         content.add_widget(name_input)
 
         btn_layout = MDBoxLayout(size_hint_y=None, height=dp(40), spacing=dp(10))
 
-        popup = Popup(title="Rename", content=content, size_hint=(0.8, 0.35), auto_dismiss=False)
+        popup = Popup(
+            title=tr('rename', 'Rename'),
+            title_color=theme.get('popup_title', (0, 0, 0, 1)),
+            separator_color=theme.get('separator_color', (0.5, 0.5, 0.5, 1)),
+            background='',
+            background_color=theme.get('popup_bg', (1, 1, 1, 1)),
+            content=content,
+            size_hint=(0.8, 0.35),
+            auto_dismiss=False
+        )
 
         def do_rename(btn):
             new_name = name_input.text.strip()
@@ -409,17 +573,25 @@ class FileBrowserPopup:
                     popup.dismiss()
                     if success:
                         self._refresh_list()
-                        self.app.show_result_popup(f"Renamed: {new_name}")
+                        self.app.show_result_popup(f"{tr('renamed', 'Renamed')}: {new_name}")
                     else:
-                        self.app.show_result_popup(f"Error: {error}")
+                        self.app.show_result_popup(f"{tr('error', 'Error')}: {error}")
 
                 self.fm.rename_file(item.path, new_name, callback)
             else:
                 popup.dismiss()
 
-        btn_ok = MDRectangleFlatButton(text="OK")
+        btn_ok = MDRectangleFlatButton(
+            text=tr('ok', 'OK'),
+            text_color=(1, 1, 1, 1),
+            md_bg_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1))
+        )
         btn_ok.bind(on_release=do_rename)
-        btn_cancel = MDRectangleFlatButton(text="Cancel")
+        btn_cancel = MDRectangleFlatButton(
+            text=tr('cancel', 'Cancel'),
+            line_color=theme.get('separator_color', (0.5, 0.5, 0.5, 0.5)),
+            text_color=text_color
+        )
         btn_cancel.bind(on_release=lambda x: popup.dismiss())
 
         btn_layout.add_widget(btn_cancel)
@@ -430,12 +602,35 @@ class FileBrowserPopup:
         Clock.schedule_once(lambda dt: setattr(name_input, 'focus', True), 0.3)
 
     def _delete_item(self, item):
+        theme = self._get_theme()
+        text_color = theme.get('text_color', (0, 0, 0, 1))
+        tr = self._tr
+
         content = MDBoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
-        content.add_widget(Label(text=f"Delete {item.name}?"))
+        content.add_widget(Label(
+            text=f"{tr('delete_confirm', 'Delete')} {item.name}?",
+            color=text_color,
+            font_size=dp(14)
+        ))
+        if not item.is_dir:
+            content.add_widget(Label(
+                text=tr('cannot_undo', 'This cannot be undone'),
+                color=(0.7, 0.2, 0.2, 1),
+                font_size=dp(10)
+            ))
 
         btn_layout = MDBoxLayout(size_hint_y=None, height=dp(40), spacing=dp(10))
 
-        popup = Popup(title="Confirm", content=content, size_hint=(0.7, 0.25), auto_dismiss=False)
+        popup = Popup(
+            title=tr('confirm', 'Confirm'),
+            title_color=theme.get('popup_title', (0, 0, 0, 1)),
+            separator_color=theme.get('separator_color', (0.5, 0.5, 0.5, 1)),
+            background='',
+            background_color=theme.get('popup_bg', (1, 1, 1, 1)),
+            content=content,
+            size_hint=(0.7, 0.25),
+            auto_dismiss=False
+        )
 
         def do_delete(btn):
             popup.dismiss()
@@ -443,15 +638,23 @@ class FileBrowserPopup:
             def callback(success, error):
                 if success:
                     self._refresh_list()
-                    self.app.show_result_popup(f"Deleted: {item.name}")
+                    self.app.show_result_popup(f"{tr('deleted', 'Deleted')}: {item.name}")
                 else:
-                    self.app.show_result_popup(f"Error: {error}")
+                    self.app.show_result_popup(f"{tr('error', 'Error')}: {error}")
 
             self.fm.delete_file(item.path, callback)
 
-        btn_delete = MDRectangleFlatButton(text="Delete", md_bg_color=(0.5, 0.2, 0.2, 1), text_color=(1, 1, 1, 1))
+        btn_delete = MDRectangleFlatButton(
+            text=tr('delete', 'Delete'),
+            text_color=(1, 1, 1, 1),
+            md_bg_color=theme.get('btn_danger_bg', (0.5, 0.2, 0.2, 1))
+        )
         btn_delete.bind(on_release=do_delete)
-        btn_cancel = MDRectangleFlatButton(text="Cancel")
+        btn_cancel = MDRectangleFlatButton(
+            text=tr('cancel', 'Cancel'),
+            line_color=theme.get('separator_color', (0.5, 0.5, 0.5, 0.5)),
+            text_color=text_color
+        )
         btn_cancel.bind(on_release=lambda x: popup.dismiss())
 
         btn_layout.add_widget(btn_cancel)
@@ -460,43 +663,7 @@ class FileBrowserPopup:
 
         popup.open()
 
-    def _on_folder_click(self, touch, path):
-        if not hasattr(touch, 'is_touch'):
-            return False
-
-        current_time = Clock.get_time()
-
-        if self._last_touch_path == path and (current_time - self._last_touch_time) < 0.3:
-            self.fm.navigate_to(path)
-            self._refresh_list()
-            self._last_touch_time = 0
-        else:
-            self._last_touch_time = current_time
-            self._last_touch_path = path
-            self._selected_path = path
-
-        return True
-
-    def _on_file_click(self, touch, path):
-        if not hasattr(touch, 'is_touch'):
-            return False
-
-        current_time = Clock.get_time()
-
-        if self._last_touch_path == path and (current_time - self._last_touch_time) < 0.3 and self.mode == "open":
-            self._load_and_close(path)
-            self._last_touch_time = 0
-        else:
-            self._last_touch_time = current_time
-            self._last_touch_path = path
-            self._selected_path = path
-
-        return True
-
     def _load_and_close(self, file_path):
-        filename = os.path.basename(file_path)
-        self.app.show_result_popup(f"Loading: {filename}...")
-
         def on_loaded(content, error):
             self._dismiss()
             if error:
@@ -507,6 +674,8 @@ class FileBrowserPopup:
         self.fm.read_file(file_path, on_loaded)
 
     def _on_action(self):
+        tr = self._tr
+
         if self.mode == "save":
             filename = self.filename_input.text.strip()
             if not filename:
@@ -524,27 +693,44 @@ class FileBrowserPopup:
             def on_saved(success, error):
                 self._dismiss()
                 if success:
-                    self.app.show_result_popup(f"Saved: {filename}")
+                    self.app.show_result_popup(f"{tr('saved', 'Saved')}: {filename}")
                     if self.callback:
                         self.callback(full_path, content)
                 else:
-                    self.app.show_result_popup(f"Error: {error}")
+                    self.app.show_result_popup(f"{tr('error', 'Error')}: {error}")
 
             self.fm.save_file(full_path, content, on_saved)
 
         else:
-            if self._selected_path:
-                self._load_and_close(self._selected_path)
+            if self._selected_item:
+                self._load_and_close(self._selected_item)
             else:
-                self.app.show_result_popup("Select a file (double click)")
+                self.app.show_result_popup(tr('select_file', 'Select a file first'))
 
     def _confirm_overwrite(self, full_path, content, filename):
+        theme = self._get_theme()
+        text_color = theme.get('text_color', (0, 0, 0, 1))
+        tr = self._tr
+
         content_box = MDBoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
-        content_box.add_widget(Label(text=f"File '{filename}' exists.\nOverwrite?"))
+        content_box.add_widget(Label(
+            text=f"{tr('file_exists', 'File')} '{filename}' {tr('already_exists', 'exists')}.\n{tr('overwrite_prompt', 'Overwrite?')}",
+            color=text_color,
+            halign='center'
+        ))
 
         btn_layout = MDBoxLayout(size_hint_y=None, height=dp(40), spacing=dp(10))
 
-        popup = Popup(title="Confirm", content=content_box, size_hint=(0.7, 0.25), auto_dismiss=False)
+        popup = Popup(
+            title=tr('confirm', 'Confirm'),
+            title_color=theme.get('popup_title', (0, 0, 0, 1)),
+            separator_color=theme.get('separator_color', (0.5, 0.5, 0.5, 1)),
+            background='',
+            background_color=theme.get('popup_bg', (1, 1, 1, 1)),
+            content=content_box,
+            size_hint=(0.7, 0.25),
+            auto_dismiss=False
+        )
 
         def on_yes(btn):
             popup.dismiss()
@@ -552,17 +738,25 @@ class FileBrowserPopup:
             def on_saved(success, error):
                 self._dismiss()
                 if success:
-                    self.app.show_result_popup(f"Saved: {filename}")
+                    self.app.show_result_popup(f"{tr('saved', 'Saved')}: {filename}")
                     if self.callback:
                         self.callback(full_path, content)
                 else:
-                    self.app.show_result_popup(f"Error: {error}")
+                    self.app.show_result_popup(f"{tr('error', 'Error')}: {error}")
 
             self.fm.save_file(full_path, content, on_saved)
 
-        btn_yes = MDRectangleFlatButton(text="Yes")
+        btn_yes = MDRectangleFlatButton(
+            text=tr('yes', 'Yes'),
+            text_color=(1, 1, 1, 1),
+            md_bg_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1))
+        )
         btn_yes.bind(on_release=on_yes)
-        btn_no = MDRectangleFlatButton(text="No")
+        btn_no = MDRectangleFlatButton(
+            text=tr('no', 'No'),
+            line_color=theme.get('separator_color', (0.5, 0.5, 0.5, 0.5)),
+            text_color=text_color
+        )
         btn_no.bind(on_release=lambda x: popup.dismiss())
 
         btn_layout.add_widget(btn_no)
