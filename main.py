@@ -2592,6 +2592,15 @@ class LineNumberTextInput(BoxLayout):
         self._undo_lock = False
         self._redraw_pending = False
         self._indent_guides_pending = False
+
+        # ДЛЯ ЗАЩИТЫ ОТ СЛУЧАЙНЫХ КАСАНИЙ ПРИ ПРОКРУТКЕ
+        self._touch_start_time = 0
+        self._touch_start_pos = (0, 0)
+        self._touch_moved = False
+        self._touch_scrolling = False
+        self._min_swipe_distance = dp(10)
+        self._click_delay = 0.2
+
         self._create_ui()
         self.apply_theme(ThemeManager.get_theme())
         Window.bind(on_keyboard=self._on_window_keyboard)
@@ -3172,16 +3181,61 @@ class LineNumberTextInput(BoxLayout):
             self._keyboard_visible = False
 
     def _on_touch_down(self, instance, touch):
+        """Обработка касания с защитой от случайных кликов при прокрутке"""
         if instance.collide_point(*touch.pos):
-            instance.focus = True
-            Clock.schedule_once(self._show_keyboard, 0.05)
-            Clock.schedule_once(self._show_keyboard, 0.1)
+            # Запоминаем начало касания
+            self._touch_start_time = time.time()
+            self._touch_start_pos = touch.pos
+            self._touch_moved = False
+            self._touch_scrolling = False
+
+            # Не устанавливаем фокус сразу, ждём
+            Clock.schedule_once(lambda dt: self._delayed_focus(instance, touch), 0.05)
             return False
         else:
             app = App.get_running_app()
             if app and hasattr(app, 'autocomplete'):
                 app.autocomplete.hide()
             return False
+
+    def _delayed_focus(self, instance, touch):
+        """Отложенная установка фокуса (если не было движения)"""
+        # Если палец уже убрали или было движение - не ставим фокус
+        if not hasattr(self, '_touch_moved') or self._touch_moved:
+            return
+
+        # Проверяем, не было ли движения
+        if hasattr(self, '_touch_start_pos') and hasattr(touch, 'pos'):
+            dx = abs(touch.pos[0] - self._touch_start_pos[0])
+            dy = abs(touch.pos[1] - self._touch_start_pos[1])
+            if dx > self._min_swipe_distance or dy > self._min_swipe_distance:
+                self._touch_moved = True
+                return
+
+        # Если всё ок - ставим фокус
+        instance.focus = True
+        Clock.schedule_once(self._show_keyboard, 0.05)
+        Clock.schedule_once(self._show_keyboard, 0.1)
+
+    def on_touch_up(self, touch):
+        """Обработка отпускания касания"""
+        # Сбрасываем флаги
+        self._touch_moved = False
+        self._touch_scrolling = False
+        return super().on_touch_up(touch)
+
+    def on_touch_move(self, touch):
+        """Обработка движения пальца (прокрутка)"""
+        if hasattr(self, '_touch_start_pos'):
+            dx = abs(touch.pos[0] - self._touch_start_pos[0])
+            dy = abs(touch.pos[1] - self._touch_start_pos[1])
+            if dx > self._min_swipe_distance or dy > self._min_swipe_distance:
+                self._touch_moved = True
+                self._touch_scrolling = True
+                # Если это прокрутка - убираем фокус
+                if hasattr(self, 'text_input') and self.text_input:
+                    self.text_input.focus = False
+        return super().on_touch_move(touch)
 
     def _show_keyboard(self, dt=None):
         try:
