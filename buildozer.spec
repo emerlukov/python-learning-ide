@@ -28,11 +28,17 @@ fullscreen = 0
 # ========== ANDROID НАСТРОЙКИ ==========
 android.api = 34
 android.minapi = 24
+android.targetapi = 33
 android.ndk_api = 24
 android.ndk = 25b
 android.archs = arm64-v8a
 
-android.permissions = INTERNET, VIBRATE
+android.manifest.extra_queries =
+    <intent>
+        <action android:name="android.intent.action.OPEN_DOCUMENT_TREE" />
+    </intent>
+
+android.permissions = INTERNET, VIBRATE, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, MANAGE_EXTERNAL_STORAGE
 android.enable_androidx = True
 android.accept_sdk_license = True
 android.statusbar_color = #FFFFFF
