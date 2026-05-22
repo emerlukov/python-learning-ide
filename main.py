@@ -5327,6 +5327,22 @@ class PythonLearningApp(MDApp):
         except:
             pass
 
+    def select_folder_via_saf(self):
+        """Открывает системный диалог выбора папки (SAF)"""
+        if platform != 'android':
+            return
+
+        try:
+            from jnius import autoclass, cast
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            Intent = autoclass('android.content.Intent')
+
+            intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+            current_activity = cast('android.app.Activity', PythonActivity.mActivity)
+            current_activity.startActivityForResult(intent, 1004)
+        except Exception as e:
+            self.show_result_popup(f"SAF error: {e}")
+
     def on_start(self):
         if platform == 'android':
             from android.permissions import request_permissions, Permission
@@ -6457,7 +6473,8 @@ class PythonLearningApp(MDApp):
 
             # Выбор папки для рабочей директории
             if request_code == 1004:
-                self.show_result_popup("Working folder selection is not supported in this version")
+                if uri:
+                    self.show_result_popup("Папка выбрана! Теперь можно открывать файлы через системный диалог.")
                 return
 
             # Для загрузки и сохранения используем существующие методы
