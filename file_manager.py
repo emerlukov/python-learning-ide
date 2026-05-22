@@ -1,4 +1,4 @@
-# file_manager.py - Файловый менеджер с сортировкой и локализацией
+# file_manager.py - Файловый менеджер с улучшенной чувствительностью
 
 import os
 import threading
@@ -26,7 +26,6 @@ except ImportError:
     ThemeManager = None
 
 # ====================== ГЛОБАЛЬНЫЕ КОНСТАНТЫ ======================
-# Расширения текстовых файлов
 TEXT_EXTENSIONS = {
     '.py', '.txt', '.md', '.json', '.xml', '.html', '.htm', '.css', '.js',
     '.csv', '.log', '.ini', '.yaml', '.yml', '.toml', '.env', '.gitignore',
@@ -36,14 +35,22 @@ TEXT_EXTENSIONS = {
     '.ts', '.scss', '.sass', '.less', '.coffee'
 }
 
-# Цвета
 PURPLE = (0.596, 0.486, 1.0, 1)
 PURPLE_LIGHT = (0.7, 0.6, 1.0, 0.3)
 SORT_ACTIVE = (0.8, 0.7, 1.0, 1)
 
+# Задержка для определения клика (секунды)
+CLICK_DELAY = 0.3
+# Минимальное движение для определения свайпа (пиксели)
+MIN_SWIPE_DISTANCE = dp(10)
+
 
 class ClickableRow(ButtonBehavior, MDBoxLayout):
-    pass
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.touch_start_time = 0
+        self.touch_start_pos = (0, 0)
+        self.touch_moved = False
 
 
 class FileNode:
@@ -80,16 +87,14 @@ class FileNode:
         return f"{size:.1f} GB"
 
     def format_date(self, tr):
-        """Возвращает отформатированную дату изменения с локализацией"""
         if self.mtime == 0:
             return ""
         from datetime import datetime
         dt = datetime.fromtimestamp(self.mtime)
-        return dt.strftime(f"%d.%m.%Y %H:%M")
+        return dt.strftime("%d.%m.%Y %H:%M")
 
 
 class SortManager:
-    """Управляет сортировкой файлов"""
     SORT_NAME = 'name'
     SORT_DATE = 'date'
     SORT_SIZE = 'size'
@@ -99,7 +104,6 @@ class SortManager:
         self.reverse = False
 
     def sort_items(self, folders, files):
-        """Сортирует папки и файлы по текущему критерию"""
         if self.current_sort == self.SORT_NAME:
             folders.sort(key=lambda x: x.name.lower(), reverse=self.reverse)
             files.sort(key=lambda x: x.name.lower(), reverse=self.reverse)
@@ -111,14 +115,6 @@ class SortManager:
             folders.sort(key=lambda x: 0, reverse=False)
 
         return folders + files
-
-    def get_sort_icon(self):
-        if self.current_sort == self.SORT_NAME:
-            return 'sort-alphabetical' + ('-descending' if self.reverse else '-ascending')
-        elif self.current_sort == self.SORT_DATE:
-            return 'calendar' + ('-descending' if self.reverse else '-ascending')
-        else:
-            return 'sort' + ('-descending' if self.reverse else '-ascending')
 
     def next_sort(self):
         if self.current_sort == self.SORT_NAME:
@@ -313,6 +309,8 @@ class FileBrowserPopup:
         self._title = title or ("Open file" if mode == "open" else "Save file")
         self._sort_type = 'name'
         self._sort_reverse = False
+        self._last_touch_time = 0
+        self._last_touch_path = None
 
     def _tr(self, key, fallback=""):
         if hasattr(self.app, 'tr') and self.app.tr:
@@ -347,7 +345,6 @@ class FileBrowserPopup:
             self._bg_rect = Rectangle(pos=content.pos, size=content.size)
         content.bind(pos=self._update_bg, size=self._update_bg)
 
-        # Путь
         self.path_label = Label(
             text=self.fm.current_path,
             font_size=dp(10),
@@ -364,7 +361,6 @@ class FileBrowserPopup:
         sort_bar = MDBoxLayout(orientation='horizontal', size_hint_y=None, height=dp(35), spacing=dp(5),
                                padding=[dp(5), dp(2)])
 
-        # Кнопка сортировки по имени
         self.sort_name_btn = MDRectangleFlatButton(
             text=tr('sort_by_name', 'By name'),
             size_hint_x=0.33,
@@ -374,7 +370,6 @@ class FileBrowserPopup:
         )
         self.sort_name_btn.bind(on_release=lambda x: self._apply_sort('name'))
 
-        # Кнопка сортировки по дате
         self.sort_date_btn = MDRectangleFlatButton(
             text=tr('sort_by_date', 'By date'),
             size_hint_x=0.33,
@@ -384,7 +379,6 @@ class FileBrowserPopup:
         )
         self.sort_date_btn.bind(on_release=lambda x: self._apply_sort('date'))
 
-        # Кнопка сортировки по размеру
         self.sort_size_btn = MDRectangleFlatButton(
             text=tr('sort_by_size', 'By size'),
             size_hint_x=0.33,
@@ -394,7 +388,6 @@ class FileBrowserPopup:
         )
         self.sort_size_btn.bind(on_release=lambda x: self._apply_sort('size'))
 
-        # Кнопка реверса
         self.sort_reverse_btn = MDIconButton(
             icon='arrow-up',
             icon_size=dp(20),
@@ -411,14 +404,12 @@ class FileBrowserPopup:
         sort_bar.add_widget(self.sort_reverse_btn)
         content.add_widget(sort_bar)
 
-        # Список файлов
         self.file_list = MDScrollView()
         self.file_container = MDBoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(1))
         self.file_container.bind(minimum_height=self.file_container.setter('height'))
         self.file_list.add_widget(self.file_container)
         content.add_widget(self.file_list)
 
-        # Индикатор загрузки
         self._loading_indicator = Label(
             text=tr('loading_in_progress', "Loading..."),
             font_size=dp(12),
@@ -427,7 +418,6 @@ class FileBrowserPopup:
             height=dp(40)
         )
 
-        # Кнопка "Наверх"
         up_btn = MDRectangleFlatButton(
             text=tr('up_level', 'Up'),
             size_hint_y=None,
@@ -438,7 +428,6 @@ class FileBrowserPopup:
         up_btn.bind(on_release=lambda x: self._go_up())
         content.add_widget(up_btn)
 
-        # Поле ввода имени (для сохранения)
         if self.mode == "save":
             self.filename_input = MDTextField(
                 text=self.save_filename,
@@ -452,7 +441,6 @@ class FileBrowserPopup:
             self.filename_input.hint_text_color = (0.6, 0.6, 0.6, 1)
             content.add_widget(self.filename_input)
 
-        # Кнопки
         btn_layout = MDBoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
 
         cancel_btn = MDRectangleFlatButton(
@@ -495,10 +483,6 @@ class FileBrowserPopup:
             self._bg_rect.size = instance.size
 
     def _apply_sort(self, sort_type):
-        """Применяет сортировку и обновляет список"""
-        tr = self._tr
-
-        # Обновляем стиль кнопок
         self.sort_name_btn.line_color = SORT_ACTIVE if sort_type == 'name' else PURPLE
         self.sort_name_btn.text_color = SORT_ACTIVE if sort_type == 'name' else PURPLE
         self.sort_date_btn.line_color = SORT_ACTIVE if sort_type == 'date' else PURPLE
@@ -510,7 +494,6 @@ class FileBrowserPopup:
         self._refresh_list()
 
     def _toggle_reverse(self):
-        """Инвертирует направление сортировки"""
         self._sort_reverse = not self._sort_reverse
         self.sort_reverse_btn.icon = 'arrow-down' if self._sort_reverse else 'arrow-up'
         self.fm.toggle_sort_direction()
@@ -583,7 +566,6 @@ class FileBrowserPopup:
                 row._selected_rect = Rectangle(pos=row.pos, size=row.size)
             row.bind(pos=self._update_selected_rect, size=self._update_selected_rect)
 
-        # Иконка
         icon = MDIcon(
             icon=item.icon_name,
             font_size=dp(22),
@@ -594,7 +576,6 @@ class FileBrowserPopup:
         )
         row.add_widget(icon)
 
-        # Информация
         info_layout = MDBoxLayout(orientation='vertical', size_hint_x=1, spacing=dp(2))
 
         name_label = Label(
@@ -606,7 +587,6 @@ class FileBrowserPopup:
         )
         info_layout.add_widget(name_label)
 
-        # Дополнительная информация
         if item.is_dir:
             sub_text = f"{tr('modified', 'Modified')}: {item.format_date(tr)}"
         else:
@@ -623,7 +603,6 @@ class FileBrowserPopup:
 
         row.add_widget(info_layout)
 
-        # Кнопка меню
         menu_btn = MDIconButton(
             icon='dots-vertical',
             icon_size=dp(20),
@@ -635,46 +614,75 @@ class FileBrowserPopup:
         menu_btn.bind(on_release=lambda btn, it=item: self._show_menu(btn, it))
         row.add_widget(menu_btn)
 
+        # Обработка касаний с защитой от случайных кликов
         if item.is_dir:
-            row.bind(on_release=lambda x, p=item.path: self._open_folder(p))
+            row.bind(on_touch_down=self._on_row_touch_down)
+            row.bind(on_touch_up=lambda touch, p=item.path, is_dir=True: self._on_row_touch_up(touch, p, is_dir))
         else:
-            row.bind(on_release=lambda x, p=item.path: self._select_file(p))
+            row.bind(on_touch_down=self._on_row_touch_down)
+            row.bind(on_touch_up=lambda touch, p=item.path, is_dir=False: self._on_row_touch_up(touch, p, is_dir))
 
         return row
 
-    def _update_selected_rect(self, instance, value):
-        if hasattr(instance, '_selected_rect'):
-            instance._selected_rect.pos = instance.pos
-            instance._selected_rect.size = instance.size
+    def _on_row_touch_down(self, instance, touch):
+        """Запоминаем начало касания"""
+        if not instance.collide_point(*touch.pos):
+            return False
+        instance.touch_start_time = time.time()
+        instance.touch_start_pos = touch.pos
+        instance.touch_moved = False
+        return True
 
-    def _open_folder(self, path):
-        self.fm.navigate_to(path)
-        self._refresh_list()
-        self._selected_item = None
+    def _on_row_touch_up(self, touch, path, is_dir):
+        """Обрабатываем отпускание касания"""
+        # Находим виджет, который вызвал событие
+        instance = self._find_widget_by_path(path)
+        if not instance:
+            return False
 
-    def _select_file(self, path):
-        self._selected_item = path
+        # Проверяем, было ли движение
+        if not instance.touch_moved:
+            # Проверяем, не двигался ли палец
+            dx = abs(touch.pos[0] - instance.touch_start_pos[0])
+            dy = abs(touch.pos[1] - instance.touch_start_pos[1])
+            if dx > MIN_SWIPE_DISTANCE or dy > MIN_SWIPE_DISTANCE:
+                return False
 
-        # Обновляем подсветку
-        if self.file_container:
-            for child in self.file_container.children:
-                if isinstance(child, ClickableRow):
-                    if hasattr(child, '_selected_rect'):
-                        child.canvas.before.remove(child._selected_rect)
-                        child._selected_rect = None
+        # Проверяем время касания
+        duration = time.time() - instance.touch_start_time
 
-                    if hasattr(child, 'children'):
-                        for widget in child.children:
-                            if isinstance(widget, MDBoxLayout):
-                                for sub_widget in widget.children:
-                                    if isinstance(sub_widget, Label) and sub_widget.text == os.path.basename(path):
-                                        with child.canvas.before:
-                                            Color(*PURPLE_LIGHT)
-                                            child._selected_rect = Rectangle(pos=child.pos, size=child.size)
-                                        child.bind(pos=self._update_selected_rect, size=self._update_selected_rect)
-                                        break
+        # Короткое касание (клик)
+        if duration < CLICK_DELAY:
+            if is_dir:
+                self._open_folder(path)
+            else:
+                self._select_file(path)
+        # Длинное касание (контекстное меню)
+        else:
+            # Находим item по пути для меню
+            for item in self._current_items:
+                if item.path == path:
+                    self._show_menu_for_item(item, instance)
+                    break
 
-    def _show_menu(self, button, item):
+        return True
+
+    def _find_widget_by_path(self, path):
+        """Находит виджет строки по пути файла"""
+        if not self.file_container:
+            return None
+        for child in self.file_container.children:
+            if isinstance(child, ClickableRow):
+                if hasattr(child, 'children'):
+                    for widget in child.children:
+                        if isinstance(widget, MDBoxLayout):
+                            for sub_widget in widget.children:
+                                if isinstance(sub_widget, Label) and sub_widget.text == os.path.basename(path):
+                                    return child
+        return None
+
+    def _show_menu_for_item(self, item, button):
+        """Показывает контекстное меню для элемента"""
         tr = self._tr
 
         content = MDBoxLayout(orientation='vertical', padding=dp(8), spacing=dp(5), size_hint_y=None)
@@ -723,6 +731,42 @@ class FileBrowserPopup:
             auto_dismiss=True
         )
         menu_popup.open()
+
+    def _update_selected_rect(self, instance, value):
+        if hasattr(instance, '_selected_rect'):
+            instance._selected_rect.pos = instance.pos
+            instance._selected_rect.size = instance.size
+
+    def _open_folder(self, path):
+        self.fm.navigate_to(path)
+        self._refresh_list()
+        self._selected_item = None
+
+    def _select_file(self, path):
+        self._selected_item = path
+
+        # Обновляем подсветку
+        if self.file_container:
+            for child in self.file_container.children:
+                if isinstance(child, ClickableRow):
+                    if hasattr(child, '_selected_rect'):
+                        child.canvas.before.remove(child._selected_rect)
+                        child._selected_rect = None
+
+                    if hasattr(child, 'children'):
+                        for widget in child.children:
+                            if isinstance(widget, MDBoxLayout):
+                                for sub_widget in widget.children:
+                                    if isinstance(sub_widget, Label) and sub_widget.text == os.path.basename(path):
+                                        with child.canvas.before:
+                                            Color(*PURPLE_LIGHT)
+                                            child._selected_rect = Rectangle(pos=child.pos, size=child.size)
+                                        child.bind(pos=self._update_selected_rect, size=self._update_selected_rect)
+                                        break
+
+    def _show_menu(self, button, item):
+        """Старый метод для совместимости"""
+        self._show_menu_for_item(item, button)
 
     def _open_item(self, item):
         if item.is_dir:
@@ -863,6 +907,8 @@ class FileBrowserPopup:
         popup.open()
 
     def _load_and_close(self, file_path):
+        """Загружает файл без лишних попапов"""
+
         def on_loaded(content, error):
             self._dismiss()
             if error:
@@ -889,9 +935,11 @@ class FileBrowserPopup:
                 self._confirm_overwrite(full_path, content, filename)
                 return
 
+            # Сохраняем без лишних попапов - только финальное сообщение
             def on_saved(success, error):
                 self._dismiss()
                 if success:
+                    # Только одно сообщение об успехе
                     self.app.show_result_popup(f"{tr('saved', 'Saved')}: {filename}")
                     if self.callback:
                         self.callback(full_path, content)
