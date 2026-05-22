@@ -1,5 +1,3 @@
-# file_manager.py - Файловый менеджер с поддержкой SAF для Android
-
 import os
 import threading
 from kivy.uix.label import Label
@@ -9,6 +7,8 @@ from kivy.metrics import dp
 from kivy.utils import platform
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.graphics import Color, Rectangle
+from functools import lru_cache
+import time
 
 from kivymd.uix.label import MDIcon
 from kivymd.uix.button import MDRectangleFlatButton, MDIconButton
@@ -36,6 +36,8 @@ class ClickableRow(ButtonBehavior, MDBoxLayout):
 
 
 class FileNode:
+    __slots__ = ('path', 'name', 'is_dir', 'size', 'extension')
+
     def __init__(self, path, is_dir=False, size=0, name=None):
         self.path = path
         self.name = name or os.path.basename(path)
@@ -71,13 +73,14 @@ class FileManager:
         self.app = app
         self.current_path = self._get_default_path()
         self._loading = False
-        # Для SAF на Android
         self._saf_enabled = False
         self._saf_root_uri = None
+        self._cache = {}  # Кэш содержимого папок
+        self._cache_time = {}  # Время кэширования
+        self._cache_ttl = 5  # Время жизни кэша в секундах
 
     def _get_default_path(self):
         if platform == 'android':
-            # На Android 11+ используем доступные пути
             paths = [
                 '/storage/emulated/0/Download',
                 '/storage/emulated/0/Documents',
@@ -91,13 +94,14 @@ class FileManager:
         return os.path.expanduser('~')
 
     def set_saf_root(self, uri):
-        """Устанавливает корневой URI для SAF доступа"""
         self._saf_root_uri = uri
         self._saf_enabled = True
 
     def navigate_to(self, path):
         if os.path.exists(path) and os.path.isdir(path):
             self.current_path = os.path.abspath(path)
+            # Очищаем кэш для этой папки при переходе
+            self._cache.pop(self.current_path, None)
             return True
         return False
 
@@ -105,13 +109,23 @@ class FileManager:
         parent = os.path.dirname(self.current_path)
         if parent and parent != self.current_path:
             self.current_path = parent
+            self._cache.pop(self.current_path, None)
             return True
         return False
 
-    def list_files(self, callback):
+    def list_files(self, callback, force_refresh=False):
         if self._loading:
-            callback([], self.current_path, "Loading...")
+            callback([], self.current_path, "Загрузка...")
             return
+
+        # Проверяем кэш
+        current_time = time.time()
+        if not force_refresh and self.current_path in self._cache:
+            cache_time = self._cache_time.get(self.current_path, 0)
+            if current_time - cache_time < self._cache_ttl:
+                items = self._cache[self.current_path]
+                Clock.schedule_once(lambda dt: callback(items, self.current_path, None))
+                return
 
         def load():
             self._loading = True
@@ -119,7 +133,9 @@ class FileManager:
             files = []
 
             try:
-                for item in os.listdir(self.current_path):
+                items = os.listdir(self.current_path)
+
+                for item in items:
                     if item.startswith('.'):
                         continue
 
@@ -128,7 +144,6 @@ class FileManager:
                         if os.path.isdir(full_path):
                             folders.append(FileNode(full_path, is_dir=True))
                         else:
-                            # Добавляем ВСЕ файлы, а не только текстовые
                             try:
                                 size = os.path.getsize(full_path)
                                 files.append(FileNode(full_path, is_dir=False, size=size))
@@ -137,12 +152,19 @@ class FileManager:
                     except (PermissionError, OSError):
                         continue
 
+                # Сортируем: папки первые, потом файлы
                 folders.sort(key=lambda x: x.name.lower())
                 files.sort(key=lambda x: x.name.lower())
-                Clock.schedule_once(lambda dt: callback(folders + files, self.current_path, None))
+                all_items = folders + files
+
+                # Сохраняем в кэш
+                self._cache[self.current_path] = all_items
+                self._cache_time[self.current_path] = time.time()
+
+                Clock.schedule_once(lambda dt: callback(all_items, self.current_path, None))
 
             except PermissionError:
-                Clock.schedule_once(lambda dt: callback([], self.current_path, "Нет доступа к папке"))
+                Clock.schedule_once(lambda dt: callback([], self.current_path, "Нет доступа"))
             except Exception as e:
                 Clock.schedule_once(lambda dt: callback([], self.current_path, str(e)))
             finally:
@@ -162,12 +184,12 @@ class FileManager:
                         return
                     except UnicodeDecodeError:
                         continue
-                # Если ничего не подошло
+                # Fallback
                 with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
                     content = f.read()
                 Clock.schedule_once(lambda dt: callback(content, None))
             except PermissionError:
-                Clock.schedule_once(lambda dt: callback(None, "Нет прав на чтение файла"))
+                Clock.schedule_once(lambda dt: callback(None, "Нет прав на чтение"))
             except Exception as e:
                 Clock.schedule_once(lambda dt: callback(None, str(e)))
 
@@ -179,6 +201,8 @@ class FileManager:
                 os.makedirs(os.path.dirname(file_path), exist_ok=True)
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(content)
+                # Очищаем кэш родительской папки
+                self._cache.pop(os.path.dirname(file_path), None)
                 Clock.schedule_once(lambda dt: callback(True, None))
             except PermissionError:
                 Clock.schedule_once(lambda dt: callback(False, "Нет прав на запись"))
@@ -191,6 +215,7 @@ class FileManager:
         def delete():
             try:
                 os.remove(file_path)
+                self._cache.pop(os.path.dirname(file_path), None)
                 Clock.schedule_once(lambda dt: callback(True, None))
             except Exception as e:
                 Clock.schedule_once(lambda dt: callback(False, str(e)))
@@ -202,6 +227,7 @@ class FileManager:
             try:
                 new_path = os.path.join(os.path.dirname(old_path), new_name)
                 os.rename(old_path, new_path)
+                self._cache.pop(os.path.dirname(old_path), None)
                 Clock.schedule_once(lambda dt: callback(True, new_path, None))
             except Exception as e:
                 Clock.schedule_once(lambda dt: callback(False, None, str(e)))
@@ -219,6 +245,7 @@ class FileBrowserPopup:
         self._current_items = []
         self._selected_item = None
         self._title = title or ("Open file" if mode == "open" else "Save file")
+        self._loading_indicator = None
 
     def _tr(self, key, fallback=""):
         if hasattr(self.app, 'tr') and self.app.tr:
@@ -231,7 +258,7 @@ class FileBrowserPopup:
                 theme = ThemeManager.get_theme()
                 if theme and isinstance(theme, dict) and 'name' in theme:
                     return theme
-        except Exception as e:
+        except:
             pass
         return DARK_THEME
 
@@ -273,6 +300,15 @@ class FileBrowserPopup:
         self.file_list.add_widget(self.file_container)
         content.add_widget(self.file_list)
 
+        # Индикатор загрузки
+        self._loading_indicator = Label(
+            text=tr('loading_in_progress', "Загрузка..."),
+            font_size=dp(12),
+            color=theme.get('stats_text', (0.6, 0.6, 0.6, 1)),
+            size_hint_y=None,
+            height=dp(40)
+        )
+
         # Кнопка "Наверх"
         up_btn = MDRectangleFlatButton(
             text=tr('up_level', 'Up'),
@@ -309,15 +345,15 @@ class FileBrowserPopup:
         cancel_btn.bind(on_release=lambda x: self._dismiss())
 
         action_text = tr('save', 'Save') if self.mode == "save" else tr('open', 'Open')
-        action_btn = MDRectangleFlatButton(
+        self.action_btn = MDRectangleFlatButton(
             text=action_text,
             text_color=(1, 1, 1, 1),
             md_bg_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1))
         )
-        action_btn.bind(on_release=lambda x: self._on_action())
+        self.action_btn.bind(on_release=lambda x: self._on_action())
 
         btn_layout.add_widget(cancel_btn)
-        btn_layout.add_widget(action_btn)
+        btn_layout.add_widget(self.action_btn)
         content.add_widget(btn_layout)
 
         self.popup = Popup(
@@ -347,6 +383,7 @@ class FileBrowserPopup:
     def _refresh_list(self):
         if self.file_container:
             self.file_container.clear_widgets()
+            self.file_container.add_widget(self._loading_indicator)
         if self.path_label:
             self.path_label.text = self.fm.current_path
         self.fm.list_files(self._update_list)
@@ -383,75 +420,87 @@ class FileBrowserPopup:
             ))
             return
 
-        for item in items:
-            row = ClickableRow(
-                orientation='horizontal',
-                size_hint_y=None,
-                height=dp(44),
-                spacing=dp(8),
-                padding=[dp(8), dp(4), dp(8), dp(4)]
-            )
+        # Добавляем виджеты партиями для плавности
+        def add_widgets(start_idx, batch_size=20):
+            end_idx = min(start_idx + batch_size, len(items))
+            for i in range(start_idx, end_idx):
+                item = items[i]
+                row = self._create_row(item, theme, text_color, selected_bg, widget_bg, tr)
+                self.file_container.add_widget(row)
+            if end_idx < len(items):
+                Clock.schedule_once(lambda dt: add_widgets(end_idx, batch_size), 0.01)
 
-            # Фон строки
-            with row.canvas.before:
-                Color(*widget_bg)
-                row._bg_rect = Rectangle(pos=row.pos, size=row.size)
-            row.bind(pos=self._update_row_bg, size=self._update_row_bg)
+        add_widgets(0, 20)
 
-            # Подсветка выбранного файла
-            if self._selected_item == item.path:
-                with row.canvas.after:
-                    Color(*selected_bg)
-                    row._selected_rect = Rectangle(pos=row.pos, size=row.size)
-                row.bind(pos=self._update_selected_rect, size=self._update_selected_rect)
+    def _create_row(self, item, theme, text_color, selected_bg, widget_bg, tr):
+        row = ClickableRow(
+            orientation='horizontal',
+            size_hint_y=None,
+            height=dp(44),
+            spacing=dp(8),
+            padding=[dp(8), dp(4), dp(8), dp(4)]
+        )
 
-            icon = MDIcon(
-                icon=item.icon_name,
-                font_size=dp(22),
-                theme_text_color="Custom",
-                text_color=text_color,
+        # Фон строки
+        with row.canvas.before:
+            Color(*widget_bg)
+            row._bg_rect = Rectangle(pos=row.pos, size=row.size)
+        row.bind(pos=self._update_row_bg, size=self._update_row_bg)
+
+        # Подсветка выбранного файла
+        if self._selected_item == item.path:
+            with row.canvas.after:
+                Color(*selected_bg)
+                row._selected_rect = Rectangle(pos=row.pos, size=row.size)
+            row.bind(pos=self._update_selected_rect, size=self._update_selected_rect)
+
+        icon = MDIcon(
+            icon=item.icon_name,
+            font_size=dp(22),
+            theme_text_color="Custom",
+            text_color=text_color,
+            size_hint_x=None,
+            width=dp(40)
+        )
+        row.add_widget(icon)
+
+        name_label = Label(
+            text=item.name,
+            font_size=dp(12),
+            color=text_color,
+            halign='left',
+            size_hint_x=1
+        )
+        row.add_widget(name_label)
+
+        if not item.is_dir and item.size > 0:
+            size_label = Label(
+                text=item.format_size(),
+                font_size=dp(9),
+                color=theme.get('stats_text', (0.5, 0.5, 0.5, 1)),
                 size_hint_x=None,
-                width=dp(40)
+                width=dp(50),
+                halign='right'
             )
-            row.add_widget(icon)
+            row.add_widget(size_label)
 
-            name_label = Label(
-                text=item.name,
-                font_size=dp(12),
-                color=text_color,
-                halign='left',
-                size_hint_x=1
-            )
-            row.add_widget(name_label)
+        menu_btn = MDIconButton(
+            icon='dots-vertical',
+            icon_size=dp(20),
+            size_hint_x=None,
+            width=dp(40),
+            theme_icon_color="Custom",
+            icon_color=text_color
+        )
+        menu_btn.bind(on_release=lambda btn, it=item: self._show_menu(btn, it))
+        row.add_widget(menu_btn)
 
-            if not item.is_dir and item.size > 0:
-                size_label = Label(
-                    text=item.format_size(),
-                    font_size=dp(9),
-                    color=theme.get('stats_text', (0.5, 0.5, 0.5, 1)),
-                    size_hint_x=None,
-                    width=dp(50),
-                    halign='right'
-                )
-                row.add_widget(size_label)
+        if item.is_dir:
+            row.bind(on_release=lambda x, p=item.path: self._open_folder(p))
+        else:
+            row.bind(on_release=lambda x, p=item.path: self._select_file(p))
 
-            menu_btn = MDIconButton(
-                icon='dots-vertical',
-                icon_size=dp(20),
-                size_hint_x=None,
-                width=dp(40),
-                theme_icon_color="Custom",
-                icon_color=text_color
-            )
-            menu_btn.bind(on_release=lambda btn, it=item: self._show_menu(btn, it))
-            row.add_widget(menu_btn)
-
-            if item.is_dir:
-                row.bind(on_release=lambda x, p=item.path: self._open_folder(p))
-            else:
-                row.bind(on_release=lambda x, p=item.path: self._select_file(p))
-
-            self.file_container.add_widget(row)
+        return row
 
     def _update_row_bg(self, instance, value):
         if hasattr(instance, '_bg_rect'):
