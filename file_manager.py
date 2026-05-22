@@ -1,4 +1,4 @@
-# file_manager.py - Полностью новый файловый менеджер
+# file_manager.py - Файловый менеджер с поддержкой SAF для Android
 
 import os
 import threading
@@ -36,9 +36,9 @@ class ClickableRow(ButtonBehavior, MDBoxLayout):
 
 
 class FileNode:
-    def __init__(self, path, is_dir=False, size=0):
+    def __init__(self, path, is_dir=False, size=0, name=None):
         self.path = path
-        self.name = os.path.basename(path)
+        self.name = name or os.path.basename(path)
         self.is_dir = is_dir
         self.size = size
         self.extension = os.path.splitext(self.name)[1].lower() if not is_dir else ''
@@ -71,11 +71,29 @@ class FileManager:
         self.app = app
         self.current_path = self._get_default_path()
         self._loading = False
+        # Для SAF на Android
+        self._saf_enabled = False
+        self._saf_root_uri = None
 
     def _get_default_path(self):
         if platform == 'android':
-            return '/storage/emulated/0/Documents'
+            # На Android 11+ используем доступные пути
+            paths = [
+                '/storage/emulated/0/Download',
+                '/storage/emulated/0/Documents',
+                '/storage/emulated/0',
+                '/sdcard'
+            ]
+            for p in paths:
+                if os.path.exists(p) and os.access(p, os.R_OK):
+                    return p
+            return '/storage/emulated/0'
         return os.path.expanduser('~')
+
+    def set_saf_root(self, uri):
+        """Устанавливает корневой URI для SAF доступа"""
+        self._saf_root_uri = uri
+        self._saf_enabled = True
 
     def navigate_to(self, path):
         if os.path.exists(path) and os.path.isdir(path):
@@ -111,10 +129,20 @@ class FileManager:
                             folders.append(FileNode(full_path, is_dir=True))
                         else:
                             ext = os.path.splitext(item)[1].lower()
-                            if ext in TEXT_EXTENSIONS:
+                            # Показываем ВСЕ файлы, не только текстовые
+                            # Но для нетекстовых показываем иконку файла
+                            try:
                                 size = os.path.getsize(full_path)
-                                files.append(FileNode(full_path, is_dir=False, size=size))
-                    except:
+                                # Проверяем, можно ли прочитать файл
+                                if os.access(full_path, os.R_OK):
+                                    files.append(FileNode(full_path, is_dir=False, size=size))
+                                else:
+                                    # Файл есть, но нет прав на чтение
+                                    files.append(FileNode(full_path, is_dir=False, size=size))
+                            except (PermissionError, OSError):
+                                # Файл существует, но не можем получить размер
+                                files.append(FileNode(full_path, is_dir=False, size=0))
+                    except (PermissionError, OSError):
                         continue
 
                 folders.sort(key=lambda x: x.name.lower())
@@ -122,7 +150,7 @@ class FileManager:
                 Clock.schedule_once(lambda dt: callback(folders + files, self.current_path, None))
 
             except PermissionError:
-                Clock.schedule_once(lambda dt: callback([], self.current_path, "Нет доступа"))
+                Clock.schedule_once(lambda dt: callback([], self.current_path, "Нет доступа к папке"))
             except Exception as e:
                 Clock.schedule_once(lambda dt: callback([], self.current_path, str(e)))
             finally:
@@ -133,9 +161,21 @@ class FileManager:
     def read_file(self, file_path, callback):
         def read():
             try:
+                # Пробуем разные кодировки
+                for encoding in ['utf-8', 'utf-8-sig', 'cp1251', 'latin-1']:
+                    try:
+                        with open(file_path, 'r', encoding=encoding, errors='replace') as f:
+                            content = f.read()
+                        Clock.schedule_once(lambda dt: callback(content, None))
+                        return
+                    except UnicodeDecodeError:
+                        continue
+                # Если ничего не подошло
                 with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
                     content = f.read()
                 Clock.schedule_once(lambda dt: callback(content, None))
+            except PermissionError:
+                Clock.schedule_once(lambda dt: callback(None, "Нет прав на чтение файла"))
             except Exception as e:
                 Clock.schedule_once(lambda dt: callback(None, str(e)))
 
@@ -148,6 +188,8 @@ class FileManager:
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(content)
                 Clock.schedule_once(lambda dt: callback(True, None))
+            except PermissionError:
+                Clock.schedule_once(lambda dt: callback(False, "Нет прав на запись"))
             except Exception as e:
                 Clock.schedule_once(lambda dt: callback(False, str(e)))
 
@@ -187,52 +229,19 @@ class FileBrowserPopup:
         self._title = title or ("Open file" if mode == "open" else "Save file")
 
     def _tr(self, key, fallback=""):
-        """Получает перевод из приложения"""
         if hasattr(self.app, 'tr') and self.app.tr:
             return self.app.tr.get(key, fallback)
         return fallback
 
     def _get_theme(self):
-        """Надёжное получение текущей темы"""
         try:
             if ThemeManager is not None:
                 theme = ThemeManager.get_theme()
                 if theme and isinstance(theme, dict) and 'name' in theme:
                     return theme
         except Exception as e:
-            print(f"[FileBrowser] ThemeManager error: {e}")
-
-        try:
-            if hasattr(self.app, 'current_theme_name'):
-                if self.app.current_theme_name == 'light':
-                    return LIGHT_THEME
-        except:
             pass
-
         return DARK_THEME
-
-    def apply_theme(self):
-        """Принудительное обновление темы попапа (вызывается из main.py при смене темы)"""
-        try:
-            theme = self._get_theme()
-
-            if self.popup:
-                # Обновляем цвета попапа
-                self.popup.background_color = theme.get('popup_bg', (1, 1, 1, 1))
-                self.popup.title_color = theme.get('popup_title', (0, 0, 0, 1))
-                self.popup.separator_color = theme.get('separator_color', (0.5, 0.5, 0.5, 1))
-
-            # Обновляем путь
-            if hasattr(self, 'path_label'):
-                self.path_label.color = theme.get('stats_text', (0.6, 0.6, 0.6, 1))
-
-            # Перерисовываем список файлов
-            self._refresh_list()
-
-            print(f"[FileBrowser] Theme updated to {theme.get('name', 'unknown')}")
-
-        except Exception as e:
-            print(f"[FileBrowser] apply_theme error: {e}")
 
     def show(self, callback, save_filename="script.py"):
         self.callback = callback
