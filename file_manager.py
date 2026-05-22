@@ -559,6 +559,11 @@ class FileBrowserPopup:
             padding=[dp(8), dp(4), dp(8), dp(4)]
         )
 
+        # Сохраняем данные в атрибутах строки
+        row.item_path = item.path
+        row.is_dir = item.is_dir
+        row.item = item
+
         # Подсветка выбранного
         if self._selected_item == item.path:
             with row.canvas.before:
@@ -614,13 +619,9 @@ class FileBrowserPopup:
         menu_btn.bind(on_release=lambda btn, it=item: self._show_menu(btn, it))
         row.add_widget(menu_btn)
 
-        # Обработка касаний с защитой от случайных кликов
-        if item.is_dir:
-            row.bind(on_touch_down=self._on_row_touch_down)
-            row.bind(on_touch_up=lambda touch, p=item.path, is_dir=True: self._on_row_touch_up(touch, p, is_dir))
-        else:
-            row.bind(on_touch_down=self._on_row_touch_down)
-            row.bind(on_touch_up=lambda touch, p=item.path, is_dir=False: self._on_row_touch_up(touch, p, is_dir))
+        # Привязываем обработчики касаний (без лямбда с touch)
+        row.bind(on_touch_down=self._on_row_touch_down)
+        row.bind(on_touch_up=self._on_row_touch_up)
 
         return row
 
@@ -633,16 +634,14 @@ class FileBrowserPopup:
         instance.touch_moved = False
         return True
 
-    def _on_row_touch_up(self, touch, path, is_dir):
+    def _on_row_touch_up(self, instance, touch):
         """Обрабатываем отпускание касания"""
-        # Находим виджет, который вызвал событие
-        instance = self._find_widget_by_path(path)
-        if not instance:
+        # Проверяем, было ли движение
+        if hasattr(instance, 'touch_moved') and instance.touch_moved:
             return False
 
-        # Проверяем, было ли движение
-        if not instance.touch_moved:
-            # Проверяем, не двигался ли палец
+        # Проверяем, не двигался ли палец
+        if hasattr(instance, 'touch_start_pos'):
             dx = abs(touch.pos[0] - instance.touch_start_pos[0])
             dy = abs(touch.pos[1] - instance.touch_start_pos[1])
             if dx > MIN_SWIPE_DISTANCE or dy > MIN_SWIPE_DISTANCE:
@@ -650,6 +649,13 @@ class FileBrowserPopup:
 
         # Проверяем время касания
         duration = time.time() - instance.touch_start_time
+
+        # Получаем данные из атрибутов строки
+        path = getattr(instance, 'item_path', None)
+        is_dir = getattr(instance, 'is_dir', False)
+
+        if not path:
+            return False
 
         # Короткое касание (клик)
         if duration < CLICK_DELAY:
@@ -659,27 +665,11 @@ class FileBrowserPopup:
                 self._select_file(path)
         # Длинное касание (контекстное меню)
         else:
-            # Находим item по пути для меню
-            for item in self._current_items:
-                if item.path == path:
-                    self._show_menu_for_item(item, instance)
-                    break
+            item = getattr(instance, 'item', None)
+            if item:
+                self._show_menu_for_item(item, instance)
 
         return True
-
-    def _find_widget_by_path(self, path):
-        """Находит виджет строки по пути файла"""
-        if not self.file_container:
-            return None
-        for child in self.file_container.children:
-            if isinstance(child, ClickableRow):
-                if hasattr(child, 'children'):
-                    for widget in child.children:
-                        if isinstance(widget, MDBoxLayout):
-                            for sub_widget in widget.children:
-                                if isinstance(sub_widget, Label) and sub_widget.text == os.path.basename(path):
-                                    return child
-        return None
 
     def _show_menu_for_item(self, item, button):
         """Показывает контекстное меню для элемента"""
