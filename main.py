@@ -5131,6 +5131,7 @@ class PythonLearningApp(MDApp):
         self._load_fonts()
         self._request_android_permissions()
         self._request_storage_permission()
+        self.check_and_request_manage_storage()
         Window.keyboard_anim_args = {'d': 0.2, 't': 'in_out_quad'}
         Window.bind(on_key_down=self._keyboard_handler)
         theme = ThemeManager.get_theme()
@@ -5326,6 +5327,34 @@ class PythonLearningApp(MDApp):
             request_permissions(permissions)
         except:
             pass
+
+    def check_and_request_manage_storage(self):
+        """Проверяет и запрашивает разрешение MANAGE_EXTERNAL_STORAGE (Android 11+)"""
+        if platform != 'android':
+            return
+
+        try:
+            from jnius import autoclass
+            from android.permissions import request_permissions, Permission
+            from android import activity
+
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            activity = PythonActivity.mActivity
+
+            # Получаем версию Android
+            Build = autoclass('android.os.Build$VERSION')
+            if Build.SDK_INT >= 30:  # Android 11+
+                # Проверяем, есть ли уже разрешение
+                Environment = autoclass('android.os.Environment')
+                if not Environment.isExternalStorageManager():
+                    # Запрашиваем разрешение
+                    Intent = autoclass('android.content.Intent')
+                    Settings = autoclass('android.provider.Settings')
+                    intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                    intent.setData(autoclass('android.net.Uri').parse("package:" + activity.getPackageName()))
+                    activity.startActivityForResult(intent, 1005)
+        except Exception as e:
+            print(f"MANAGE_EXTERNAL_STORAGE error: {e}")
 
     def select_folder_via_saf(self):
         """Открывает системный диалог выбора папки (SAF)"""
@@ -6471,17 +6500,38 @@ class PythonLearningApp(MDApp):
             if not uri:
                 return
 
-            # Выбор папки для рабочей директории
+            # Выбор папки для рабочей директории (SAF)
             if request_code == 1004:
                 if uri:
-                    self.show_result_popup("Папка выбрана! Теперь можно открывать файлы через системный диалог.")
+                    # Сохраняем URI рабочей папки
+                    if hasattr(self, 'file_manager'):
+                        self.file_manager.set_saf_root(str(uri))
+                    self.show_result_popup("Папка выбрана! Теперь можно открывать файлы.")
                 return
 
-            # Для загрузки и сохранения используем существующие методы
-            if request_code == 1001:  # Открытие файла
-                self._read_file_from_uri(uri)  # Этот метод уже есть в main.py
-            elif request_code == 1002:  # Сохранение файла
-                self._save_file_to_uri(uri)  # Этот метод уже есть в main.py
+            # Открытие файла через SAF
+            if request_code == 1001:
+                self._read_file_from_uri(uri)
+                return
+
+            # Сохранение файла через SAF
+            if request_code == 1002:
+                self._save_file_to_uri(uri)
+                return
+
+            # Запрос разрешения MANAGE_EXTERNAL_STORAGE (Android 11+)
+            if request_code == 1005:
+                try:
+                    from jnius import autoclass
+                    Environment = autoclass('android.os.Environment')
+                    if Environment.isExternalStorageManager():
+                        self.show_result_popup("✓ Полный доступ к файлам получен!\nПерезапустите приложение.")
+                    else:
+                        self.show_result_popup(
+                            "✗ Полный доступ к файлам не получен.\nНекоторые файлы могут быть не видны.")
+                except:
+                    pass
+                return
 
         except Exception as e:
             log_error(f"on_activity_result error: {e}")
