@@ -31,6 +31,7 @@ android.minapi = 24
 android.targetapi = 33
 android.ndk_api = 24
 android.ndk = 25b
+android.add_sdk = 30
 android.archs = arm64-v8a
 
 android.manifest.extra_queries =
