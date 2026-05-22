@@ -1,3 +1,5 @@
+# file_manager.py - Файловый менеджер с сортировкой и локализацией
+
 import os
 import threading
 from kivy.uix.label import Label
@@ -7,7 +9,6 @@ from kivy.metrics import dp
 from kivy.utils import platform
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.graphics import Color, Rectangle
-from functools import lru_cache
 import time
 
 from kivymd.uix.label import MDIcon
@@ -20,22 +21,25 @@ from kivymd.uix.scrollview import MDScrollView
 try:
     from main import DARK_THEME, LIGHT_THEME, ThemeManager
 except ImportError:
-    DARK_THEME = {'name': 'dark'}
-    LIGHT_THEME = {'name': 'light'}
+    DARK_THEME = {'name': 'dark', 'app_bg': (0.188, 0.204, 0.251, 1), 'text_color': (0.85, 0.88, 0.90, 1)}
+    LIGHT_THEME = {'name': 'light', 'app_bg': (1, 1, 1, 1), 'text_color': (0, 0, 0, 1)}
     ThemeManager = None
 
 # ====================== ГЛОБАЛЬНЫЕ КОНСТАНТЫ ======================
-# Расширения текстовых файлов (только редактируемые)
+# Расширения текстовых файлов
 TEXT_EXTENSIONS = {
     '.py', '.txt', '.md', '.json', '.xml', '.html', '.htm', '.css', '.js',
     '.csv', '.log', '.ini', '.yaml', '.yml', '.toml', '.env', '.gitignore',
     '.rst', '.tex', '.c', '.cpp', '.h', '.java', '.kt', '.kts', '.swift',
     '.go', '.rs', '.rb', '.php', '.sql', '.sh', '.bat', '.ps1', '.cfg',
     '.conf', '.properties', '.gradle', '.svg', '.vue', '.jsx', '.tsx',
-    '.ts', '.scss', '.sass', '.less', '.coffee', '.pl', '.pm', '.lua',
-    '.r', '.m', '.mm', '.cs', '.fs', '.vb', '.groovy', '.scala', '.clj',
-    '.erl', '.hs', '.nim', '.cr', '.zig', '.v', '.odin', '.gleam'
+    '.ts', '.scss', '.sass', '.less', '.coffee'
 }
+
+# Цвета
+PURPLE = (0.596, 0.486, 1.0, 1)
+PURPLE_LIGHT = (0.7, 0.6, 1.0, 0.3)
+SORT_ACTIVE = (0.8, 0.7, 1.0, 1)
 
 
 class ClickableRow(ButtonBehavior, MDBoxLayout):
@@ -43,13 +47,14 @@ class ClickableRow(ButtonBehavior, MDBoxLayout):
 
 
 class FileNode:
-    __slots__ = ('path', 'name', 'is_dir', 'size', 'extension')
+    __slots__ = ('path', 'name', 'is_dir', 'size', 'extension', 'mtime')
 
-    def __init__(self, path, is_dir=False, size=0, name=None):
+    def __init__(self, path, is_dir=False, size=0, mtime=0, name=None):
         self.path = path
         self.name = name or os.path.basename(path)
         self.is_dir = is_dir
         self.size = size
+        self.mtime = mtime
         self.extension = os.path.splitext(self.name)[1].lower() if not is_dir else ''
 
     @property
@@ -74,17 +79,71 @@ class FileNode:
             size /= 1024
         return f"{size:.1f} GB"
 
+    def format_date(self, tr):
+        """Возвращает отформатированную дату изменения с локализацией"""
+        if self.mtime == 0:
+            return ""
+        from datetime import datetime
+        dt = datetime.fromtimestamp(self.mtime)
+        return dt.strftime(f"%d.%m.%Y %H:%M")
+
+
+class SortManager:
+    """Управляет сортировкой файлов"""
+    SORT_NAME = 'name'
+    SORT_DATE = 'date'
+    SORT_SIZE = 'size'
+
+    def __init__(self):
+        self.current_sort = self.SORT_NAME
+        self.reverse = False
+
+    def sort_items(self, folders, files):
+        """Сортирует папки и файлы по текущему критерию"""
+        if self.current_sort == self.SORT_NAME:
+            folders.sort(key=lambda x: x.name.lower(), reverse=self.reverse)
+            files.sort(key=lambda x: x.name.lower(), reverse=self.reverse)
+        elif self.current_sort == self.SORT_DATE:
+            folders.sort(key=lambda x: x.mtime, reverse=not self.reverse)
+            files.sort(key=lambda x: x.mtime, reverse=not self.reverse)
+        elif self.current_sort == self.SORT_SIZE:
+            files.sort(key=lambda x: x.size, reverse=not self.reverse)
+            folders.sort(key=lambda x: 0, reverse=False)
+
+        return folders + files
+
+    def get_sort_icon(self):
+        if self.current_sort == self.SORT_NAME:
+            return 'sort-alphabetical' + ('-descending' if self.reverse else '-ascending')
+        elif self.current_sort == self.SORT_DATE:
+            return 'calendar' + ('-descending' if self.reverse else '-ascending')
+        else:
+            return 'sort' + ('-descending' if self.reverse else '-ascending')
+
+    def next_sort(self):
+        if self.current_sort == self.SORT_NAME:
+            self.current_sort = self.SORT_DATE
+        elif self.current_sort == self.SORT_DATE:
+            self.current_sort = self.SORT_SIZE
+        else:
+            self.current_sort = self.SORT_NAME
+        self.reverse = False
+        return self.current_sort
+
+    def toggle_reverse(self):
+        self.reverse = not self.reverse
+        return self.reverse
+
 
 class FileManager:
     def __init__(self, app):
         self.app = app
         self.current_path = self._get_default_path()
         self._loading = False
-        self._saf_enabled = False
-        self._saf_root_uri = None
-        self._cache = {}  # Кэш содержимого папок
-        self._cache_time = {}  # Время кэширования
-        self._cache_ttl = 5  # Время жизни кэша в секундах
+        self._cache = {}
+        self._cache_time = {}
+        self._cache_ttl = 3
+        self.sort_manager = SortManager()
 
     def _get_default_path(self):
         if platform == 'android':
@@ -99,10 +158,6 @@ class FileManager:
                     return p
             return '/storage/emulated/0'
         return os.path.expanduser('~')
-
-    def set_saf_root(self, uri):
-        self._saf_root_uri = uri
-        self._saf_enabled = True
 
     def navigate_to(self, path):
         if os.path.exists(path) and os.path.isdir(path):
@@ -124,7 +179,6 @@ class FileManager:
             callback([], self.current_path, "Загрузка...")
             return
 
-        # Проверяем кэш
         current_time = time.time()
         if not force_refresh and self.current_path in self._cache:
             cache_time = self._cache_time.get(self.current_path, 0)
@@ -139,35 +193,34 @@ class FileManager:
             files = []
 
             try:
-                items = os.listdir(self.current_path)
-
-                for item in items:
+                for item in os.listdir(self.current_path):
                     if item.startswith('.'):
                         continue
 
                     full_path = os.path.join(self.current_path, item)
                     try:
                         if os.path.isdir(full_path):
-                            folders.append(FileNode(full_path, is_dir=True))
+                            try:
+                                stat = os.stat(full_path)
+                                mtime = stat.st_mtime
+                            except:
+                                mtime = 0
+                            folders.append(FileNode(full_path, is_dir=True, mtime=mtime))
                         else:
-                            # Показываем ТОЛЬКО текстовые файлы (из TEXT_EXTENSIONS)
                             ext = os.path.splitext(item)[1].lower()
                             if ext in TEXT_EXTENSIONS:
                                 try:
-                                    size = os.path.getsize(full_path)
-                                    files.append(FileNode(full_path, is_dir=False, size=size))
-                                except (PermissionError, OSError):
-                                    files.append(FileNode(full_path, is_dir=False, size=0))
-                            # Картинки, музыка, видео, архивы - ПРОПУСКАЕМ
-                    except (PermissionError, OSError):
+                                    stat = os.stat(full_path)
+                                    size = stat.st_size
+                                    mtime = stat.st_mtime
+                                    files.append(FileNode(full_path, is_dir=False, size=size, mtime=mtime))
+                                except:
+                                    pass
+                    except:
                         continue
 
-                # Сортируем: папки первые, потом файлы
-                folders.sort(key=lambda x: x.name.lower())
-                files.sort(key=lambda x: x.name.lower())
-                all_items = folders + files
+                all_items = self.sort_manager.sort_items(folders, files)
 
-                # Сохраняем в кэш
                 self._cache[self.current_path] = all_items
                 self._cache_time[self.current_path] = time.time()
 
@@ -181,6 +234,17 @@ class FileManager:
                 self._loading = False
 
         threading.Thread(target=load, daemon=True).start()
+
+    def set_sort(self, sort_type, reverse=False):
+        self.sort_manager.current_sort = sort_type
+        self.sort_manager.reverse = reverse
+        self._cache.pop(self.current_path, None)
+        return True
+
+    def toggle_sort_direction(self):
+        reverse = self.sort_manager.toggle_reverse()
+        self._cache.pop(self.current_path, None)
+        return reverse
 
     def read_file(self, file_path, callback):
         def read():
@@ -196,8 +260,6 @@ class FileManager:
                 with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
                     content = f.read()
                 Clock.schedule_once(lambda dt: callback(content, None))
-            except PermissionError:
-                Clock.schedule_once(lambda dt: callback(None, "Нет прав на чтение"))
             except Exception as e:
                 Clock.schedule_once(lambda dt: callback(None, str(e)))
 
@@ -211,8 +273,6 @@ class FileManager:
                     f.write(content)
                 self._cache.pop(os.path.dirname(file_path), None)
                 Clock.schedule_once(lambda dt: callback(True, None))
-            except PermissionError:
-                Clock.schedule_once(lambda dt: callback(False, "Нет прав на запись"))
             except Exception as e:
                 Clock.schedule_once(lambda dt: callback(False, str(e)))
 
@@ -249,25 +309,27 @@ class FileBrowserPopup:
         self.mode = mode
         self.popup = None
         self.callback = None
-        self._current_items = []
         self._selected_item = None
         self._title = title or ("Open file" if mode == "open" else "Save file")
-        self._loading_indicator = None
+        self._sort_type = 'name'
+        self._sort_reverse = False
 
     def _tr(self, key, fallback=""):
         if hasattr(self.app, 'tr') and self.app.tr:
             return self.app.tr.get(key, fallback)
         return fallback
 
-    def _get_theme(self):
+    def _get_bg_color(self):
         try:
             if ThemeManager is not None:
                 theme = ThemeManager.get_theme()
-                if theme and isinstance(theme, dict) and 'name' in theme:
-                    return theme
+                if theme and theme.get('name') == 'dark':
+                    return (0.188, 0.204, 0.251, 1)
+                else:
+                    return (1, 1, 1, 1)
         except:
             pass
-        return DARK_THEME
+        return (0.188, 0.204, 0.251, 1)
 
     def show(self, callback, save_filename="script.py"):
         self.callback = callback
@@ -275,15 +337,13 @@ class FileBrowserPopup:
         self._show_browser()
 
     def _show_browser(self):
-        theme = self._get_theme()
-        text_color = theme.get('text_color', (0, 0, 0, 1))
+        bg_color = self._get_bg_color()
         tr = self._tr
 
         content = MDBoxLayout(orientation='vertical', padding=dp(5), spacing=dp(5))
 
-        # Устанавливаем фон
         with content.canvas.before:
-            self._bg_color = Color(*theme.get('app_bg', (1, 1, 1, 1)))
+            self._bg_color = Color(*bg_color)
             self._bg_rect = Rectangle(pos=content.pos, size=content.size)
         content.bind(pos=self._update_bg, size=self._update_bg)
 
@@ -292,13 +352,64 @@ class FileBrowserPopup:
             text=self.fm.current_path,
             font_size=dp(10),
             font_name='SourceBold',
-            color=theme.get('stats_text', (0.6, 0.6, 0.6, 1)),
+            color=(0.6, 0.6, 0.6, 1),
             size_hint_y=None,
             height=dp(25),
             shorten=True,
             shorten_from='left'
         )
         content.add_widget(self.path_label)
+
+        # Панель сортировки
+        sort_bar = MDBoxLayout(orientation='horizontal', size_hint_y=None, height=dp(35), spacing=dp(5),
+                               padding=[dp(5), dp(2)])
+
+        # Кнопка сортировки по имени
+        self.sort_name_btn = MDRectangleFlatButton(
+            text=tr('sort_by_name', 'By name'),
+            size_hint_x=0.33,
+            font_size=dp(10),
+            line_color=PURPLE,
+            text_color=PURPLE
+        )
+        self.sort_name_btn.bind(on_release=lambda x: self._apply_sort('name'))
+
+        # Кнопка сортировки по дате
+        self.sort_date_btn = MDRectangleFlatButton(
+            text=tr('sort_by_date', 'By date'),
+            size_hint_x=0.33,
+            font_size=dp(10),
+            line_color=PURPLE,
+            text_color=PURPLE
+        )
+        self.sort_date_btn.bind(on_release=lambda x: self._apply_sort('date'))
+
+        # Кнопка сортировки по размеру
+        self.sort_size_btn = MDRectangleFlatButton(
+            text=tr('sort_by_size', 'By size'),
+            size_hint_x=0.33,
+            font_size=dp(10),
+            line_color=PURPLE,
+            text_color=PURPLE
+        )
+        self.sort_size_btn.bind(on_release=lambda x: self._apply_sort('size'))
+
+        # Кнопка реверса
+        self.sort_reverse_btn = MDIconButton(
+            icon='arrow-up',
+            icon_size=dp(20),
+            size_hint_x=None,
+            width=dp(40),
+            theme_icon_color="Custom",
+            icon_color=PURPLE
+        )
+        self.sort_reverse_btn.bind(on_release=lambda x: self._toggle_reverse())
+
+        sort_bar.add_widget(self.sort_name_btn)
+        sort_bar.add_widget(self.sort_date_btn)
+        sort_bar.add_widget(self.sort_size_btn)
+        sort_bar.add_widget(self.sort_reverse_btn)
+        content.add_widget(sort_bar)
 
         # Список файлов
         self.file_list = MDScrollView()
@@ -309,9 +420,9 @@ class FileBrowserPopup:
 
         # Индикатор загрузки
         self._loading_indicator = Label(
-            text=tr('loading_in_progress', "Загрузка..."),
+            text=tr('loading_in_progress', "Loading..."),
             font_size=dp(12),
-            color=theme.get('stats_text', (0.6, 0.6, 0.6, 1)),
+            color=(0.6, 0.6, 0.6, 1),
             size_hint_y=None,
             height=dp(40)
         )
@@ -321,8 +432,8 @@ class FileBrowserPopup:
             text=tr('up_level', 'Up'),
             size_hint_y=None,
             height=dp(30),
-            line_color=theme.get('separator_color', (0.5, 0.5, 0.5, 0.5)),
-            text_color=text_color
+            line_color=PURPLE,
+            text_color=PURPLE
         )
         up_btn.bind(on_release=lambda x: self._go_up())
         content.add_widget(up_btn)
@@ -336,9 +447,9 @@ class FileBrowserPopup:
                 height=dp(45),
                 mode="rectangle"
             )
-            self.filename_input.line_color_normal = theme.get('separator_color', (0.5, 0.5, 0.5, 0.5))
-            self.filename_input.text_color = text_color
-            self.filename_input.hint_text_color = theme.get('stats_text', (0.5, 0.5, 0.5, 1))
+            self.filename_input.line_color_normal = PURPLE
+            self.filename_input.text_color = PURPLE
+            self.filename_input.hint_text_color = (0.6, 0.6, 0.6, 1)
             content.add_widget(self.filename_input)
 
         # Кнопки
@@ -346,8 +457,8 @@ class FileBrowserPopup:
 
         cancel_btn = MDRectangleFlatButton(
             text=tr('cancel', 'Cancel'),
-            line_color=theme.get('separator_color', (0.5, 0.5, 0.5, 0.5)),
-            text_color=text_color
+            line_color=PURPLE,
+            text_color=PURPLE
         )
         cancel_btn.bind(on_release=lambda x: self._dismiss())
 
@@ -355,7 +466,7 @@ class FileBrowserPopup:
         self.action_btn = MDRectangleFlatButton(
             text=action_text,
             text_color=(1, 1, 1, 1),
-            md_bg_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1))
+            md_bg_color=PURPLE
         )
         self.action_btn.bind(on_release=lambda x: self._on_action())
 
@@ -365,11 +476,11 @@ class FileBrowserPopup:
 
         self.popup = Popup(
             title=self._title,
-            title_color=theme.get('popup_title', (0, 0, 0, 1)),
+            title_color=PURPLE,
             title_size=dp(14),
-            separator_color=theme.get('separator_color', (0.5, 0.5, 0.5, 1)),
+            separator_color=PURPLE,
             background='',
-            background_color=theme.get('popup_bg', (1, 1, 1, 1)),
+            background_color=bg_color,
             content=content,
             size_hint=(0.92, 0.85),
             auto_dismiss=False
@@ -383,9 +494,32 @@ class FileBrowserPopup:
             self._bg_rect.pos = instance.pos
             self._bg_rect.size = instance.size
 
+    def _apply_sort(self, sort_type):
+        """Применяет сортировку и обновляет список"""
+        tr = self._tr
+
+        # Обновляем стиль кнопок
+        self.sort_name_btn.line_color = SORT_ACTIVE if sort_type == 'name' else PURPLE
+        self.sort_name_btn.text_color = SORT_ACTIVE if sort_type == 'name' else PURPLE
+        self.sort_date_btn.line_color = SORT_ACTIVE if sort_type == 'date' else PURPLE
+        self.sort_date_btn.text_color = SORT_ACTIVE if sort_type == 'date' else PURPLE
+        self.sort_size_btn.line_color = SORT_ACTIVE if sort_type == 'size' else PURPLE
+        self.sort_size_btn.text_color = SORT_ACTIVE if sort_type == 'size' else PURPLE
+
+        self.fm.set_sort(sort_type, self._sort_reverse)
+        self._refresh_list()
+
+    def _toggle_reverse(self):
+        """Инвертирует направление сортировки"""
+        self._sort_reverse = not self._sort_reverse
+        self.sort_reverse_btn.icon = 'arrow-down' if self._sort_reverse else 'arrow-up'
+        self.fm.toggle_sort_direction()
+        self._refresh_list()
+
     def _go_up(self):
         if self.fm.go_up():
             self._refresh_list()
+            self._selected_item = None
 
     def _refresh_list(self):
         if self.file_container:
@@ -401,13 +535,6 @@ class FileBrowserPopup:
 
         self.file_container.clear_widgets()
         self.path_label.text = current_path
-        self._current_items = items
-
-        theme = self._get_theme()
-        text_color = theme.get('text_color', (0, 0, 0, 1))
-        selected_bg = theme.get('btn_selected_file_bg', (0.3, 0.5, 0.3, 0.5))
-        widget_bg = theme.get('widget_bg', (0.95, 0.95, 0.95, 1))
-        tr = self._tr
 
         if error:
             self.file_container.add_widget(Label(
@@ -420,84 +547,90 @@ class FileBrowserPopup:
 
         if not items:
             self.file_container.add_widget(Label(
-                text=tr('empty_folder', 'Empty folder'),
+                text=self._tr('empty_folder', 'Empty folder'),
                 size_hint_y=None,
                 height=dp(50),
-                color=text_color
+                color=PURPLE
             ))
             return
 
-        # Добавляем виджеты партиями для плавности
-        def add_widgets(start_idx, batch_size=20):
+        def add_widgets(start_idx, batch_size=25):
             end_idx = min(start_idx + batch_size, len(items))
             for i in range(start_idx, end_idx):
                 item = items[i]
-                row = self._create_row(item, theme, text_color, selected_bg, widget_bg, tr)
+                row = self._create_row(item)
                 self.file_container.add_widget(row)
             if end_idx < len(items):
                 Clock.schedule_once(lambda dt: add_widgets(end_idx, batch_size), 0.01)
 
-        add_widgets(0, 20)
+        add_widgets(0, 25)
 
-    def _create_row(self, item, theme, text_color, selected_bg, widget_bg, tr):
+    def _create_row(self, item):
+        tr = self._tr
+
         row = ClickableRow(
             orientation='horizontal',
             size_hint_y=None,
-            height=dp(44),
+            height=dp(48),
             spacing=dp(8),
             padding=[dp(8), dp(4), dp(8), dp(4)]
         )
 
-        # Фон строки
-        with row.canvas.before:
-            Color(*widget_bg)
-            row._bg_rect = Rectangle(pos=row.pos, size=row.size)
-        row.bind(pos=self._update_row_bg, size=self._update_row_bg)
-
-        # Подсветка выбранного файла
+        # Подсветка выбранного
         if self._selected_item == item.path:
-            with row.canvas.after:
-                Color(*selected_bg)
+            with row.canvas.before:
+                Color(*PURPLE_LIGHT)
                 row._selected_rect = Rectangle(pos=row.pos, size=row.size)
             row.bind(pos=self._update_selected_rect, size=self._update_selected_rect)
 
+        # Иконка
         icon = MDIcon(
             icon=item.icon_name,
             font_size=dp(22),
             theme_text_color="Custom",
-            text_color=text_color,
+            text_color=PURPLE,
             size_hint_x=None,
             width=dp(40)
         )
         row.add_widget(icon)
 
+        # Информация
+        info_layout = MDBoxLayout(orientation='vertical', size_hint_x=1, spacing=dp(2))
+
         name_label = Label(
             text=item.name,
             font_size=dp(12),
-            color=text_color,
+            color=PURPLE,
             halign='left',
-            size_hint_x=1
+            size_hint_y=0.6
         )
-        row.add_widget(name_label)
+        info_layout.add_widget(name_label)
 
-        if not item.is_dir and item.size > 0:
-            size_label = Label(
-                text=item.format_size(),
-                font_size=dp(9),
-                color=theme.get('stats_text', (0.5, 0.5, 0.5, 1)),
-                size_hint_x=None,
-                width=dp(50),
-                halign='right'
-            )
-            row.add_widget(size_label)
+        # Дополнительная информация
+        if item.is_dir:
+            sub_text = f"{tr('modified', 'Modified')}: {item.format_date(tr)}"
+        else:
+            sub_text = f"{tr('file_size', 'Size')}: {item.format_size()}  |  {tr('modified', 'Modified')}: {item.format_date(tr)}"
 
+        sub_label = Label(
+            text=sub_text,
+            font_size=dp(9),
+            color=(0.6, 0.6, 0.6, 1),
+            halign='left',
+            size_hint_y=0.4
+        )
+        info_layout.add_widget(sub_label)
+
+        row.add_widget(info_layout)
+
+        # Кнопка меню
         menu_btn = MDIconButton(
             icon='dots-vertical',
             icon_size=dp(20),
             size_hint_x=None,
             width=dp(40),
             theme_icon_color="Custom",
-            icon_color=text_color
+            icon_color=PURPLE
         )
         menu_btn.bind(on_release=lambda btn, it=item: self._show_menu(btn, it))
         row.add_widget(menu_btn)
@@ -508,11 +641,6 @@ class FileBrowserPopup:
             row.bind(on_release=lambda x, p=item.path: self._select_file(p))
 
         return row
-
-    def _update_row_bg(self, instance, value):
-        if hasattr(instance, '_bg_rect'):
-            instance._bg_rect.pos = instance.pos
-            instance._bg_rect.size = instance.size
 
     def _update_selected_rect(self, instance, value):
         if hasattr(instance, '_selected_rect'):
@@ -526,11 +654,27 @@ class FileBrowserPopup:
 
     def _select_file(self, path):
         self._selected_item = path
-        self._refresh_list()
+
+        # Обновляем подсветку
+        if self.file_container:
+            for child in self.file_container.children:
+                if isinstance(child, ClickableRow):
+                    if hasattr(child, '_selected_rect'):
+                        child.canvas.before.remove(child._selected_rect)
+                        child._selected_rect = None
+
+                    if hasattr(child, 'children'):
+                        for widget in child.children:
+                            if isinstance(widget, MDBoxLayout):
+                                for sub_widget in widget.children:
+                                    if isinstance(sub_widget, Label) and sub_widget.text == os.path.basename(path):
+                                        with child.canvas.before:
+                                            Color(*PURPLE_LIGHT)
+                                            child._selected_rect = Rectangle(pos=child.pos, size=child.size)
+                                        child.bind(pos=self._update_selected_rect, size=self._update_selected_rect)
+                                        break
 
     def _show_menu(self, button, item):
-        theme = self._get_theme()
-        text_color = theme.get('text_color', (0, 0, 0, 1))
         tr = self._tr
 
         content = MDBoxLayout(orientation='vertical', padding=dp(8), spacing=dp(5), size_hint_y=None)
@@ -541,8 +685,8 @@ class FileBrowserPopup:
                 text=tr('open', 'Open'),
                 size_hint_y=None,
                 height=dp(40),
-                line_color=theme.get('separator_color', (0.5, 0.5, 0.5, 0.5)),
-                text_color=text_color
+                line_color=PURPLE,
+                text_color=PURPLE
             )
             btn_open.bind(on_release=lambda x: self._open_item(item))
             content.add_widget(btn_open)
@@ -551,8 +695,8 @@ class FileBrowserPopup:
             text=tr('rename', 'Rename'),
             size_hint_y=None,
             height=dp(40),
-            line_color=theme.get('separator_color', (0.5, 0.5, 0.5, 0.5)),
-            text_color=text_color
+            line_color=PURPLE,
+            text_color=PURPLE
         )
         btn_rename.bind(on_release=lambda x: self._rename_item(item))
         content.add_widget(btn_rename)
@@ -561,7 +705,7 @@ class FileBrowserPopup:
             text=tr('delete', 'Delete'),
             size_hint_y=None,
             height=dp(40),
-            md_bg_color=theme.get('btn_danger_bg', (0.5, 0.2, 0.2, 1)),
+            md_bg_color=(0.5, 0.2, 0.2, 1),
             text_color=(1, 1, 1, 1)
         )
         btn_delete.bind(on_release=lambda x: self._delete_item(item))
@@ -569,10 +713,10 @@ class FileBrowserPopup:
 
         menu_popup = Popup(
             title=tr('actions', 'Actions'),
-            title_color=theme.get('popup_title', (0, 0, 0, 1)),
-            separator_color=theme.get('separator_color', (0.5, 0.5, 0.5, 1)),
+            title_color=PURPLE,
+            separator_color=PURPLE,
             background='',
-            background_color=theme.get('popup_bg', (1, 1, 1, 1)),
+            background_color=self._get_bg_color(),
             content=content,
             size_hint=(0.6, None),
             height=dp(190) if not item.is_dir else dp(150),
@@ -589,14 +733,13 @@ class FileBrowserPopup:
             self._load_and_close(item.path)
 
     def _rename_item(self, item):
-        theme = self._get_theme()
-        text_color = theme.get('text_color', (0, 0, 0, 1))
+        bg_color = self._get_bg_color()
         tr = self._tr
 
         content = MDBoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
         content.add_widget(Label(
             text=f"{tr('rename', 'Rename')}: {item.name}",
-            color=text_color,
+            color=PURPLE,
             font_size=dp(12)
         ))
 
@@ -606,18 +749,18 @@ class FileBrowserPopup:
             height=dp(45),
             mode="rectangle"
         )
-        name_input.line_color_normal = theme.get('separator_color', (0.5, 0.5, 0.5, 0.5))
-        name_input.text_color = text_color
+        name_input.line_color_normal = PURPLE
+        name_input.text_color = PURPLE
         content.add_widget(name_input)
 
         btn_layout = MDBoxLayout(size_hint_y=None, height=dp(40), spacing=dp(10))
 
         popup = Popup(
             title=tr('rename', 'Rename'),
-            title_color=theme.get('popup_title', (0, 0, 0, 1)),
-            separator_color=theme.get('separator_color', (0.5, 0.5, 0.5, 1)),
+            title_color=PURPLE,
+            separator_color=PURPLE,
             background='',
-            background_color=theme.get('popup_bg', (1, 1, 1, 1)),
+            background_color=bg_color,
             content=content,
             size_hint=(0.8, 0.35),
             auto_dismiss=False
@@ -641,13 +784,13 @@ class FileBrowserPopup:
         btn_ok = MDRectangleFlatButton(
             text=tr('ok', 'OK'),
             text_color=(1, 1, 1, 1),
-            md_bg_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1))
+            md_bg_color=PURPLE
         )
         btn_ok.bind(on_release=do_rename)
         btn_cancel = MDRectangleFlatButton(
             text=tr('cancel', 'Cancel'),
-            line_color=theme.get('separator_color', (0.5, 0.5, 0.5, 0.5)),
-            text_color=text_color
+            line_color=PURPLE,
+            text_color=PURPLE
         )
         btn_cancel.bind(on_release=lambda x: popup.dismiss())
 
@@ -659,14 +802,13 @@ class FileBrowserPopup:
         Clock.schedule_once(lambda dt: setattr(name_input, 'focus', True), 0.3)
 
     def _delete_item(self, item):
-        theme = self._get_theme()
-        text_color = theme.get('text_color', (0, 0, 0, 1))
+        bg_color = self._get_bg_color()
         tr = self._tr
 
         content = MDBoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
         content.add_widget(Label(
             text=f"{tr('delete_confirm', 'Delete')} {item.name}?",
-            color=text_color,
+            color=PURPLE,
             font_size=dp(14)
         ))
         if not item.is_dir:
@@ -680,10 +822,10 @@ class FileBrowserPopup:
 
         popup = Popup(
             title=tr('confirm', 'Confirm'),
-            title_color=theme.get('popup_title', (0, 0, 0, 1)),
-            separator_color=theme.get('separator_color', (0.5, 0.5, 0.5, 1)),
+            title_color=PURPLE,
+            separator_color=PURPLE,
             background='',
-            background_color=theme.get('popup_bg', (1, 1, 1, 1)),
+            background_color=bg_color,
             content=content,
             size_hint=(0.7, 0.25),
             auto_dismiss=False
@@ -704,13 +846,13 @@ class FileBrowserPopup:
         btn_delete = MDRectangleFlatButton(
             text=tr('delete', 'Delete'),
             text_color=(1, 1, 1, 1),
-            md_bg_color=theme.get('btn_danger_bg', (0.5, 0.2, 0.2, 1))
+            md_bg_color=(0.5, 0.2, 0.2, 1)
         )
         btn_delete.bind(on_release=do_delete)
         btn_cancel = MDRectangleFlatButton(
             text=tr('cancel', 'Cancel'),
-            line_color=theme.get('separator_color', (0.5, 0.5, 0.5, 0.5)),
-            text_color=text_color
+            line_color=PURPLE,
+            text_color=PURPLE
         )
         btn_cancel.bind(on_release=lambda x: popup.dismiss())
 
@@ -765,14 +907,13 @@ class FileBrowserPopup:
                 self.app.show_result_popup(tr('select_file', 'Select a file first'))
 
     def _confirm_overwrite(self, full_path, content, filename):
-        theme = self._get_theme()
-        text_color = theme.get('text_color', (0, 0, 0, 1))
+        bg_color = self._get_bg_color()
         tr = self._tr
 
         content_box = MDBoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
         content_box.add_widget(Label(
             text=f"{tr('file_exists', 'File')} '{filename}' {tr('already_exists', 'exists')}.\n{tr('overwrite_prompt', 'Overwrite?')}",
-            color=text_color,
+            color=PURPLE,
             halign='center'
         ))
 
@@ -780,10 +921,10 @@ class FileBrowserPopup:
 
         popup = Popup(
             title=tr('confirm', 'Confirm'),
-            title_color=theme.get('popup_title', (0, 0, 0, 1)),
-            separator_color=theme.get('separator_color', (0.5, 0.5, 0.5, 1)),
+            title_color=PURPLE,
+            separator_color=PURPLE,
             background='',
-            background_color=theme.get('popup_bg', (1, 1, 1, 1)),
+            background_color=bg_color,
             content=content_box,
             size_hint=(0.7, 0.25),
             auto_dismiss=False
@@ -806,13 +947,13 @@ class FileBrowserPopup:
         btn_yes = MDRectangleFlatButton(
             text=tr('yes', 'Yes'),
             text_color=(1, 1, 1, 1),
-            md_bg_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1))
+            md_bg_color=PURPLE
         )
         btn_yes.bind(on_release=on_yes)
         btn_no = MDRectangleFlatButton(
             text=tr('no', 'No'),
-            line_color=theme.get('separator_color', (0.5, 0.5, 0.5, 0.5)),
-            text_color=text_color
+            line_color=PURPLE,
+            text_color=PURPLE
         )
         btn_no.bind(on_release=lambda x: popup.dismiss())
 
