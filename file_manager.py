@@ -128,19 +128,11 @@ class FileManager:
                         if os.path.isdir(full_path):
                             folders.append(FileNode(full_path, is_dir=True))
                         else:
-                            ext = os.path.splitext(item)[1].lower()
-                            # Показываем ВСЕ файлы, не только текстовые
-                            # Но для нетекстовых показываем иконку файла
+                            # Добавляем ВСЕ файлы, а не только текстовые
                             try:
                                 size = os.path.getsize(full_path)
-                                # Проверяем, можно ли прочитать файл
-                                if os.access(full_path, os.R_OK):
-                                    files.append(FileNode(full_path, is_dir=False, size=size))
-                                else:
-                                    # Файл есть, но нет прав на чтение
-                                    files.append(FileNode(full_path, is_dir=False, size=size))
+                                files.append(FileNode(full_path, is_dir=False, size=size))
                             except (PermissionError, OSError):
-                                # Файл существует, но не можем получить размер
                                 files.append(FileNode(full_path, is_dir=False, size=0))
                     except (PermissionError, OSError):
                         continue
