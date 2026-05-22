@@ -589,6 +589,17 @@ TRANSLATIONS = {
         'no_permission': 'Нет прав',
         'actions': 'Действия',
         'error': 'Ошибка',
+        # ========== КЛЮЧИ ДЛЯ СОРТИРОВКИ В ФАЙЛОВОМ МЕНЕДЖЕРЕ ==========
+        'sort_by_name': 'По имени',
+        'sort_by_date': 'По дате',
+        'sort_by_size': 'По размеру',
+        'sort_ascending': '↑ По возрастанию',
+        'sort_descending': '↓ По убыванию',
+        'sort_name': 'Имя',
+        'sort_date': 'Дата',
+        'sort_size': 'Размер',
+        'file_size': 'Размер',
+        'modified': 'Изменён',
     },
     'en': {
         'no_code': 'No code to format',
@@ -802,6 +813,17 @@ TRANSLATIONS = {
         'no_permission': 'No permission',
         'actions': 'Actions',
         'error': 'Error',
+        # ========== KEYS FOR SORTING IN FILE MANAGER ==========
+        'sort_by_name': 'By name',
+        'sort_by_date': 'By date',
+        'sort_by_size': 'By size',
+        'sort_ascending': '↑ Ascending',
+        'sort_descending': '↓ Descending',
+        'sort_name': 'Name',
+        'sort_date': 'Date',
+        'sort_size': 'Size',
+        'file_size': 'Size',
+        'modified': 'Modified',
     },
 }
 
