@@ -24,10 +24,17 @@ except ImportError:
     LIGHT_THEME = {'name': 'light'}
     ThemeManager = None
 
-# Расширения текстовых файлов
+# ====================== ГЛОБАЛЬНЫЕ КОНСТАНТЫ ======================
+# Расширения текстовых файлов (только редактируемые)
 TEXT_EXTENSIONS = {
     '.py', '.txt', '.md', '.json', '.xml', '.html', '.htm', '.css', '.js',
-    '.csv', '.log', '.ini', '.yaml', '.yml', '.toml', '.env', '.gitignore'
+    '.csv', '.log', '.ini', '.yaml', '.yml', '.toml', '.env', '.gitignore',
+    '.rst', '.tex', '.c', '.cpp', '.h', '.java', '.kt', '.kts', '.swift',
+    '.go', '.rs', '.rb', '.php', '.sql', '.sh', '.bat', '.ps1', '.cfg',
+    '.conf', '.properties', '.gradle', '.svg', '.vue', '.jsx', '.tsx',
+    '.ts', '.scss', '.sass', '.less', '.coffee', '.pl', '.pm', '.lua',
+    '.r', '.m', '.mm', '.cs', '.fs', '.vb', '.groovy', '.scala', '.clj',
+    '.erl', '.hs', '.nim', '.cr', '.zig', '.v', '.odin', '.gleam'
 }
 
 
@@ -100,7 +107,6 @@ class FileManager:
     def navigate_to(self, path):
         if os.path.exists(path) and os.path.isdir(path):
             self.current_path = os.path.abspath(path)
-            # Очищаем кэш для этой папки при переходе
             self._cache.pop(self.current_path, None)
             return True
         return False
@@ -144,11 +150,15 @@ class FileManager:
                         if os.path.isdir(full_path):
                             folders.append(FileNode(full_path, is_dir=True))
                         else:
-                            try:
-                                size = os.path.getsize(full_path)
-                                files.append(FileNode(full_path, is_dir=False, size=size))
-                            except (PermissionError, OSError):
-                                files.append(FileNode(full_path, is_dir=False, size=0))
+                            # Показываем ТОЛЬКО текстовые файлы (из TEXT_EXTENSIONS)
+                            ext = os.path.splitext(item)[1].lower()
+                            if ext in TEXT_EXTENSIONS:
+                                try:
+                                    size = os.path.getsize(full_path)
+                                    files.append(FileNode(full_path, is_dir=False, size=size))
+                                except (PermissionError, OSError):
+                                    files.append(FileNode(full_path, is_dir=False, size=0))
+                            # Картинки, музыка, видео, архивы - ПРОПУСКАЕМ
                     except (PermissionError, OSError):
                         continue
 
@@ -175,7 +185,6 @@ class FileManager:
     def read_file(self, file_path, callback):
         def read():
             try:
-                # Пробуем разные кодировки
                 for encoding in ['utf-8', 'utf-8-sig', 'cp1251', 'latin-1']:
                     try:
                         with open(file_path, 'r', encoding=encoding, errors='replace') as f:
@@ -184,7 +193,6 @@ class FileManager:
                         return
                     except UnicodeDecodeError:
                         continue
-                # Fallback
                 with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
                     content = f.read()
                 Clock.schedule_once(lambda dt: callback(content, None))
@@ -201,7 +209,6 @@ class FileManager:
                 os.makedirs(os.path.dirname(file_path), exist_ok=True)
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(content)
-                # Очищаем кэш родительской папки
                 self._cache.pop(os.path.dirname(file_path), None)
                 Clock.schedule_once(lambda dt: callback(True, None))
             except PermissionError:
