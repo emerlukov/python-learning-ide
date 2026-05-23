@@ -37,6 +37,7 @@ Python Learning App
 - Добавлен индикатор загрузки/сохранения
 - UI не блокируется при работе с большими файлами
 - Полностью переделанный файловый менеджер!!!
+- Поправленны "Поиск" и "Поиск/Замена" !!!
 """
 
 # ====================== ИМПОРТ СТАНДАРТНЫХ БИБЛИОТЕК ======================
@@ -4299,12 +4300,20 @@ class SearchOnlyPopup(BoxLayout):
     def find_next(self):
         if not self.search_results:
             return
+        # ВИБРАЦИЯ
+        app = App.get_running_app()
+        if app and hasattr(app, 'vibrate_short'):
+            app.vibrate_short()
         self.current_result_index = (self.current_result_index + 1) % len(self.search_results)
         self._highlight_current()
 
     def find_previous(self):
         if not self.search_results:
             return
+        # ВИБРАЦИЯ
+        app = App.get_running_app()
+        if app and hasattr(app, 'vibrate_short'):
+            app.vibrate_short()
         self.current_result_index = (self.current_result_index - 1) % len(self.search_results)
         self._highlight_current()
 
@@ -4336,7 +4345,10 @@ class SearchOnlyPopup(BoxLayout):
             pass
 
     def dismiss(self, *args):
+        # ВИБРАЦИЯ
         app = App.get_running_app()
+        if app and hasattr(app, 'vibrate_short'):
+            app.vibrate_short()
         if app:
             app.dismiss_search()
 
@@ -4558,12 +4570,20 @@ class SearchReplacePopup(BoxLayout):
     def find_next(self):
         if not self.search_results:
             return
+        # ВИБРАЦИЯ
+        app = App.get_running_app()
+        if app and hasattr(app, 'vibrate_short'):
+            app.vibrate_short()
         self.current_result_index = (self.current_result_index + 1) % len(self.search_results)
         self._highlight_current()
 
     def find_previous(self):
         if not self.search_results:
             return
+        # ВИБРАЦИЯ
+        app = App.get_running_app()
+        if app and hasattr(app, 'vibrate_short'):
+            app.vibrate_short()
         self.current_result_index = (self.current_result_index - 1) % len(self.search_results)
         self._highlight_current()
 
@@ -4598,6 +4618,11 @@ class SearchReplacePopup(BoxLayout):
         if self.current_result_index >= len(self.search_results):
             return
 
+         # ВИБРАЦИЯ
+        app = App.get_running_app()
+        if app and hasattr(app, 'vibrate_short'):
+            app.vibrate_short()
+
         start, end = self.search_results[self.current_result_index]
         replace_text = self.replace_input.text
 
@@ -4628,6 +4653,11 @@ class SearchReplacePopup(BoxLayout):
         if not self.search_results:
             return
 
+        # ВИБРАЦИЯ
+        app = App.get_running_app()
+        if app and hasattr(app, 'vibrate_short'):
+            app.vibrate_short()
+
         replace_text = self.replace_input.text
         text = self.text_input.text
 
@@ -4641,7 +4671,10 @@ class SearchReplacePopup(BoxLayout):
         self.status_label.text = f"✓ {self.tr.get('replaced', 'Replaced')} all"
 
     def dismiss(self, *args):
+        # ВИБРАЦИЯ
         app = App.get_running_app()
+        if app and hasattr(app, 'vibrate_short'):
+            app.vibrate_short()
         if app:
             app.dismiss_search()
 
@@ -7909,7 +7942,7 @@ def пауза():
         if hasattr(self, 'action_bar'):
             try:
                 self.action_bar.action_keys = ['undo', 'redo', 'copy', 'paste', 'cut', 'sel_all', 'auto', 'key',
-                                               'clean', 'find']
+                                               'clean', 'find', 'find_replace']
                 self.action_bar._create_buttons()
                 self.action_bar.button_container.clear_widgets()
                 for btn in self.action_bar.buttons:
