@@ -3408,6 +3408,7 @@ class MyActionBar(BoxLayout):
     ACTION_KEY = 'key'
     ACTION_CLEAN = 'clean'
     ACTION_FIND = 'find'
+    ACTION_FIND_REPLACE = 'find_replace'
     background_color = ColorProperty([0, 0, 0, 0])
     border = ListProperty([0, 0, 0, 0])
     background_image = StringProperty('')
@@ -3439,7 +3440,7 @@ class MyActionBar(BoxLayout):
         self._keywords_popup = None
         self._autocomplete_popup = None
         self.action_keys = [self.ACTION_UNDO, self.ACTION_REDO, self.ACTION_COPY, self.ACTION_PASTE, self.ACTION_CUT,
-                            self.ACTION_SEL_ALL, self.ACTION_AUTO, self.ACTION_KEY, self.ACTION_CLEAN, self.ACTION_FIND]
+                            self.ACTION_SEL_ALL, self.ACTION_AUTO, self.ACTION_KEY, self.ACTION_CLEAN, self.ACTION_FIND, self.ACTION_FIND_REPLACE]
         self.buttons = []
         self._create_scroll_view()
         self._create_buttons()
@@ -3467,7 +3468,7 @@ class MyActionBar(BoxLayout):
             self.ACTION_UNDO: 'undo', self.ACTION_REDO: 'redo', self.ACTION_COPY: 'content-copy',
             self.ACTION_PASTE: 'content-paste', self.ACTION_CUT: 'content-cut', self.ACTION_SEL_ALL: 'select-all',
             self.ACTION_AUTO: 'code-tags', self.ACTION_KEY: 'key-variant', self.ACTION_CLEAN: 'delete-sweep',
-            self.ACTION_FIND: 'magnify',
+            self.ACTION_FIND: 'magnify', self.ACTION_FIND_REPLACE: 'find-replace',
         }
         for key in self.action_keys:
             icon_name = action_icons.get(key, None)
@@ -3543,6 +3544,9 @@ class MyActionBar(BoxLayout):
             elif action_key == self.ACTION_FIND:
                 if self.app and hasattr(self.app, 'show_search_dialog_from_button'):
                     self.app.show_search_dialog_from_button()
+            elif action_key == self.ACTION_FIND_REPLACE:  # ← НОВАЯ КНОПКА
+                if self.app and hasattr(self.app, 'show_search_replace_dialog'):
+                    self.app.show_search_replace_dialog()
             if action_key in [self.ACTION_COPY, self.ACTION_PASTE, self.ACTION_CUT, self.ACTION_SEL_ALL,
                               self.ACTION_CLEAN, self.ACTION_UNDO, self.ACTION_REDO]:
                 Clock.schedule_once(lambda dt: self._refocus(ti), 0.05)
@@ -4119,60 +4123,139 @@ class AIAssistantPopup(BoxLayout):
 
 
 class SearchOnlyPopup(BoxLayout):
-    """Диалог для поиска текста"""
+    """Диалог для поиска текста (вверху экрана, не блокирует редактор)"""
 
     def __init__(self, text_input, **kwargs):
         super().__init__(**kwargs)
         self.text_input = text_input
         self.orientation = 'vertical'
-        self.padding = [dp(3), dp(3), dp(3), dp(3)]
-        self.spacing = dp(2)
+        self.padding = [dp(10), dp(8), dp(10), dp(8)]
+        self.spacing = dp(8)
         self.last_search = ''
         self.search_results = []
         self.current_result_index = -1
-        self.popup = None
         app = App.get_running_app()
         self.tr = app.tr if app else TRANSLATIONS['ru']
         theme = ThemeManager.get_theme()
         self._create_ui(theme)
 
-    def _create_ui(self, theme):
-        tr = self.tr
+        # Настройки для виджета
+        self.size_hint_y = None
+        self.height = dp(95)
+
+        # Добавляем тень/рамку для видимости
         with self.canvas.before:
-            bg_color = theme['widget_bg']
-            lighter_bg = (bg_color[0] * 0.8 + 1.0 * 0.2, bg_color[1] * 0.8 + 1.0 * 0.2, bg_color[2] * 0.8 + 1.0 * 0.2,
-                          bg_color[3])
-            Color(*lighter_bg)
+            # Основной фон
+            Color(*theme.get('popup_bg', (0.188, 0.204, 0.251, 1)))
             self.bg_rect = Rectangle(pos=self.pos, size=self.size)
         self.bind(pos=self._update_bg, size=self._update_bg)
-        search_row = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(20), spacing=dp(2))
-        self.search_input = TextInput(hint_text=tr.get('find_text', 'Search text'), multiline=False, font_size=dp(10),
-                                      font_name='SourceBold', background_color=theme['input_bg'],
-                                      foreground_color=theme['input_text'], cursor_color=theme['input_cursor'],
-                                      hint_text_color=theme['hint_text'], size_hint_x=0.75)
-        self.search_input.bind(text=self._on_search_text_change)
-        search_row.add_widget(self.search_input)
-        btn_close = Button(text=tr.get('close', 'Close'), font_name='SourceBold', size_hint_x=0.25,
-                           background_color=theme.get('btn_danger_bg', (0.5, 0.2, 0.2, 1)), background_normal='',
-                           background_down='', color=theme['text_color'], font_size=dp(9))
-        btn_close.bind(on_release=self.dismiss)
-        search_row.add_widget(btn_close)
-        self.add_widget(search_row)
-        nav_layout = BoxLayout(size_hint_y=None, height=dp(15), spacing=dp(3))
-        btn_prev = Button(text='◀', font_name='SourceBold', background_color=theme['widget_bg'], background_normal='',
-                          background_down='', color=theme['text_color'], font_size=dp(9),
-                          on_release=lambda x: self.find_previous())
-        btn_next = Button(text='▶', font_name='SourceBold', background_color=theme['widget_bg'], background_normal='',
-                          background_down='', color=theme['text_color'], font_size=dp(9),
-                          on_release=lambda x: self.find_next())
-        nav_layout.add_widget(btn_prev)
-        nav_layout.add_widget(btn_next)
-        self.add_widget(nav_layout)
+
+        # Добавляем тонкую рамку
+        with self.canvas.after:
+            Color(*theme.get('separator_color', (0.5, 0.5, 0.5, 0.5)))
+            self.border_line = Line(rectangle=(self.x, self.y, self.width, self.height), width=dp(1))
+        self.bind(pos=self._update_border, size=self._update_border)
 
     def _update_bg(self, instance, value):
         if hasattr(self, 'bg_rect'):
             self.bg_rect.pos = instance.pos
             self.bg_rect.size = instance.size
+
+    def _update_border(self, instance, value):
+        if hasattr(self, 'border_line'):
+            self.border_line.rectangle = (instance.x, instance.y, instance.width, instance.height)
+
+    def _create_ui(self, theme):
+        tr = self.tr
+
+        # Верхняя строка с заголовком и кнопкой закрытия
+        header_box = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(28), spacing=dp(10))
+
+        header_label = Label(
+            text=tr.get('find', '🔍 Search'),
+            color=theme.get('text_color', (0.85, 0.88, 0.90, 1)),
+            font_size=dp(14),
+            font_name='SourceBold',
+            size_hint_x=0.7,
+            halign='left',
+            valign='middle'
+        )
+        header_label.bind(size=lambda s, sz: setattr(header_label, 'text_size', (sz[0], None)))
+        header_box.add_widget(header_label)
+
+        # Кнопка закрытия
+        btn_close = Button(
+            text='✕',
+            font_name='DejaVuSans',
+            size_hint=(None, 1),
+            width=dp(36),
+            background_color=theme.get('btn_danger_bg', (0.5, 0.2, 0.2, 1)),
+            background_normal='', background_down='',
+            color=(1, 1, 1, 1),
+            font_size=dp(16),
+            bold=True
+        )
+        btn_close.bind(on_release=lambda x: self.dismiss())
+        header_box.add_widget(btn_close)
+        self.add_widget(header_box)
+
+        # Строка поиска
+        search_row = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(36), spacing=dp(8))
+
+        self.search_input = TextInput(
+            hint_text=tr.get('find_text', 'Find...'),
+            multiline=False,
+            font_size=dp(14),
+            font_name='SourceBold',
+            background_color=theme['input_bg'],
+            foreground_color=theme['input_text'],
+            cursor_color=theme['input_cursor'],
+            hint_text_color=theme['hint_text'],
+            size_hint_x=0.7
+        )
+        self.search_input.bind(text=self._on_search_text_change)
+        search_row.add_widget(self.search_input)
+
+        # Кнопки навигации
+        nav_layout = BoxLayout(orientation='horizontal', size_hint_x=0.3, spacing=dp(6))
+
+        btn_prev = Button(
+            text='◀',
+            font_name='DejaVuSans',
+            background_color=theme['widget_bg'],
+            background_normal='', background_down='',
+            color=theme['text_color'],
+            font_size=dp(14),
+            on_release=lambda x: self.find_previous()
+        )
+        btn_next = Button(
+            text='▶',
+            font_name='DejaVuSans',
+            background_color=theme['widget_bg'],
+            background_normal='', background_down='',
+            color=theme['text_color'],
+            font_size=dp(14),
+            on_release=lambda x: self.find_next()
+        )
+        nav_layout.add_widget(btn_prev)
+        nav_layout.add_widget(btn_next)
+        search_row.add_widget(nav_layout)
+
+        self.add_widget(search_row)
+
+        # Статусная строка
+        self.status_label = Label(
+            text='',
+            color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+            font_size=dp(10),
+            font_name='SourceBold',
+            size_hint_y=None,
+            height=dp(20),
+            halign='left',
+            valign='middle'
+        )
+        self.status_label.bind(size=lambda s, sz: setattr(self.status_label, 'text_size', (sz[0], None)))
+        self.add_widget(self.status_label)
 
     def _on_search_text_change(self, instance, value):
         if value != self.last_search:
@@ -4182,12 +4265,16 @@ class SearchOnlyPopup(BoxLayout):
         search_text = self.search_input.text
         if not search_text:
             self.search_results = []
+            self.status_label.text = ''
             return
+
         self.last_search = search_text
         text = self.text_input.text
         if not text:
             self.search_results = []
+            self.status_label.text = self.tr.get('not_found', 'Not found')
             return
+
         try:
             self.search_results = []
             search_lower = search_text.lower()
@@ -4201,9 +4288,13 @@ class SearchOnlyPopup(BoxLayout):
                 start = pos + 1
         except:
             self.search_results = []
+
         self.current_result_index = -1
         if self.search_results:
+            self.status_label.text = f"✓ {self.tr.get('found', 'Found')}: {len(self.search_results)}"
             self.find_next()
+        else:
+            self.status_label.text = f"✗ {self.tr.get('not_found', 'Not found')}"
 
     def find_next(self):
         if not self.search_results:
@@ -4224,6 +4315,9 @@ class SearchOnlyPopup(BoxLayout):
         self.text_input.select_text(start, end)
         self._scroll_to_position(start)
 
+        # Обновляем статус
+        self.status_label.text = f"→ {self.current_result_index + 1} / {len(self.search_results)}"
+
     def _scroll_to_position(self, position):
         try:
             text = self.text_input.text
@@ -4241,31 +4335,10 @@ class SearchOnlyPopup(BoxLayout):
         except:
             pass
 
-    def set_popup(self, popup):
-        self.popup = popup
-        if hasattr(popup, 'bind'):
-            popup.bind(on_touch_down=self._on_popup_touch)
-
-    def _on_popup_touch(self, instance, touch):
-        if self.collide_point(*touch.pos):
-            return False
-        if hasattr(self, 'text_input') and self.text_input:
-            self.text_input.focus = True
-            return False
-
     def dismiss(self, *args):
-        # ВИБРАЦИЯ
         app = App.get_running_app()
-        if app and hasattr(app, 'vibrate_short'):
-            app.vibrate_short()
-
-        if self.popup:
-            self.popup.dismiss()
-
-    def open_popup(self):
-        if self.popup:
-            self.popup.open()
-            Clock.schedule_once(lambda dt: self._focus_search(), 0.3)
+        if app:
+            app.dismiss_search()
 
     def _focus_search(self):
         if self.search_input:
@@ -4273,70 +4346,175 @@ class SearchOnlyPopup(BoxLayout):
 
 
 class SearchReplacePopup(BoxLayout):
-    """Диалог для поиска и замены"""
+    """Диалог для поиска и замены (вверху экрана, не блокирует редактор)"""
 
     def __init__(self, text_input, **kwargs):
         super().__init__(**kwargs)
         self.text_input = text_input
         self.orientation = 'vertical'
-        self.padding = [dp(3), dp(3), dp(3), dp(3)]
-        self.spacing = dp(2)
+        self.padding = [dp(10), dp(8), dp(10), dp(8)]
+        self.spacing = dp(8)
         self.last_search = ''
         self.search_results = []
         self.current_result_index = -1
-        self.popup = None
         app = App.get_running_app()
         self.tr = app.tr if app else TRANSLATIONS['ru']
         theme = ThemeManager.get_theme()
         self._create_ui(theme)
 
-    def _create_ui(self, theme):
-        tr = self.tr
+        # Настройки для виджета
+        self.size_hint_y = None
+        self.height = dp(135)
+
+        # Добавляем тень/рамку для видимости
         with self.canvas.before:
-            bg_color = theme['widget_bg']
-            lighter_bg = (bg_color[0] * 0.8 + 1.0 * 0.2, bg_color[1] * 0.8 + 1.0 * 0.2, bg_color[2] * 0.8 + 1.0 * 0.2,
-                          bg_color[3])
-            Color(*lighter_bg)
+            Color(*theme.get('popup_bg', (0.188, 0.204, 0.251, 1)))
             self.bg_rect = Rectangle(pos=self.pos, size=self.size)
         self.bind(pos=self._update_bg, size=self._update_bg)
-        search_row = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(18), spacing=dp(2))
-        self.search_input = TextInput(hint_text=tr.get('find_text', 'Find text'), multiline=False, font_size=dp(10),
-                                      font_name='SourceBold', background_color=theme['input_bg'],
-                                      foreground_color=theme['input_text'], cursor_color=theme['input_cursor'],
-                                      hint_text_color=theme['hint_text'], size_hint_x=0.75)
-        self.search_input.bind(text=self._on_search_text_change)
-        search_row.add_widget(self.search_input)
-        btn_close = Button(text=tr.get('close', 'Close'), font_name='SourceBold', size_hint_x=0.25,
-                           background_color=theme.get('btn_danger_bg', (0.5, 0.2, 0.2, 1)), background_normal='',
-                           background_down='', color=theme['text_color'], font_size=dp(9))
-        btn_close.bind(on_release=self.dismiss)
-        search_row.add_widget(btn_close)
-        self.add_widget(search_row)
-        self.replace_input = TextInput(hint_text=tr.get('replace_text', 'Replace with'), multiline=False,
-                                       font_size=dp(10), font_name='SourceBold', background_color=theme['input_bg'],
-                                       foreground_color=theme['input_text'], cursor_color=theme['input_cursor'],
-                                       hint_text_color=theme['hint_text'], size_hint_y=None, height=dp(18))
-        self.add_widget(self.replace_input)
-        btn_layout = BoxLayout(size_hint_y=None, height=dp(17), spacing=dp(3))
-        btn_replace = Button(text=tr.get('replace', 'Replace'), font_name='SourceBold',
-                             background_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1)), background_normal='',
-                             background_down='', color=theme['text_color'], font_size=dp(9),
-                             on_release=lambda x: self.replace_current())
-        btn_next = Button(text='▶', font_name='SourceBold', background_color=theme['widget_bg'], background_normal='',
-                          background_down='', color=theme['text_color'], font_size=dp(9),
-                          on_release=lambda x: self.find_next())
-        btn_replace_all = Button(text=tr.get('replace_all', 'Replace All'), font_name='SourceBold',
-                                 background_color=theme['symbol_btn_bg'], background_normal='', background_down='',
-                                 color=theme['text_color'], font_size=dp(9), on_release=lambda x: self.replace_all())
-        btn_layout.add_widget(btn_replace)
-        btn_layout.add_widget(btn_next)
-        btn_layout.add_widget(btn_replace_all)
-        self.add_widget(btn_layout)
+
+        with self.canvas.after:
+            Color(*theme.get('separator_color', (0.5, 0.5, 0.5, 0.5)))
+            self.border_line = Line(rectangle=(self.x, self.y, self.width, self.height), width=dp(1))
+        self.bind(pos=self._update_border, size=self._update_border)
 
     def _update_bg(self, instance, value):
         if hasattr(self, 'bg_rect'):
             self.bg_rect.pos = instance.pos
             self.bg_rect.size = instance.size
+
+    def _update_border(self, instance, value):
+        if hasattr(self, 'border_line'):
+            self.border_line.rectangle = (instance.x, instance.y, instance.width, instance.height)
+
+    def _create_ui(self, theme):
+        tr = self.tr
+
+        # Верхняя строка с заголовком и кнопкой закрытия
+        header_box = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(28), spacing=dp(10))
+
+        header_label = Label(
+            text=tr.get('find_replace', '🔄 Find & Replace'),
+            color=theme.get('text_color', (0.85, 0.88, 0.90, 1)),
+            font_size=dp(14),
+            font_name='SourceBold',
+            size_hint_x=0.7,
+            halign='left',
+            valign='middle'
+        )
+        header_label.bind(size=lambda s, sz: setattr(header_label, 'text_size', (sz[0], None)))
+        header_box.add_widget(header_label)
+
+        btn_close = Button(
+            text='✕',
+            font_name='DejaVuSans',
+            size_hint=(None, 1),
+            width=dp(36),
+            background_color=theme.get('btn_danger_bg', (0.5, 0.2, 0.2, 1)),
+            background_normal='', background_down='',
+            color=(1, 1, 1, 1),
+            font_size=dp(16),
+            bold=True
+        )
+        btn_close.bind(on_release=lambda x: self.dismiss())
+        header_box.add_widget(btn_close)
+        self.add_widget(header_box)
+
+        # Строка поиска
+        search_row = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(34), spacing=dp(8))
+
+        self.search_input = TextInput(
+            hint_text=tr.get('find_text', 'Find...'),
+            multiline=False,
+            font_size=dp(13),
+            font_name='SourceBold',
+            background_color=theme['input_bg'],
+            foreground_color=theme['input_text'],
+            cursor_color=theme['input_cursor'],
+            hint_text_color=theme['hint_text'],
+            size_hint_x=0.6
+        )
+        self.search_input.bind(text=self._on_search_text_change)
+        search_row.add_widget(self.search_input)
+
+        # Кнопки навигации
+        nav_layout = BoxLayout(orientation='horizontal', size_hint_x=0.4, spacing=dp(6))
+        btn_prev = Button(
+            text='◀',
+            font_name='DejaVuSans',
+            background_color=theme['widget_bg'],
+            background_normal='', background_down='',
+            color=theme['text_color'],
+            font_size=dp(13),
+            on_release=lambda x: self.find_previous()
+        )
+        btn_next = Button(
+            text='▶',
+            font_name='DejaVuSans',
+            background_color=theme['widget_bg'],
+            background_normal='', background_down='',
+            color=theme['text_color'],
+            font_size=dp(13),
+            on_release=lambda x: self.find_next()
+        )
+        nav_layout.add_widget(btn_prev)
+        nav_layout.add_widget(btn_next)
+        search_row.add_widget(nav_layout)
+
+        self.add_widget(search_row)
+
+        # Строка замены
+        replace_row = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(34), spacing=dp(8))
+
+        self.replace_input = TextInput(
+            hint_text=tr.get('replace_text', 'Replace with...'),
+            multiline=False,
+            font_size=dp(13),
+            font_name='SourceBold',
+            background_color=theme['input_bg'],
+            foreground_color=theme['input_text'],
+            cursor_color=theme['input_cursor'],
+            hint_text_color=theme['hint_text'],
+            size_hint_x=0.6
+        )
+        replace_row.add_widget(self.replace_input)
+
+        # Кнопки действий
+        action_layout = BoxLayout(orientation='horizontal', size_hint_x=0.4, spacing=dp(6))
+        btn_replace = Button(
+            text=tr.get('replace', 'Replace'),
+            background_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1)),
+            background_normal='', background_down='',
+            color=(1, 1, 1, 1),
+            font_size=dp(11),
+            on_release=lambda x: self.replace_current()
+        )
+        btn_replace_all = Button(
+            text=tr.get('replace_all', 'Replace All'),
+            background_color=theme['widget_bg'],
+            background_normal='', background_down='',
+            color=theme['text_color'],
+            font_size=dp(11),
+            on_release=lambda x: self.replace_all()
+        )
+        action_layout.add_widget(btn_replace)
+        action_layout.add_widget(btn_replace_all)
+        replace_row.add_widget(action_layout)
+
+        self.add_widget(replace_row)
+
+        # Статусная строка
+        self.status_label = Label(
+            text='',
+            color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+            font_size=dp(10),
+            font_name='SourceBold',
+            size_hint_y=None,
+            height=dp(20),
+            halign='left',
+            valign='middle'
+        )
+        self.status_label.bind(size=lambda s, sz: setattr(self.status_label, 'text_size', (sz[0], None)))
+        self.add_widget(self.status_label)
 
     def _on_search_text_change(self, instance, value):
         if value != self.last_search:
@@ -4346,12 +4524,16 @@ class SearchReplacePopup(BoxLayout):
         search_text = self.search_input.text
         if not search_text:
             self.search_results = []
+            self.status_label.text = ''
             return
+
         self.last_search = search_text
         text = self.text_input.text
         if not text:
             self.search_results = []
+            self.status_label.text = self.tr.get('not_found', 'Not found')
             return
+
         try:
             self.search_results = []
             search_lower = search_text.lower()
@@ -4365,9 +4547,13 @@ class SearchReplacePopup(BoxLayout):
                 start = pos + 1
         except:
             self.search_results = []
+
         self.current_result_index = -1
         if self.search_results:
+            self.status_label.text = f"✓ {self.tr.get('found', 'Found')}: {len(self.search_results)}"
             self.find_next()
+        else:
+            self.status_label.text = f"✗ {self.tr.get('not_found', 'Not found')}"
 
     def find_next(self):
         if not self.search_results:
@@ -4375,58 +4561,89 @@ class SearchReplacePopup(BoxLayout):
         self.current_result_index = (self.current_result_index + 1) % len(self.search_results)
         self._highlight_current()
 
+    def find_previous(self):
+        if not self.search_results:
+            return
+        self.current_result_index = (self.current_result_index - 1) % len(self.search_results)
+        self._highlight_current()
+
     def _highlight_current(self):
         if not self.search_results or self.current_result_index < 0:
             return
         start, end = self.search_results[self.current_result_index]
         self.text_input.select_text(start, end)
+        self._scroll_to_position(start)
+        self.status_label.text = f"→ {self.current_result_index + 1} / {len(self.search_results)}"
+
+    def _scroll_to_position(self, position):
+        try:
+            text = self.text_input.text
+            text_before = text[:position]
+            line_number = text_before.count('\n')
+            total_lines = max(1, text.count('\n') + 1)
+            target_y = 1.0 - (line_number / total_lines)
+            target_y = max(0.0, min(1.0, target_y))
+            parent = self.text_input.parent
+            while parent:
+                if isinstance(parent, ScrollView):
+                    parent.scroll_y = target_y
+                    break
+                parent = parent.parent
+        except:
+            pass
 
     def replace_current(self):
         if not self.search_results or self.current_result_index < 0:
             return
         if self.current_result_index >= len(self.search_results):
             return
+
         start, end = self.search_results[self.current_result_index]
         replace_text = self.replace_input.text
-        self.text_input.text = self.text_input.text[:start] + replace_text + self.text_input.text[end:]
-        self._perform_search()
+
+        old_text = self.text_input.text
+        new_text = old_text[:start] + replace_text + old_text[end:]
+        self.text_input.text = new_text
+
+        # Корректируем позиции оставшихся результатов
+        delta = len(replace_text) - (end - start)
+        adjusted_results = []
+        for i, (s, e) in enumerate(self.search_results):
+            if i == self.current_result_index:
+                adjusted_results.append((start, start + len(replace_text)))
+            elif s > start:
+                adjusted_results.append((s + delta, e + delta))
+            else:
+                adjusted_results.append((s, e))
+
+        self.search_results = adjusted_results
+        if self.current_result_index < len(self.search_results):
+            self._highlight_current()
+        else:
+            self.current_result_index = -1
+
+        self.status_label.text = f"✓ {self.tr.get('replaced', 'Replaced')} | {len(self.search_results)} matches"
 
     def replace_all(self):
         if not self.search_results:
             return
+
         replace_text = self.replace_input.text
         text = self.text_input.text
+
+        # Заменяем с конца, чтобы не сбивать позиции
         for start, end in reversed(self.search_results):
             text = text[:start] + replace_text + text[end:]
+
         self.text_input.text = text
         self.search_results = []
         self.current_result_index = -1
-
-    def set_popup(self, popup):
-        self.popup = popup
-        if hasattr(popup, 'bind'):
-            popup.bind(on_touch_down=self._on_popup_touch)
-
-    def _on_popup_touch(self, instance, touch):
-        if self.collide_point(*touch.pos):
-            return False
-        if hasattr(self, 'text_input') and self.text_input:
-            self.text_input.focus = True
-            return False
+        self.status_label.text = f"✓ {self.tr.get('replaced', 'Replaced')} all"
 
     def dismiss(self, *args):
-        # ВИБРАЦИЯ
         app = App.get_running_app()
-        if app and hasattr(app, 'vibrate_short'):
-            app.vibrate_short()
-
-        if self.popup:
-            self.popup.dismiss()
-
-    def open_popup(self):
-        if self.popup:
-            self.popup.open()
-            Clock.schedule_once(lambda dt: self._focus_search(), 0.3)
+        if app:
+            app.dismiss_search()
 
     def _focus_search(self):
         if self.search_input:
@@ -7386,61 +7603,86 @@ def пауза():
 
     def show_search_only_dialog(self, instance=None):
         self.dismiss_search()
+
         content = SearchOnlyPopup(self.code_input)
-        container = FloatLayout()
 
-        # Адаптивный размер окна поиска
-        category = get_screen_category()
-        if category == 'tablet':
-            size_hint = (0.70, 0.20)
-        elif category == 'large_phone':
-            size_hint = (0.80, 0.18)
+        # Добавляем как виджет, а не popup
+        content.size_hint_y = None
+        content.height = dp(120)
+        content.pos_hint = {'top': 1}
+
+        self.search_widget = content
+
+        # Добавляем в корневой виджет
+        if hasattr(self, 'root_layout'):
+            self.root_layout.add_widget(content)
         else:
-            size_hint = (0.95, 0.15)
+            # Ищем корневой виджет
+            for child in self.root.children:
+                if hasattr(child, 'children'):
+                    for sub in child.children:
+                        if isinstance(sub, FloatLayout):
+                            sub.add_widget(content)
+                            break
+                    break
 
-        search_box = BoxLayout(orientation='vertical', size_hint=size_hint, pos_hint={'top': 1.0, 'center_x': 0.5})
-        search_box.add_widget(content)
-        container.add_widget(search_box)
-        popup = Popup(title='', title_color=(0, 0, 0, 0), separator_color=(0, 0, 0, 0), background='',
-                      background_color=(0, 0, 0, 0), content=container, size_hint=size_hint, auto_dismiss=False,
-                      overlay_color=(0, 0, 0, 0))
-        content.set_popup(popup)
-        content.open_popup()
-        self.search_popup = popup
+        Clock.schedule_once(lambda dt: content._focus_search(), 0.3)
 
     def show_search_replace_dialog(self, instance=None):
         self.dismiss_search()
+
         content = SearchReplacePopup(self.code_input)
-        container = FloatLayout()
 
-        # Адаптивный размер окна поиска и замены
-        category = get_screen_category()
-        if category == 'tablet':
-            size_hint = (0.75, 0.30)
-        elif category == 'large_phone':
-            size_hint = (0.85, 0.26)
+        # Добавляем как виджет, а не popup
+        content.size_hint_y = None
+        content.height = dp(155)
+        content.pos_hint = {'top': 1}
+
+        self.search_widget = content
+
+        # Добавляем в корневой виджет
+        if hasattr(self, 'root_layout'):
+            self.root_layout.add_widget(content)
         else:
-            size_hint = (0.95, 0.22)
+            # Ищем корневой виджет
+            for child in self.root.children:
+                if hasattr(child, 'children'):
+                    for sub in child.children:
+                        if isinstance(sub, FloatLayout):
+                            sub.add_widget(content)
+                            break
+                    break
 
-        replace_box = BoxLayout(orientation='vertical', size_hint=size_hint, pos_hint={'top': 1.0, 'center_x': 0.5})
-        replace_box.add_widget(content)
-        container.add_widget(replace_box)
-        popup = Popup(title='', title_color=(0, 0, 0, 0), separator_color=(0, 0, 0, 0), background='',
-                      background_color=(0, 0, 0, 0), content=container, size_hint=size_hint, auto_dismiss=False,
-                      overlay_color=(0, 0, 0, 0))
-        content.set_popup(popup)
-        content.open_popup()
-        self.search_popup = popup
+        Clock.schedule_once(lambda dt: content._focus_search(), 0.3)
 
     def dismiss_search(self):
-        if self.search_popup:
+        """Закрывает окно поиска"""
+        if hasattr(self, 'search_widget') and self.search_widget:
             try:
-                self.search_popup.dismiss()
+                self.search_widget.parent.remove_widget(self.search_widget)
             except:
                 pass
-            self.search_popup = None
+            self.search_widget = None
+
+        # Восстанавливаем фокус на редакторе
         if hasattr(self, 'code_input') and self.code_input:
-            self.code_input.focus = True
+            Clock.schedule_once(lambda dt: setattr(self.code_input, 'focus', True), 0.1)
+
+    def _position_search_popup(self, popup):
+        """Позиционирует попап вверху экрана"""
+        Clock.schedule_once(lambda dt: self._apply_search_position(popup), 0.05)
+
+    def _apply_search_position(self, popup):
+        """Применяет позиционирование попапа"""
+        try:
+            if popup and popup.container:
+                # Размещаем попап вверху
+                popup.container.pos_hint = {'top': 1}
+                popup.container.size_hint = (1, None)
+                # Принудительно обновляем
+                popup.container.height = popup.content.height
+        except:
+            pass
 
     def show_search_dialog_from_button(self):
         self.show_search_only_dialog(None)
