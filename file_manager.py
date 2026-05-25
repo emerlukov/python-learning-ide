@@ -1,4 +1,4 @@
-# file_manager.py - Файловый менеджер с улучшенной чувствительностью
+# file_manager.py - ИСПРАВЛЕННАЯ ВЕРСИЯ
 
 import os
 import threading
@@ -311,6 +311,7 @@ class FileBrowserPopup:
         self._sort_reverse = False
         self._last_touch_time = 0
         self._last_touch_path = None
+        self._current_menu_popup = None  # Добавляем ссылку на текущее меню
 
     def _tr(self, key, fallback=""):
         if hasattr(self.app, 'tr') and self.app.tr:
@@ -616,17 +617,23 @@ class FileBrowserPopup:
             theme_icon_color="Custom",
             icon_color=PURPLE
         )
-        menu_btn.bind(on_release=lambda btn, it=item: self._show_menu(btn, it))
+        # ИЗМЕНЕНО: прямое касание для кнопки меню
+        menu_btn.bind(on_release=lambda btn, it=item: self._show_menu_for_item(it, btn))
         row.add_widget(menu_btn)
 
-        # Привязываем обработчики касаний (без лямбда с touch)
+        # Привязываем обработчики касаний для строки (удержание)
         row.bind(on_touch_down=self._on_row_touch_down)
         row.bind(on_touch_up=self._on_row_touch_up)
 
         return row
 
     def _on_row_touch_down(self, instance, touch):
-        """Запоминаем начало касания"""
+        """Запоминаем начало касания, но только если касание не на кнопке меню"""
+        # Проверяем, не нажата ли кнопка меню внутри строки
+        for child in instance.children:
+            if isinstance(child, MDIconButton) and child.collide_point(*touch.pos):
+                return False  # Игнорируем, это обработает кнопка меню
+
         if not instance.collide_point(*touch.pos):
             return False
         instance.touch_start_time = time.time()
@@ -635,7 +642,12 @@ class FileBrowserPopup:
         return True
 
     def _on_row_touch_up(self, instance, touch):
-        """Обрабатываем отпускание касания"""
+        """Обрабатываем отпускание касания только если это удержание (не на кнопке меню)"""
+        # Проверяем, не нажата ли кнопка меню внутри строки
+        for child in instance.children:
+            if isinstance(child, MDIconButton) and child.collide_point(*touch.pos):
+                return False  # Игнорируем, это обработает кнопка меню
+
         # Проверяем, было ли движение
         if hasattr(instance, 'touch_moved') and instance.touch_moved:
             return False
@@ -657,73 +669,23 @@ class FileBrowserPopup:
         if not path:
             return False
 
-        # Короткое касание (клик)
-        if duration < CLICK_DELAY:
+        # ТОЛЬКО длинное касание (удержание) для контекстного меню
+        if duration >= CLICK_DELAY:
+            item = getattr(instance, 'item', None)
+            if item:
+                self._show_menu_for_item(item, instance)
+        else:
+            # Короткое касание - открываем папку или выделяем файл
             if is_dir:
                 self._open_folder(path)
             else:
                 self._select_file(path)
-        # Длинное касание (контекстное меню)
-        else:
-            item = getattr(instance, 'item', None)
-            if item:
-                self._show_menu_for_item(item, instance)
 
         return True
 
-    def _show_menu_for_item(self, item, button):
-        """Показывает контекстное меню для элемента"""
-        tr = self._tr
-
-        content = MDBoxLayout(orientation='vertical', padding=dp(8), spacing=dp(5), size_hint_y=None)
-        content.height = dp(130)
-
-        if not item.is_dir:
-            btn_open = MDRectangleFlatButton(
-                text=tr('open', 'Open'),
-                size_hint_y=None,
-                height=dp(40),
-                line_color=PURPLE,
-                text_color=PURPLE
-            )
-            btn_open.bind(on_release=lambda x: self._open_item(item))
-            content.add_widget(btn_open)
-
-        btn_rename = MDRectangleFlatButton(
-            text=tr('rename', 'Rename'),
-            size_hint_y=None,
-            height=dp(40),
-            line_color=PURPLE,
-            text_color=PURPLE
-        )
-        btn_rename.bind(on_release=lambda x: self._rename_item(item))
-        content.add_widget(btn_rename)
-
-        btn_delete = MDRectangleFlatButton(
-            text=tr('delete', 'Delete'),
-            size_hint_y=None,
-            height=dp(40),
-            md_bg_color=(0.5, 0.2, 0.2, 1),
-            text_color=(1, 1, 1, 1)
-        )
-        btn_delete.bind(on_release=lambda x: self._delete_item(item))
-        content.add_widget(btn_delete)
-
-        menu_popup = Popup(
-            title=tr('actions', 'Actions'),
-            title_color=PURPLE,
-            separator_color=PURPLE,
-            background='',
-            background_color=self._get_bg_color(),
-            content=content,
-            size_hint=(0.6, None),
-            height=dp(190) if not item.is_dir else dp(150),
-            auto_dismiss=True
-        )
-        menu_popup.open()
-
     def _update_selected_rect(self, instance, value):
-        if hasattr(instance, '_selected_rect'):
+        """Обновляет позицию и размер подсветки выбранного элемента"""
+        if hasattr(instance, '_selected_rect') and instance._selected_rect:
             instance._selected_rect.pos = instance.pos
             instance._selected_rect.size = instance.size
 
@@ -733,32 +695,143 @@ class FileBrowserPopup:
         self._selected_item = None
 
     def _select_file(self, path):
+        """Выбирает файл с правильной очисткой предыдущей подсветки"""
+        # Сохраняем старый выбранный путь
+        old_selected = self._selected_item
         self._selected_item = path
 
-        # Обновляем подсветку
+        # Очищаем подсветку со всех строк
+        if self.file_container:
+            for child in self.file_container.children[:]:  # копия списка для безопасной итерации
+                if isinstance(child, ClickableRow):
+                    # Удаляем старый прямоугольник если есть
+                    if hasattr(child, '_selected_rect'):
+                        if child._selected_rect:
+                            child.canvas.before.remove(child._selected_rect)
+                            child._selected_rect = None
+
+                    # Удаляем старые привязки, если они есть
+                    if hasattr(child, '_bound_pos') and child._bound_pos:
+                        child.unbind(pos=child._bound_pos, size=child._bound_size)
+                        child._bound_pos = None
+                        child._bound_size = None
+
+        # Добавляем подсветку только для нового выбранного файла
         if self.file_container:
             for child in self.file_container.children:
                 if isinstance(child, ClickableRow):
-                    if hasattr(child, '_selected_rect'):
-                        child.canvas.before.remove(child._selected_rect)
-                        child._selected_rect = None
+                    # Проверяем, соответствует ли эта строка выбранному файлу
+                    child_path = getattr(child, 'item_path', None)
+                    if child_path == path:
+                        # Создаем новый прямоугольник
+                        with child.canvas.before:
+                            Color(*PURPLE_LIGHT)
+                            child._selected_rect = Rectangle(pos=child.pos, size=child.size)
 
-                    if hasattr(child, 'children'):
-                        for widget in child.children:
-                            if isinstance(widget, MDBoxLayout):
-                                for sub_widget in widget.children:
-                                    if isinstance(sub_widget, Label) and sub_widget.text == os.path.basename(path):
-                                        with child.canvas.before:
-                                            Color(*PURPLE_LIGHT)
-                                            child._selected_rect = Rectangle(pos=child.pos, size=child.size)
-                                        child.bind(pos=self._update_selected_rect, size=self._update_selected_rect)
-                                        break
+                        # Сохраняем привязки для обновления
+                        child._bound_pos = child.bind(pos=self._update_selected_rect)
+                        child._bound_size = child.bind(size=self._update_selected_rect)
+                        break
 
-    def _show_menu(self, button, item):
-        """Старый метод для совместимости"""
-        self._show_menu_for_item(item, button)
+    def _show_menu_for_item(self, item, button):
+        """Показывает контекстное меню для элемента - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
+        # Закрываем предыдущее меню, если оно открыто
+        if self._current_menu_popup:
+            self._current_menu_popup.dismiss()
+            self._current_menu_popup = None
+
+        tr = self._tr
+        bg_color = self._get_bg_color()
+
+        # Создаём содержимое меню
+        content = MDBoxLayout(orientation='vertical', padding=dp(8), spacing=dp(5), size_hint_y=None)
+
+        # Устанавливаем высоту в зависимости от типа элемента
+        if not item.is_dir:
+            content.height = dp(200)
+        else:
+            content.height = dp(160)
+
+        if not item.is_dir:
+            btn_open = MDRectangleFlatButton(
+                text=tr('open', 'Open'),
+                size_hint_y=None,
+                height=dp(40),
+                line_color=PURPLE,
+                text_color=PURPLE
+            )
+            btn_open.bind(on_release=lambda x: self._open_item_with_menu_close(item))
+            content.add_widget(btn_open)
+
+        btn_rename = MDRectangleFlatButton(
+            text=tr('rename', 'Rename'),
+            size_hint_y=None,
+            height=dp(40),
+            line_color=PURPLE,
+            text_color=PURPLE
+        )
+        btn_rename.bind(on_release=lambda x: self._rename_item_with_menu_close(item))
+        content.add_widget(btn_rename)
+
+        btn_delete = MDRectangleFlatButton(
+            text=tr('delete', 'Delete'),
+            size_hint_y=None,
+            height=dp(40),
+            md_bg_color=(0.5, 0.2, 0.2, 1),
+            text_color=(1, 1, 1, 1)
+        )
+        btn_delete.bind(on_release=lambda x: self._delete_item_with_menu_close(item))
+        content.add_widget(btn_delete)
+
+        # Создаём попап меню
+        try:
+            menu_popup = Popup(
+                title=tr('actions', 'Actions'),
+                title_color=PURPLE,
+                separator_color=PURPLE,
+                background='',
+                background_color=bg_color,
+                content=content,
+                size_hint=(0.55, None),
+                height=content.height,
+                auto_dismiss=True
+            )
+
+            # При закрытии очищаем ссылку
+            menu_popup.bind(on_dismiss=self._on_menu_closed)
+
+            self._current_menu_popup = menu_popup
+            menu_popup.open()
+        except Exception as e:
+            print(f"[ERROR] Menu popup error: {e}")
+
+    def _on_menu_closed(self, instance):
+        """Очищает ссылку на меню при его закрытии"""
+        self._current_menu_popup = None
+
+    def _open_item_with_menu_close(self, item):
+        """Открывает элемент и закрывает меню"""
+        if self._current_menu_popup:
+            self._current_menu_popup.dismiss()
+            self._current_menu_popup = None
+        self._open_item(item)
+
+    def _rename_item_with_menu_close(self, item):
+        """Переименовывает элемент и закрывает меню"""
+        if self._current_menu_popup:
+            self._current_menu_popup.dismiss()
+            self._current_menu_popup = None
+        self._rename_item(item)
+
+    def _delete_item_with_menu_close(self, item):
+        """Удаляет элемент и закрывает меню"""
+        if self._current_menu_popup:
+            self._current_menu_popup.dismiss()
+            self._current_menu_popup = None
+        self._delete_item(item)
 
     def _open_item(self, item):
+        """Открывает папку или файл"""
         if item.is_dir:
             self.fm.navigate_to(item.path)
             self._refresh_list()
@@ -767,6 +840,7 @@ class FileBrowserPopup:
             self._load_and_close(item.path)
 
     def _rename_item(self, item):
+        """Показывает диалог переименования"""
         bg_color = self._get_bg_color()
         tr = self._tr
 
@@ -774,7 +848,9 @@ class FileBrowserPopup:
         content.add_widget(Label(
             text=f"{tr('rename', 'Rename')}: {item.name}",
             color=PURPLE,
-            font_size=dp(12)
+            font_size=dp(12),
+            size_hint_y=None,
+            height=dp(30)
         ))
 
         name_input = MDTextField(
@@ -789,14 +865,14 @@ class FileBrowserPopup:
 
         btn_layout = MDBoxLayout(size_hint_y=None, height=dp(40), spacing=dp(10))
 
-        popup = Popup(
+        rename_popup = Popup(
             title=tr('rename', 'Rename'),
             title_color=PURPLE,
             separator_color=PURPLE,
             background='',
             background_color=bg_color,
             content=content,
-            size_hint=(0.8, 0.35),
+            size_hint=(0.8, 0.38),
             auto_dismiss=False
         )
 
@@ -804,7 +880,7 @@ class FileBrowserPopup:
             new_name = name_input.text.strip()
             if new_name and new_name != item.name:
                 def callback(success, new_path, error):
-                    popup.dismiss()
+                    rename_popup.dismiss()
                     if success:
                         self._refresh_list()
                         self.app.show_result_popup(f"{tr('renamed', 'Renamed')}: {new_name}")
@@ -813,7 +889,7 @@ class FileBrowserPopup:
 
                 self.fm.rename_file(item.path, new_name, callback)
             else:
-                popup.dismiss()
+                rename_popup.dismiss()
 
         btn_ok = MDRectangleFlatButton(
             text=tr('ok', 'OK'),
@@ -826,16 +902,17 @@ class FileBrowserPopup:
             line_color=PURPLE,
             text_color=PURPLE
         )
-        btn_cancel.bind(on_release=lambda x: popup.dismiss())
+        btn_cancel.bind(on_release=lambda x: rename_popup.dismiss())
 
         btn_layout.add_widget(btn_cancel)
         btn_layout.add_widget(btn_ok)
         content.add_widget(btn_layout)
 
-        popup.open()
+        rename_popup.open()
         Clock.schedule_once(lambda dt: setattr(name_input, 'focus', True), 0.3)
 
     def _delete_item(self, item):
+        """Показывает диалог подтверждения удаления"""
         bg_color = self._get_bg_color()
         tr = self._tr
 
@@ -843,30 +920,34 @@ class FileBrowserPopup:
         content.add_widget(Label(
             text=f"{tr('delete_confirm', 'Delete')} {item.name}?",
             color=PURPLE,
-            font_size=dp(14)
+            font_size=dp(14),
+            size_hint_y=None,
+            height=dp(30)
         ))
         if not item.is_dir:
             content.add_widget(Label(
                 text=tr('cannot_undo', 'This cannot be undone'),
                 color=(0.7, 0.2, 0.2, 1),
-                font_size=dp(10)
+                font_size=dp(10),
+                size_hint_y=None,
+                height=dp(20)
             ))
 
         btn_layout = MDBoxLayout(size_hint_y=None, height=dp(40), spacing=dp(10))
 
-        popup = Popup(
+        delete_popup = Popup(
             title=tr('confirm', 'Confirm'),
             title_color=PURPLE,
             separator_color=PURPLE,
             background='',
             background_color=bg_color,
             content=content,
-            size_hint=(0.7, 0.25),
+            size_hint=(0.7, 0.35),
             auto_dismiss=False
         )
 
         def do_delete(btn):
-            popup.dismiss()
+            delete_popup.dismiss()
 
             def callback(success, error):
                 if success:
@@ -888,16 +969,16 @@ class FileBrowserPopup:
             line_color=PURPLE,
             text_color=PURPLE
         )
-        btn_cancel.bind(on_release=lambda x: popup.dismiss())
+        btn_cancel.bind(on_release=lambda x: delete_popup.dismiss())
 
         btn_layout.add_widget(btn_cancel)
         btn_layout.add_widget(btn_delete)
         content.add_widget(btn_layout)
 
-        popup.open()
+        delete_popup.open()
 
     def _load_and_close(self, file_path):
-        """Загружает файл без лишних попапов"""
+        """Загружает файл и закрывает браузер"""
 
         def on_loaded(content, error):
             self._dismiss()
@@ -925,11 +1006,9 @@ class FileBrowserPopup:
                 self._confirm_overwrite(full_path, content, filename)
                 return
 
-            # Сохраняем без лишних попапов - только финальное сообщение
             def on_saved(success, error):
                 self._dismiss()
                 if success:
-                    # Только одно сообщение об успехе
                     self.app.show_result_popup(f"{tr('saved', 'Saved')}: {filename}")
                     if self.callback:
                         self.callback(full_path, content)
@@ -952,7 +1031,9 @@ class FileBrowserPopup:
         content_box.add_widget(Label(
             text=f"{tr('file_exists', 'File')} '{filename}' {tr('already_exists', 'exists')}.\n{tr('overwrite_prompt', 'Overwrite?')}",
             color=PURPLE,
-            halign='center'
+            halign='center',
+            size_hint_y=None,
+            height=dp(50)
         ))
 
         btn_layout = MDBoxLayout(size_hint_y=None, height=dp(40), spacing=dp(10))
@@ -964,7 +1045,7 @@ class FileBrowserPopup:
             background='',
             background_color=bg_color,
             content=content_box,
-            size_hint=(0.7, 0.25),
+            size_hint=(0.7, 0.28),
             auto_dismiss=False
         )
 
@@ -1002,6 +1083,25 @@ class FileBrowserPopup:
         popup.open()
 
     def _dismiss(self):
+        """Закрывает попап с очисткой всех ресурсов"""
+        # Очищаем подсветку
+        if hasattr(self, 'file_container') and self.file_container:
+            for child in self.file_container.children[:]:
+                if isinstance(child, ClickableRow):
+                    if hasattr(child, '_selected_rect') and child._selected_rect:
+                        child.canvas.before.remove(child._selected_rect)
+                        child._selected_rect = None
+                    if hasattr(child, '_bound_pos') and child._bound_pos:
+                        child.unbind(pos=child._bound_pos, size=child._bound_size)
+                        child._bound_pos = None
+                        child._bound_size = None
+
+        # Закрываем меню если открыто
+        if hasattr(self, '_current_menu_popup') and self._current_menu_popup:
+            self._current_menu_popup.dismiss()
+            self._current_menu_popup = None
+
+        # Закрываем попап
         if self.popup:
             self.popup.dismiss()
             self.popup = None
