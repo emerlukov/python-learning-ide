@@ -5104,45 +5104,47 @@ class TabManager:
         tr = self.app.tr
         theme = ThemeManager.get_theme()
 
-        from kivy.uix.popup import Popup
         from kivy.uix.boxlayout import BoxLayout
         from kivy.uix.button import Button
         from kivy.uix.label import Label
         from kivy.clock import Clock
 
-        content = BoxLayout(orientation='vertical', padding=10, spacing=5)
+        content = BoxLayout(orientation='vertical', padding=15, spacing=10)  # ← увеличены отступы
+
+        # Увеличиваем размер шрифта и высоту
         message = f"{tr.get('unsaved_changes', 'Unsaved changes')}\n'{tab_title}'\n\n{tr.get('save_before_exit', 'Save before closing?')}"
 
         content.add_widget(Label(
             text=message,
             color=theme['text_color'],
-            font_size=11,
+            font_size=14,  # ← было 11
             font_name='SourceBold',
             halign='center',
             size_hint_y=None,
-            height=45
+            height=55  # ← было 45
         ))
 
-        btn_layout = BoxLayout(size_hint_y=None, height=30, spacing=8)
+        btn_layout = BoxLayout(size_hint_y=None, height=40, spacing=10)  # ← было 30
 
-        popup = Popup(
+        # Используем ThemedPopup
+        popup = ThemedPopup(
             title=tr.get('confirm_title', 'Unsaved changes'),
             title_color=theme['popup_title'],
-            background='',
-            background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)),
+            title_bg=theme.get('popup_title_bg', theme['widget_bg']),
+            popup_bg=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)),
+            separator_color=theme.get('popup_separator', (0.25, 0.25, 0.25, 1)),
             content=content,
-            size_hint=(0.85, 0.32),
+            size_hint=(0.85, 0.38),  # ← было 0.32, увеличили высоту
+            pos_hint={'top': 0.85},  # ← ПРИЖИМАЕМ К ВЕРХУ
             auto_dismiss=False
         )
 
         def on_save(x):
             popup.dismiss()
-            # Сохраняем содержимое по ID
             if tab_file:
                 self.app._save_tab_content_by_id(tab_file, tab_content, tab_id)
             else:
                 self.app._save_tab_as_by_id(tab_content, tab_id)
-            # Закрываем вкладку по ID
             Clock.schedule_once(lambda dt: self._do_close_tab_by_id(tab_id), 0.5)
 
         def on_discard(x):
@@ -5152,13 +5154,16 @@ class TabManager:
         def on_cancel(x):
             popup.dismiss()
 
+        # Увеличиваем размер кнопок
         btn_save = Button(
             text=tr.get('save', 'Save'),
             font_name='SourceBold',
             background_color=(0.2, 0.5, 0.2, 1),
             background_normal='', background_down='',
             color=(1, 1, 1, 1),
-            font_size=11,
+            font_size=13,  # ← было 11
+            size_hint_y=None,
+            height=35,  # ← добавили высоту
             on_release=on_save
         )
 
@@ -5168,7 +5173,9 @@ class TabManager:
             background_color=(0.5, 0.2, 0.2, 1),
             background_normal='', background_down='',
             color=theme['text_color'],
-            font_size=11,
+            font_size=13,  # ← было 11
+            size_hint_y=None,
+            height=35,  # ← добавили высоту
             on_release=on_discard
         )
 
@@ -5178,7 +5185,9 @@ class TabManager:
             background_color=theme['widget_bg'],
             background_normal='', background_down='',
             color=theme['text_color'],
-            font_size=11,
+            font_size=13,  # ← было 11
+            size_hint_y=None,
+            height=35,  # ← добавили высоту
             on_release=on_cancel
         )
 
