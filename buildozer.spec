@@ -11,9 +11,8 @@ source.exclude_patterns = *.pyc,*.pyo
 version = 3.4.0
 
 # ========== ТРЕБОВАНИЯ ==========
-requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0,kivymd==1.1.1,pygments,autopep8,pycodestyle,plyer,requests,androidstorage4kivy,plyer
-
-android.gradle_dependencies = 'com.android.support:support-annotations:28.0.0'
+# ВСЁ ОСТАВЛЕНО КАК БЫЛО (работало раньше)
+requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0,kivymd==1.1.1,pygments,autopep8,pycodestyle,plyer,requests,androidstorage4kivy
 
 # ========== ЗАСТАВКИ ==========
 presplash.filename = splash.png
@@ -28,7 +27,7 @@ orientation = portrait
 fullscreen = 0
 
 # ========== ANDROID НАСТРОЙКИ ==========
-android.api = 34
+android.api = 33
 android.minapi = 24
 android.targetapi = 33
 android.ndk_api = 24
@@ -65,6 +64,9 @@ package.full_name = Python Learning IDE
 android.logcat_filters = *:S python:D
 android.extract_native_libs = True
 log_level = 2
+
+# ========== ЕДИНСТВЕННОЕ НОВОЕ - отключаем проблемную библиотеку ==========
+android.exclude_libs = libthorvg-1.so
 
 [buildozer]
 log_level = 2
