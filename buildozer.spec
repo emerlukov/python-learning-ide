@@ -14,7 +14,6 @@ version = 3.4.0
 requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0,kivymd==1.1.1,pygments,autopep8,pycodestyle,plyer,requests,androidstorage4kivy,plyer
 
 android.gradle_dependencies = 'com.android.support:support-annotations:28.0.0'
-android.enable_androidx = True
 
 # ========== ЗАСТАВКИ ==========
 presplash.filename = splash.png
