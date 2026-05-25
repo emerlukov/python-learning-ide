@@ -11,7 +11,6 @@ source.exclude_patterns = *.pyc,*.pyo
 version = 3.4.0
 
 # ========== ТРЕБОВАНИЯ ==========
-# ИЗМЕНЕНО: kivymd==1.1.1 -> kivymd==1.1.0 (не требует libthorvg)
 requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0,kivymd==1.1.0,pygments,autopep8,pycodestyle,plyer,requests,androidstorage4kivy
 
 # ========== ЗАСТАВКИ ==========
@@ -54,7 +53,7 @@ source.main = main.py
 android.copy_libs = 1
 
 # ========== НАСТРОЙКИ СТАБИЛЬНОСТИ ==========
-p4a.branch = stable
+p4a.branch = master
 p4a.hostpython_version = 3.10.7
 android.wakelock = False
 p4a.bootstrap = sdl2
