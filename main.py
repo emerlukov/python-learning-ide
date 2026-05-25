@@ -54,6 +54,7 @@ import ssl
 import time
 import re
 import builtins
+import uuid
 from datetime import datetime
 from plyer import vibrator
 # После остальных импортов, добавьте:
@@ -602,6 +603,9 @@ TRANSLATIONS = {
         'sort_size': 'Размер',
         'file_size': 'Размер',
         'modified': 'Изменён',
+        'goto_line': 'Перейти',
+        'goto_line_title': 'Перейти к строке',
+        'goto_line_hint': 'Номер строки',
     },
     'en': {
         'no_code': 'No code to format',
@@ -826,6 +830,9 @@ TRANSLATIONS = {
         'sort_size': 'Size',
         'file_size': 'Size',
         'modified': 'Modified',
+        'goto_line': 'Go to',
+        'goto_line_title': 'Go to line',
+        'goto_line_hint': 'Line number',
     },
 }
 
@@ -3410,6 +3417,7 @@ class MyActionBar(BoxLayout):
     ACTION_CLEAN = 'clean'
     ACTION_FIND = 'find'
     ACTION_FIND_REPLACE = 'find_replace'
+    ACTION_GOTO = 'goto'
     background_color = ColorProperty([0, 0, 0, 0])
     border = ListProperty([0, 0, 0, 0])
     background_image = StringProperty('')
@@ -3441,7 +3449,7 @@ class MyActionBar(BoxLayout):
         self._keywords_popup = None
         self._autocomplete_popup = None
         self.action_keys = [self.ACTION_UNDO, self.ACTION_REDO, self.ACTION_COPY, self.ACTION_PASTE, self.ACTION_CUT,
-                            self.ACTION_SEL_ALL, self.ACTION_AUTO, self.ACTION_KEY, self.ACTION_CLEAN, self.ACTION_FIND, self.ACTION_FIND_REPLACE]
+                            self.ACTION_SEL_ALL, self.ACTION_AUTO, self.ACTION_KEY, self.ACTION_CLEAN, self.ACTION_FIND, self.ACTION_FIND_REPLACE, self.ACTION_GOTO]
         self.buttons = []
         self._create_scroll_view()
         self._create_buttons()
@@ -3469,7 +3477,7 @@ class MyActionBar(BoxLayout):
             self.ACTION_UNDO: 'undo', self.ACTION_REDO: 'redo', self.ACTION_COPY: 'content-copy',
             self.ACTION_PASTE: 'content-paste', self.ACTION_CUT: 'content-cut', self.ACTION_SEL_ALL: 'select-all',
             self.ACTION_AUTO: 'code-tags', self.ACTION_KEY: 'key-variant', self.ACTION_CLEAN: 'delete-sweep',
-            self.ACTION_FIND: 'magnify', self.ACTION_FIND_REPLACE: 'find-replace',
+            self.ACTION_FIND: 'magnify', self.ACTION_FIND_REPLACE: 'find-replace',self.ACTION_GOTO: 'arrow-right-bold',
         }
         for key in self.action_keys:
             icon_name = action_icons.get(key, None)
@@ -3548,6 +3556,9 @@ class MyActionBar(BoxLayout):
             elif action_key == self.ACTION_FIND_REPLACE:  # ← НОВАЯ КНОПКА
                 if self.app and hasattr(self.app, 'show_search_replace_dialog'):
                     self.app.show_search_replace_dialog()
+            elif action_key == self.ACTION_GOTO:
+                if self.app and hasattr(self.app, 'show_goto_line_dialog'):
+                    self.app.show_goto_line_dialog()
             if action_key in [self.ACTION_COPY, self.ACTION_PASTE, self.ACTION_CUT, self.ACTION_SEL_ALL,
                               self.ACTION_CLEAN, self.ACTION_UNDO, self.ACTION_REDO]:
                 Clock.schedule_once(lambda dt: self._refocus(ti), 0.05)
@@ -4683,6 +4694,163 @@ class SearchReplacePopup(BoxLayout):
             self.search_input.focus = True
 
 
+class GotoLinePopup(BoxLayout):
+    """Диалог для перехода к строке (вверху экрана, не блокирует редактор)"""
+
+    def __init__(self, text_input, **kwargs):
+        super().__init__(**kwargs)
+        self.text_input = text_input
+        self.orientation = 'vertical'
+        self.padding = [dp(10), dp(8), dp(10), dp(8)]
+        self.spacing = dp(8)
+        app = App.get_running_app()
+        self.tr = app.tr if app else TRANSLATIONS['ru']
+        theme = ThemeManager.get_theme()
+        self._create_ui(theme)
+
+        self.size_hint_y = None
+        self.height = dp(95)
+
+        with self.canvas.before:
+            Color(*theme.get('popup_bg', (0.188, 0.204, 0.251, 1)))
+            self.bg_rect = Rectangle(pos=self.pos, size=self.size)
+        self.bind(pos=self._update_bg, size=self._update_bg)
+
+        with self.canvas.after:
+            Color(*theme.get('separator_color', (0.5, 0.5, 0.5, 0.5)))
+            self.border_line = Line(rectangle=(self.x, self.y, self.width, self.height), width=dp(1))
+        self.bind(pos=self._update_border, size=self._update_border)
+
+    def _update_bg(self, instance, value):
+        if hasattr(self, 'bg_rect'):
+            self.bg_rect.pos = instance.pos
+            self.bg_rect.size = instance.size
+
+    def _update_border(self, instance, value):
+        if hasattr(self, 'border_line'):
+            self.border_line.rectangle = (instance.x, instance.y, instance.width, instance.height)
+
+    def _create_ui(self, theme):
+        tr = self.tr
+
+        header_box = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(28), spacing=dp(10))
+
+        header_label = Label(
+            text=tr.get('goto_line_title', 'Go to line'),
+            color=theme.get('text_color', (0.85, 0.88, 0.90, 1)),
+            font_size=dp(14),
+            font_name='SourceBold',
+            size_hint_x=0.7,
+            halign='left',
+            valign='middle'
+        )
+        header_label.bind(size=lambda s, sz: setattr(header_label, 'text_size', (sz[0], None)))
+        header_box.add_widget(header_label)
+
+        btn_close = Button(
+            text='✕',
+            font_name='DejaVuSans',
+            size_hint=(None, 1),
+            width=dp(36),
+            background_color=theme.get('btn_danger_bg', (0.5, 0.2, 0.2, 1)),
+            background_normal='', background_down='',
+            color=(1, 1, 1, 1),
+            font_size=dp(16),
+            bold=True
+        )
+        btn_close.bind(on_release=lambda x: self.dismiss())
+        header_box.add_widget(btn_close)
+        self.add_widget(header_box)
+
+        row = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(36), spacing=dp(8))
+
+        lines_count = len(self.text_input.text.split('\n')) if self.text_input.text else 1
+
+        self.line_input = TextInput(
+            hint_text=f"{tr.get('goto_line_hint', 'Line number')} (1-{lines_count})",
+            multiline=False,
+            font_size=dp(14),
+            font_name='SourceBold',
+            background_color=theme['input_bg'],
+            foreground_color=theme['input_text'],
+            cursor_color=theme['input_cursor'],
+            hint_text_color=theme['hint_text'],
+            size_hint_x=0.7,
+            input_filter='int'
+        )
+        self.line_input.bind(on_text_validate=self._on_enter)
+        row.add_widget(self.line_input)
+
+        btn_goto = Button(
+            text=tr.get('goto_line', 'Go'),
+            font_name='SourceBold',
+            size_hint_x=0.3,
+            background_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1)),
+            background_normal='', background_down='',
+            color=(1, 1, 1, 1),
+            font_size=dp(14),
+            on_release=lambda x: self._goto_line()
+        )
+        row.add_widget(btn_goto)
+        self.add_widget(row)
+
+    def _on_enter(self, instance):
+        self._goto_line()
+
+    def _goto_line(self):
+        if not self.text_input or not self.text_input.text:
+            self.dismiss()
+            return
+
+        try:
+            line_num = int(self.line_input.text.strip())
+            lines = self.text_input.text.split('\n')
+            lines_count = len(lines)
+
+            if 1 <= line_num <= lines_count:
+                char_pos = 0
+                for i in range(line_num - 1):
+                    char_pos += len(lines[i]) + 1
+
+                self.text_input.cursor = self.text_input.get_cursor_from_index(char_pos)
+                self._scroll_to_line(line_num, lines_count)
+                self.dismiss()
+            else:
+                self.line_input.text = ""
+                self.line_input.hint_text = f"1-{lines_count}"
+                self.line_input.hint_text_color = (0.8, 0.2, 0.2, 1)
+                Clock.schedule_once(lambda dt: setattr(self.line_input, 'focus', True), 0.1)
+        except ValueError:
+            self.line_input.text = ""
+            self.line_input.hint_text = "?"
+            self.line_input.hint_text_color = (0.8, 0.2, 0.2, 1)
+            Clock.schedule_once(lambda dt: setattr(self.line_input, 'focus', True), 0.1)
+
+    def _scroll_to_line(self, line_num, total_lines):
+        try:
+            parent = self.text_input.parent
+            while parent:
+                if isinstance(parent, ScrollView):
+                    target_y = 1.0 - (line_num / total_lines)
+                    target_y = max(0.0, min(1.0, target_y))
+                    parent.scroll_y = target_y
+                    break
+                parent = parent.parent
+        except:
+            pass
+
+    def dismiss(self, *args):
+        app = App.get_running_app()
+        if app and hasattr(app, 'vibrate_short'):
+            app.vibrate_short()
+        if app:
+            app.dismiss_search()
+
+    def _focus_input(self):
+        if self.line_input:
+            self.line_input.focus = True
+
+
 class TabManager:
     """Управляет вкладками редактора"""
 
@@ -4710,16 +4878,74 @@ class TabManager:
                 pass
 
         Clock.schedule_once(set_cursor_to_start, 0.3)
-        tab = {'title': title, 'editor': editor, 'file': file_path, 'saved': True}
+        tab = {
+            'title': title,
+            'editor': editor,
+            'file': file_path,
+            'original_content': text,  # ← сохраняем исходное содержимое
+            'saved': True
+        }
         self.tabs.append(tab)
         self.active_index = len(self.tabs) - 1
         self._update_tab_bar()
         self.save_all_tabs()
         return editor
 
+    def check_tab_changed(self, index):
+        """Проверяет, изменилось ли содержимое вкладки"""
+        if 0 <= index < len(self.tabs):
+            tab = self.tabs[index]
+            current_text = tab['editor'].get_text() if tab['editor'] else ""
+            original = tab.get('original_content', "")
+
+            # Сравниваем текущее содержимое с исходным
+            has_changes = current_text != original
+
+            if has_changes != (not tab.get('saved', True)):
+                tab['saved'] = not has_changes
+                if self.app:
+                    self.app._update_title_from_current_tab()
+                self._update_tab_bar()
+                self.save_all_tabs()
+
+            return has_changes
+        return False
+
+    def mark_tab_saved(self, index):
+        """Отмечает вкладку как сохранённую"""
+        if 0 <= index < len(self.tabs):
+            self.tabs[index]['saved'] = True
+            # Обновляем исходное содержимое
+            self.tabs[index]['original_content'] = self.tabs[index]['editor'].get_text()
+            if self.app:
+                self.app._update_title_from_current_tab()
+            self._update_tab_bar()
+            self.save_all_tabs()
+
+    def mark_tab_unsaved(self, index):
+        """Отмечает вкладку как изменённую"""
+        if 0 <= index < len(self.tabs):
+            self.tabs[index]['saved'] = False
+            if self.app:
+                self.app._update_title_from_current_tab()
+            self._update_tab_bar()
+            self.save_all_tabs()
+
     def close_tab(self, index):
+        """Закрывает вкладку без проверки сохранения (для внутреннего использования)"""
         if len(self.tabs) <= 1:
+            # Если это последняя вкладка, просто очищаем её вместо закрытия
+            if 0 <= index < len(self.tabs):
+                self.tabs[index]['editor'].set_text("")
+                self.tabs[index]['file'] = None
+                self.tabs[index]['title'] = self.app.tr.get('untitled_tab', 'Новый') if self.app else 'Новый'
+                self.tabs[index]['original_content'] = ""
+                self.tabs[index]['saved'] = True
+                self._update_tab_bar()
+                self.save_all_tabs()
+                return True
             return False
+
         if 0 <= index < len(self.tabs):
             tab = self.tabs.pop(index)
             if hasattr(tab['editor'], 'cleanup'):
@@ -4851,14 +5077,224 @@ class TabManager:
             self.app._on_tab_changed(editor)
 
     def _on_tab_close(self, index):
+        """Обработчик закрытия вкладки (с проверкой сохранения)"""
+        if 0 <= index < len(self.tabs):
+            self.check_tab_changed(index)
+            tab = self.tabs[index]
+            if not tab.get('saved', True):
+                # Запоминаем ВСЕ данные о закрываемой вкладке
+                tab_id = tab.get('id')
+                tab_content = tab['editor'].get_text()
+                tab_file = tab.get('file')
+                tab_title = tab.get('title')
+                self._show_close_tab_dialog(tab_id, tab_content, tab_file, tab_title, index)
+                return
+
         # ВИБРАЦИЯ
         if self.app and hasattr(self.app, 'vibrate_short'):
             self.app.vibrate_short()
 
-        if self.close_tab(index):
-            editor = self.get_active_editor()
-            if editor and self.app:
-                self.app._on_tab_changed(editor)
+        self._do_close_tab(index)
+
+    def _show_close_tab_dialog(self, tab_id, tab_content, tab_file, tab_title, index):
+        """Показывает диалог при закрытии вкладки с несохранёнными изменениями"""
+        if not self.app:
+            return
+
+        tr = self.app.tr
+        theme = ThemeManager.get_theme()
+
+        from kivy.uix.popup import Popup
+        from kivy.uix.boxlayout import BoxLayout
+        from kivy.uix.button import Button
+        from kivy.uix.label import Label
+        from kivy.clock import Clock
+
+        content = BoxLayout(orientation='vertical', padding=10, spacing=5)
+        message = f"{tr.get('unsaved_changes', 'Unsaved changes')}\n'{tab_title}'\n\n{tr.get('save_before_exit', 'Save before closing?')}"
+
+        content.add_widget(Label(
+            text=message,
+            color=theme['text_color'],
+            font_size=11,
+            font_name='SourceBold',
+            halign='center',
+            size_hint_y=None,
+            height=45
+        ))
+
+        btn_layout = BoxLayout(size_hint_y=None, height=30, spacing=8)
+
+        popup = Popup(
+            title=tr.get('confirm_title', 'Unsaved changes'),
+            title_color=theme['popup_title'],
+            background='',
+            background_color=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)),
+            content=content,
+            size_hint=(0.85, 0.32),
+            auto_dismiss=False
+        )
+
+        def on_save(x):
+            popup.dismiss()
+            # Сохраняем содержимое по ID
+            if tab_file:
+                self.app._save_tab_content_by_id(tab_file, tab_content, tab_id)
+            else:
+                self.app._save_tab_as_by_id(tab_content, tab_id)
+            # Закрываем вкладку по ID
+            Clock.schedule_once(lambda dt: self._do_close_tab_by_id(tab_id), 0.5)
+
+        def on_discard(x):
+            popup.dismiss()
+            self._do_close_tab_by_id(tab_id)
+
+        def on_cancel(x):
+            popup.dismiss()
+
+        btn_save = Button(
+            text=tr.get('save', 'Save'),
+            font_name='SourceBold',
+            background_color=(0.2, 0.5, 0.2, 1),
+            background_normal='', background_down='',
+            color=(1, 1, 1, 1),
+            font_size=11,
+            on_release=on_save
+        )
+
+        btn_discard = Button(
+            text=tr.get('exit_without_save', 'Discard'),
+            font_name='SourceBold',
+            background_color=(0.5, 0.2, 0.2, 1),
+            background_normal='', background_down='',
+            color=theme['text_color'],
+            font_size=11,
+            on_release=on_discard
+        )
+
+        btn_cancel = Button(
+            text=tr.get('cancel', 'Cancel'),
+            font_name='SourceBold',
+            background_color=theme['widget_bg'],
+            background_normal='', background_down='',
+            color=theme['text_color'],
+            font_size=11,
+            on_release=on_cancel
+        )
+
+        btn_layout.add_widget(btn_save)
+        btn_layout.add_widget(btn_discard)
+        btn_layout.add_widget(btn_cancel)
+        content.add_widget(btn_layout)
+
+        popup.open()
+
+    def _do_close_tab_by_id(self, tab_id):
+        """Закрывает вкладку по ID (не по индексу)"""
+        # Находим индекс вкладки по ID
+        index = -1
+        for i, tab in enumerate(self.tabs):
+            if tab.get('id') == tab_id:
+                index = i
+                break
+
+        if index == -1:
+            return  # Вкладка уже закрыта
+
+        # Запоминаем, была ли это активная вкладка и её данные
+        was_active = (index == self.active_index)
+        active_tab_id_before = None
+        if not was_active and self.active_index >= 0 and self.active_index < len(self.tabs):
+            active_tab_id_before = self.tabs[self.active_index].get('id')
+
+        # Удаляем вкладку
+        tab = self.tabs.pop(index)
+        if hasattr(tab['editor'], 'cleanup'):
+            tab['editor'].cleanup()
+
+        # Обновляем активный индекс
+        if len(self.tabs) == 0:
+            self.add_tab()
+        else:
+            if was_active:
+                # Если закрыли активную вкладку
+                if index > 0:
+                    self.active_index = index - 1
+                elif index < len(self.tabs):
+                    self.active_index = index
+                else:
+                    self.active_index = 0
+            else:
+                # Если закрыли НЕ активную вкладку
+                if index < self.active_index:
+                    self.active_index -= 1
+
+        # Обновляем UI
+        self._update_tab_bar()
+        self.save_all_tabs()
+
+        # Обновляем отображаемый редактор
+        if self.app and self.app.editor_container:
+            active_editor = self.get_active_editor()
+            if active_editor:
+                self.app.code_input = active_editor.text_input
+                self.app.editor = active_editor
+                if hasattr(self.app, 'action_bar') and self.app.action_bar:
+                    self.app.action_bar.text_input = self.app.code_input
+                if hasattr(self.app, 'symbol_bar') and self.app.symbol_bar:
+                    self.app.symbol_bar.text_input = self.app.code_input
+                if hasattr(self.app, 'autocomplete') and self.app.autocomplete:
+                    self.app.autocomplete.code_input = self.app.code_input
+
+                self.app.editor_container.clear_widgets()
+                self.app.editor_container.add_widget(active_editor)
+
+                # Обновляем заголовок окна из активной вкладки
+                self.app._update_title_from_current_tab()
+
+                Clock.schedule_once(lambda dt: setattr(self.app.code_input, 'focus', True), 0.1)
+
+    def _do_close_tab(self, index):
+        """Оставляет для совместимости, но используем _do_close_tab_by_id"""
+        self._do_close_tab_by_id(self.tabs[index].get('id') if index < len(self.tabs) else None)
+
+    def add_tab(self, title=None, text="", file_path=None):
+        if title is None:
+            tr = self.app.tr if self.app else {}
+            title = tr.get('untitled_tab', 'Новый')
+        editor = LineNumberTextInput(size_hint_y=1.0)
+        editor.set_text(text)
+
+        def set_cursor_to_start(dt):
+            try:
+                if editor and hasattr(editor, 'text_input') and editor.text_input:
+                    editor.text_input.cursor = (0, 0)
+                    editor.text_input.focus = True
+            except:
+                pass
+
+        Clock.schedule_once(set_cursor_to_start, 0.3)
+        tab = {
+            'id': str(uuid.uuid4()),  # ← УНИКАЛЬНЫЙ ID
+            'title': title,
+            'editor': editor,
+            'file': file_path,
+            'original_content': text,
+            'saved': True
+        }
+        self.tabs.append(tab)
+        self.active_index = len(self.tabs) - 1
+        self._update_tab_bar()
+        self.save_all_tabs()
+        return editor
+
+    def _close_tab_after_save(self, index):
+        """Закрывает вкладку после сохранения"""
+        # Обновляем статус после сохранения
+        if 0 <= index < len(self.tabs):
+            self.tabs[index]['saved'] = True
+            self.tabs[index]['original_content'] = self.tabs[index]['editor'].get_text()
+        self._do_close_tab(index)
 
     def update_tab_bar_theme(self, theme):
         if not hasattr(self, 'tab_bar') or not self.tab_bar:
@@ -5145,8 +5581,17 @@ class TabManager:
                     editor.set_text(text)
                 else:
                     editor.set_text('')
-                tab = {'title': data.get('title', tr.get('untitled_tab', 'Новый')), 'editor': editor,
-                       'file': data.get('file'), 'saved': True}
+
+                file_path = data.get('file')
+
+                tab = {
+                    'id': data.get('id', str(uuid.uuid4())),  # ← загружаем ID или создаём новый
+                    'title': data.get('title', tr.get('untitled_tab', 'Новый')),
+                    'editor': editor,
+                    'file': file_path,
+                    'original_content': text,
+                    'saved': True
+                }
                 self.tabs.append(tab)
             if 0 <= active_index < len(self.tabs):
                 self.active_index = active_index
@@ -5156,6 +5601,12 @@ class TabManager:
             return True
         except:
             return False
+
+    def is_tab_saved(self, index):
+        """Проверяет, сохранена ли вкладка"""
+        if 0 <= index < len(self.tabs):
+            return self.tabs[index].get('saved', True)
+        return True
 
 
 class AutoCompleteWidget(BoxLayout):
@@ -6424,39 +6875,29 @@ class PythonLearningApp(MDApp):
             Line(rectangle=(instance.pos[0], instance.pos[1], instance.size[0], instance.size[1]), width=dp(0.5))
 
     def _on_tab_changed(self, new_editor):
-        # Добавляем защиту от None
+        """Переключение вкладки"""
         if not new_editor:
-            print("[WARN] _on_tab_changed called with None editor")
             return
 
         if not hasattr(self, 'editor_container') or not self.editor_container:
-            print("[WARN] editor_container not ready")
             return
 
         self.editor_container.clear_widgets()
         self.editor = new_editor
 
         if not hasattr(new_editor, 'text_input') or not new_editor.text_input:
-            print("[WARN] new_editor has no text_input")
             return
 
         self.code_input = new_editor.text_input
         self.editor_container.add_widget(new_editor)
 
-        # Проверяем существование action_bar и symbol_bar
         if hasattr(self, 'action_bar') and self.action_bar:
             self.action_bar.text_input = self.code_input
         if hasattr(self, 'symbol_bar') and self.symbol_bar:
             self.symbol_bar.text_input = self.code_input
         if hasattr(self, 'autocomplete') and self.autocomplete:
             self.autocomplete.code_input = self.code_input
-        self.editor_container.clear_widgets()
-        self.editor = new_editor
-        self.code_input = new_editor.text_input
-        self.editor_container.add_widget(new_editor)
-        self.action_bar.text_input = self.code_input
-        self.symbol_bar.text_input = self.code_input
-        self.autocomplete.code_input = self.code_input
+
         saved_font = SettingsManager.get_font()
         font_files = {
             'DroidMono': 'DroidMono',
@@ -6469,10 +6910,10 @@ class PythonLearningApp(MDApp):
         }
         if saved_font in font_files:
             self.code_input.font_name = font_files[saved_font]
-        self._setup_autosave()
-        self._current_file = self.tab_manager.get_active_file()
-        self._has_unsaved_changes = False
-        self._update_title_saved()
+
+        # Обновляем заголовок окна
+        self._update_title_from_current_tab()
+
         Clock.schedule_once(self._autosave_tabs, 1)
 
         def set_cursor_to_first_line(dt):
@@ -6486,8 +6927,42 @@ class PythonLearningApp(MDApp):
         Clock.schedule_once(set_cursor_to_first_line, 0.5)
         Clock.schedule_once(set_cursor_to_first_line, 0.7)
 
-        # Восстанавливаем кнопку запуска
         self._restore_run_button()
+
+    def _update_title_from_current_tab(self):
+        """Обновляет заголовок окна на основе текущей активной вкладки"""
+        if not hasattr(self, 'tab_manager') or not self.tab_manager:
+            return
+
+        # Получаем активную вкладку
+        active_tab = None
+        if 0 <= self.tab_manager.active_index < len(self.tab_manager.tabs):
+            active_tab = self.tab_manager.tabs[self.tab_manager.active_index]
+
+        if active_tab:
+            is_saved = active_tab.get('saved', True)
+            title = active_tab.get('title', 'Untitled')
+            file_path = active_tab.get('file')
+
+            # Для файлов используем имя файла
+            if file_path and os.path.exists(file_path):
+                correct_title = os.path.basename(file_path)
+                if active_tab['title'] != correct_title:
+                    active_tab['title'] = correct_title
+                    self.tab_manager._update_tab_bar()
+                title = correct_title
+
+            # Обновляем заголовок окна
+            if not is_saved:
+                self.title = f"*{title} - {self._original_title}"
+            else:
+                self.title = f"{title} - {self._original_title}"
+
+            # Обновляем _current_file
+            self._current_file = file_path
+        else:
+            self.title = self._original_title
+            self._current_file = None
 
     def _autosave_tabs(self, dt=None):
         try:
@@ -6501,14 +6976,23 @@ class PythonLearningApp(MDApp):
         self.code_input.bind(text=self._on_code_change_for_autosave)
 
     def _on_code_change_for_autosave(self, instance, value):
-        self.tab_manager.mark_active_unsaved()
-        is_empty = all(line.strip() == '' for line in value.split('\n')) if value else True
-        if not self._has_unsaved_changes and not is_empty:
-            self._has_unsaved_changes = True
-            self._update_title_with_unsaved()
-        elif self._has_unsaved_changes and is_empty and value:
-            self._has_unsaved_changes = False
-            self._update_title_saved()
+        # Проверяем изменения в текущей вкладке
+        if hasattr(self, 'tab_manager') and self.tab_manager:
+            if 0 <= self.tab_manager.active_index < len(self.tab_manager.tabs):
+                # Проверяем, изменилось ли содержимое
+                current_tab = self.tab_manager.tabs[self.tab_manager.active_index]
+                original = current_tab.get('original_content', "")
+                has_changes = value != original
+
+                if has_changes and current_tab.get('saved', True):
+                    # Если были изменения, помечаем как несохранённую
+                    self.tab_manager.mark_tab_unsaved(self.tab_manager.active_index)
+                elif not has_changes and not current_tab.get('saved', True):
+                    # Если изменения отменили, помечаем как сохранённую
+                    self.tab_manager.mark_tab_saved(self.tab_manager.active_index)
+
+        self._update_title_from_current_tab()
+
         current_time = time.time()
         if current_time - self._last_autosave_time > 2:
             self._last_autosave_time = current_time
@@ -6518,16 +7002,29 @@ class PythonLearningApp(MDApp):
             Clock.schedule_once(self._autosave_tabs, 3)
 
     def _do_autosave(self, dt):
+        """Сохраняет ТОЛЬКО кэш вкладок, НЕ перезаписывает исходные файлы"""
         self._last_autosave_time = time.time()
-        self._save_autosave()
-        if hasattr(self, '_current_file') and self._current_file:
-            try:
-                with open(self._current_file, 'w', encoding='utf-8') as f:
-                    f.write(self.code_input.text)
-                self._has_unsaved_changes = False
-                self._update_title_saved()
-            except:
-                pass
+        self._save_autosave()  # Сохраняем только tabs.json
+
+    def save_current_file(self):
+        """Сохраняет текущий файл на диск (явное действие пользователя)"""
+        if not self._current_file:
+            self.show_save_dialog()
+            return
+
+        try:
+            with open(self._current_file, 'w', encoding='utf-8') as f:
+                f.write(self.code_input.text)
+
+            # Обновляем статус вкладки
+            if hasattr(self, 'tab_manager') and self.tab_manager:
+                if 0 <= self.tab_manager.active_index < len(self.tab_manager.tabs):
+                    self.tab_manager.mark_tab_saved(self.tab_manager.active_index)
+
+            self._update_title_from_current_tab()
+            self.show_result_popup(f"✓ Saved: {os.path.basename(self._current_file)}")
+        except Exception as e:
+            self.show_result_popup(f"X Error saving: {e}")
 
     def _save_autosave(self):
         try:
@@ -6541,6 +7038,126 @@ class PythonLearningApp(MDApp):
                 json.dump(tabs_data, f, indent=2)
         except:
             pass
+
+    def _save_tab_content(self, file_path, content, tab_index):
+        """Сохраняет содержимое конкретной вкладки в файл (не переключая активную)"""
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+
+            # Обновляем только указанную вкладку, если она ещё существует
+            if hasattr(self, 'tab_manager') and self.tab_manager:
+                if 0 <= tab_index < len(self.tab_manager.tabs):
+                    tab = self.tab_manager.tabs[tab_index]
+                    tab['original_content'] = content
+                    tab['saved'] = True
+                    tab['file'] = file_path
+                    tab['title'] = os.path.basename(file_path)
+
+                    # Обновляем отображение панели вкладок
+                    self.tab_manager._update_tab_bar()
+
+                    # Сохраняем состояние
+                    self.tab_manager.save_all_tabs()
+
+            self.show_result_popup(f"✓ Saved: {os.path.basename(file_path)}")
+        except Exception as e:
+            self.show_result_popup(f"X Error saving: {e}")
+
+    def _save_tab_as(self, content, tab_index):
+        """Показывает диалог сохранения для конкретной вкладки"""
+        suggested_name = "script.py"
+
+        def on_saved(file_path, _):
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+
+                # Обновляем только указанную вкладку, если она ещё существует
+                if hasattr(self, 'tab_manager') and self.tab_manager:
+                    if 0 <= tab_index < len(self.tab_manager.tabs):
+                        tab = self.tab_manager.tabs[tab_index]
+                        tab['file'] = file_path
+                        tab['original_content'] = content
+                        tab['saved'] = True
+                        tab['title'] = os.path.basename(file_path)
+
+                        # Обновляем отображение
+                        self.tab_manager._update_tab_bar()
+                        self.tab_manager.save_all_tabs()
+
+                        self.show_result_popup(f"✓ Saved: {os.path.basename(file_path)}")
+                    else:
+                        # Вкладка уже закрыта, просто сохраняем файл
+                        self.show_result_popup(f"✓ Saved: {os.path.basename(file_path)}")
+                else:
+                    self.show_result_popup(f"✓ Saved: {os.path.basename(file_path)}")
+
+            except Exception as e:
+                self.show_result_popup(f"X Error saving: {e}")
+
+        browser = FileBrowserPopup(
+            self,
+            self.file_manager,
+            title=self.tr.get('save', 'Save file'),
+            mode="save"
+        )
+        browser.show(on_saved, save_filename=suggested_name)
+
+    def _save_tab_content_by_id(self, file_path, content, tab_id):
+        """Сохраняет содержимое вкладки по ID"""
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+
+            # Находим вкладку по ID и обновляем её
+            if hasattr(self, 'tab_manager') and self.tab_manager:
+                for i, tab in enumerate(self.tab_manager.tabs):
+                    if tab.get('id') == tab_id:
+                        tab['original_content'] = content
+                        tab['saved'] = True
+                        tab['file'] = file_path
+                        tab['title'] = os.path.basename(file_path)
+                        self.tab_manager._update_tab_bar()
+                        self.tab_manager.save_all_tabs()
+                        break
+
+            self.show_result_popup(f"✓ Saved: {os.path.basename(file_path)}")
+        except Exception as e:
+            self.show_result_popup(f"X Error saving: {e}")
+
+    def _save_tab_as_by_id(self, content, tab_id):
+        """Сохраняет как вкладку по ID"""
+        suggested_name = "script.py"
+
+        def on_saved(file_path, _):
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+
+                # Находим вкладку по ID и обновляем
+                if hasattr(self, 'tab_manager') and self.tab_manager:
+                    for i, tab in enumerate(self.tab_manager.tabs):
+                        if tab.get('id') == tab_id:
+                            tab['file'] = file_path
+                            tab['original_content'] = content
+                            tab['saved'] = True
+                            tab['title'] = os.path.basename(file_path)
+                            self.tab_manager._update_tab_bar()
+                            self.tab_manager.save_all_tabs()
+                            break
+
+                self.show_result_popup(f"✓ Saved: {os.path.basename(file_path)}")
+            except Exception as e:
+                self.show_result_popup(f"X Error saving: {e}")
+
+        browser = FileBrowserPopup(
+            self,
+            self.file_manager,
+            title=self.tr.get('save', 'Save file'),
+            mode="save"
+        )
+        browser.show(on_saved, save_filename=suggested_name)
 
     def _update_title_with_unsaved(self):
         if self._current_file:
@@ -6612,7 +7229,13 @@ class PythonLearningApp(MDApp):
 
         # Создаём новую вкладку
         if hasattr(self, 'tab_manager') and self.tab_manager:
+            # Добавляем вкладку с содержимым файла
             editor = self.tab_manager.add_tab(title=filename, text=content)
+            # Обновляем файл и помечаем как сохранённую
+            if 0 <= self.tab_manager.active_index < len(self.tab_manager.tabs):
+                self.tab_manager.tabs[self.tab_manager.active_index]['file'] = file_path
+                self.tab_manager.tabs[self.tab_manager.active_index]['original_content'] = content
+                self.tab_manager.mark_tab_saved(self.tab_manager.active_index)
             self._on_tab_changed(editor)
         else:
             # Fallback
@@ -6622,8 +7245,7 @@ class PythonLearningApp(MDApp):
                 self.editor._update_line_panel()
 
         self._current_file = file_path
-        self._has_unsaved_changes = False
-        self._update_title_saved()
+        self._update_title_from_current_tab()
         self.show_result_popup(f"Loaded: {filename}")
 
     def show_save_dialog(self, instance=None):
@@ -6646,15 +7268,25 @@ class PythonLearningApp(MDApp):
         """Обработчик сохранённого файла"""
         filename = os.path.basename(file_path)
 
-        self._current_file = file_path
-        self._has_unsaved_changes = False
-        self._update_title_saved()
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(self.code_input.text)
 
-        if hasattr(self, 'tab_manager') and self.tab_manager:
-            self.tab_manager.set_active_file(file_path)
-            self.tab_manager.set_active_title(filename)
+            self._current_file = file_path
 
-        self.show_result_popup(f"Saved: {filename}")
+            # Обновляем статус вкладки
+            if hasattr(self, 'tab_manager') and self.tab_manager:
+                if 0 <= self.tab_manager.active_index < len(self.tab_manager.tabs):
+                    # Обновляем исходное содержимое
+                    self.tab_manager.tabs[self.tab_manager.active_index]['file'] = file_path
+                    self.tab_manager.tabs[self.tab_manager.active_index]['original_content'] = self.code_input.text
+                    self.tab_manager.mark_tab_saved(self.tab_manager.active_index)
+                    self.tab_manager.set_active_title(filename)
+
+            self._update_title_from_current_tab()
+            self.show_result_popup(f"✓ Saved: {filename}")
+        except Exception as e:
+            self.show_result_popup(f"X Error saving: {e}")
 
     def _show_filename_input_dialog(self):
         """Показывает диалог ввода имени файла перед сохранением"""
@@ -7688,6 +8320,30 @@ def пауза():
 
         Clock.schedule_once(lambda dt: content._focus_search(), 0.3)
 
+    def show_goto_line_dialog(self, instance=None):
+        """Показывает диалог перехода к строке"""
+        self.dismiss_search()
+
+        content = GotoLinePopup(self.code_input)
+        content.size_hint_y = None
+        content.height = dp(95)
+        content.pos_hint = {'top': 1}
+
+        self.search_widget = content
+
+        if hasattr(self, 'root_layout'):
+            self.root_layout.add_widget(content)
+        else:
+            for child in self.root.children:
+                if hasattr(child, 'children'):
+                    for sub in child.children:
+                        if isinstance(sub, FloatLayout):
+                            sub.add_widget(content)
+                            break
+                    break
+
+        Clock.schedule_once(lambda dt: content._focus_input(), 0.3)
+
     def dismiss_search(self):
         """Закрывает окно поиска"""
         if hasattr(self, 'search_widget') and self.search_widget:
@@ -7942,7 +8598,7 @@ def пауза():
         if hasattr(self, 'action_bar'):
             try:
                 self.action_bar.action_keys = ['undo', 'redo', 'copy', 'paste', 'cut', 'sel_all', 'auto', 'key',
-                                               'clean', 'find', 'find_replace']
+                                               'clean', 'find', 'find_replace', 'goto']
                 self.action_bar._create_buttons()
                 self.action_bar.button_container.clear_widgets()
                 for btn in self.action_bar.buttons:
