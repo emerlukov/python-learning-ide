@@ -11,8 +11,8 @@ source.exclude_patterns = *.pyc,*.pyo
 version = 3.4.0
 
 # ========== ТРЕБОВАНИЯ ==========
-# ВСЁ ОСТАВЛЕНО КАК БЫЛО (работало раньше)
-requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0,kivymd==1.1.1,pygments,autopep8,pycodestyle,plyer,requests,androidstorage4kivy
+# ИЗМЕНЕНО: kivymd==1.1.1 -> kivymd==1.1.0 (не требует libthorvg)
+requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0,kivymd==1.1.0,pygments,autopep8,pycodestyle,plyer,requests,androidstorage4kivy
 
 # ========== ЗАСТАВКИ ==========
 presplash.filename = splash.png
@@ -54,7 +54,7 @@ source.main = main.py
 android.copy_libs = 1
 
 # ========== НАСТРОЙКИ СТАБИЛЬНОСТИ ==========
-p4a.branch = develop
+p4a.branch = stable
 p4a.hostpython_version = 3.10.7
 android.wakelock = False
 p4a.bootstrap = sdl2
@@ -64,9 +64,6 @@ package.full_name = Python Learning IDE
 android.logcat_filters = *:S python:D
 android.extract_native_libs = True
 log_level = 2
-
-# ========== ЕДИНСТВЕННОЕ НОВОЕ - отключаем проблемную библиотеку ==========
-android.exclude_libs = libthorvg-1.so
 
 [buildozer]
 log_level = 2
