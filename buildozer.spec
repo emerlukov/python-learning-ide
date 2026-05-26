@@ -8,7 +8,7 @@ source.include_exts = py,png,jpg,kv,atlas,ttf,json,txt,md,otf
 source.include_dirs = fonts
 source.exclude_dirs = .git,__pycache__,bin,.buildozer,venv,.github
 source.exclude_patterns = *.pyc,*.pyo
-version = 3.4.0
+version = 1.0.0
 
 # ========== ТРЕБОВАНИЯ ==========
 # ВОЗВРАЩАЕМ kivymd==1.1.1 (она существует)
@@ -40,7 +40,7 @@ android.manifest.extra_queries =
         <action android:name="android.intent.action.OPEN_DOCUMENT_TREE" />
     </intent>
 
-android.permissions = INTERNET, VIBRATE, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, MANAGE_EXTERNAL_STORAGE
+android.permissions = INTERNET, VIBRATE, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE
 android.enable_androidx = True
 android.accept_sdk_license = True
 android.statusbar_color = #FFFFFF
