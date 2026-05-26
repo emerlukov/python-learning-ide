@@ -209,11 +209,13 @@ def adaptive_sp(value):
 
 def get_tab_count():
     """Количество видимых вкладок"""
+    if platform != 'android':
+        return 7
     category = get_screen_category()
     if category == 'tablet':
         return 6
     elif category == 'large_phone':
-        return 4
+        return 7
     else:
         return 3
 
@@ -4862,35 +4864,6 @@ class TabManager:
         self.tab_offset = 0
         self.max_visible = get_tab_count()
 
-    def add_tab(self, title=None, text="", file_path=None):
-        if title is None:
-            tr = self.app.tr if self.app else {}
-            title = tr.get('untitled_tab', 'Новый')
-        editor = LineNumberTextInput(size_hint_y=1.0)
-        editor.set_text(text)
-
-        def set_cursor_to_start(dt):
-            try:
-                if editor and hasattr(editor, 'text_input') and editor.text_input:
-                    editor.text_input.cursor = (0, 0)
-                    editor.text_input.focus = True
-            except:
-                pass
-
-        Clock.schedule_once(set_cursor_to_start, 0.3)
-        tab = {
-            'title': title,
-            'editor': editor,
-            'file': file_path,
-            'original_content': text,  # ← сохраняем исходное содержимое
-            'saved': True
-        }
-        self.tabs.append(tab)
-        self.active_index = len(self.tabs) - 1
-        self._update_tab_bar()
-        self.save_all_tabs()
-        return editor
-
     def check_tab_changed(self, index):
         """Проверяет, изменилось ли содержимое вкладки"""
         if 0 <= index < len(self.tabs):
@@ -5100,32 +5073,33 @@ class TabManager:
         """Показывает диалог при закрытии вкладки с несохранёнными изменениями"""
         if not self.app:
             return
-    
+
         tr = self.app.tr
         theme = ThemeManager.get_theme()
-    
+
         from kivy.uix.boxlayout import BoxLayout
         from kivy.uix.button import Button
         from kivy.uix.label import Label
         from kivy.clock import Clock
-        from kivy.metrics import dp
-    
-        content = BoxLayout(orientation='vertical', padding=dp(15), spacing=dp(10))
-        
+
+        content = BoxLayout(orientation='vertical', padding=15, spacing=10)  # ← увеличены отступы
+
+        # Увеличиваем размер шрифта и высоту
         message = f"{tr.get('unsaved_changes', 'Unsaved changes')}\n'{tab_title}'\n\n{tr.get('save_before_exit', 'Save before closing?')}"
-    
+
         content.add_widget(Label(
             text=message,
             color=theme['text_color'],
-            font_size=dp(14),
+            font_size=14,  # ← было 11
             font_name='SourceBold',
             halign='center',
             size_hint_y=None,
-            height=dp(55)
+            height=55  # ← было 45
         ))
-    
-        btn_layout = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(10))
-    
+
+        btn_layout = BoxLayout(size_hint_y=None, height=40, spacing=10)  # ← было 30
+
+        # Используем ThemedPopup
         popup = ThemedPopup(
             title=tr.get('confirm_title', 'Unsaved changes'),
             title_color=theme['popup_title'],
@@ -5133,11 +5107,11 @@ class TabManager:
             popup_bg=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)),
             separator_color=theme.get('popup_separator', (0.25, 0.25, 0.25, 1)),
             content=content,
-            size_hint=(0.85, 0.38),
-            pos_hint={'top': 0.85},
+            size_hint=(0.85, 0.38),  # ← было 0.32, увеличили высоту
+            pos_hint={'top': 0.85},  # ← ПРИЖИМАЕМ К ВЕРХУ
             auto_dismiss=False
         )
-    
+
         def on_save(x):
             popup.dismiss()
             if tab_file:
@@ -5145,55 +5119,56 @@ class TabManager:
             else:
                 self.app._save_tab_as_by_id(tab_content, tab_id)
             Clock.schedule_once(lambda dt: self._do_close_tab_by_id(tab_id), 0.5)
-    
+
         def on_discard(x):
             popup.dismiss()
             self._do_close_tab_by_id(tab_id)
-    
+
         def on_cancel(x):
             popup.dismiss()
-    
+
+        # Увеличиваем размер кнопок
         btn_save = Button(
             text=tr.get('save', 'Save'),
             font_name='SourceBold',
             background_color=(0.2, 0.5, 0.2, 1),
             background_normal='', background_down='',
             color=(1, 1, 1, 1),
-            font_size=dp(13),
+            font_size=13,  # ← было 11
             size_hint_y=None,
-            height=dp(40),
+            height=35,  # ← добавили высоту
             on_release=on_save
         )
-    
+
         btn_discard = Button(
             text=tr.get('exit_without_save', 'Discard'),
             font_name='SourceBold',
             background_color=(0.5, 0.2, 0.2, 1),
             background_normal='', background_down='',
             color=theme['text_color'],
-            font_size=dp(13),
+            font_size=13,  # ← было 11
             size_hint_y=None,
-            height=dp(40),
+            height=35,  # ← добавили высоту
             on_release=on_discard
         )
-    
+
         btn_cancel = Button(
             text=tr.get('cancel', 'Cancel'),
             font_name='SourceBold',
             background_color=theme['widget_bg'],
             background_normal='', background_down='',
             color=theme['text_color'],
-            font_size=dp(13),
+            font_size=13,  # ← было 11
             size_hint_y=None,
-            height=dp(40),
+            height=35,  # ← добавили высоту
             on_release=on_cancel
         )
-    
+
         btn_layout.add_widget(btn_save)
         btn_layout.add_widget(btn_discard)
         btn_layout.add_widget(btn_cancel)
         content.add_widget(btn_layout)
-    
+
         popup.open()
 
     def _do_close_tab_by_id(self, tab_id):
@@ -7291,7 +7266,7 @@ class PythonLearningApp(MDApp):
                     self.tab_manager.set_active_title(filename)
 
             self._update_title_from_current_tab()
-            self.show_result_popup(f"✓ Saved: {filename}")
+            #self.show_result_popup(f"✓ Saved: {filename}")
         except Exception as e:
             self.show_result_popup(f"X Error saving: {e}")
 
@@ -8873,7 +8848,5 @@ if __name__ == '__main__':
         except:
             pass
         raise
-
-
 
 
