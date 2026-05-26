@@ -27,12 +27,12 @@ orientation = portrait
 fullscreen = 0
 
 # ========== ANDROID НАСТРОЙКИ ==========
-android.api = 33
+android.api = 34
 android.minapi = 24
-android.targetapi = 33
+android.targetapi = 34
 android.ndk_api = 24
 android.ndk = 25b
-android.add_sdk = 30
+android.add_sdk = 34
 android.archs = arm64-v8a
 
 android.manifest.extra_queries =
