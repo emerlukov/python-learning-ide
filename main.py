@@ -213,7 +213,7 @@ def get_tab_count():
         return 7
     category = get_screen_category()
     if category == 'tablet':
-        return 6
+        return 7
     elif category == 'large_phone':
         return 7
     else:
@@ -5082,33 +5082,61 @@ class TabManager:
         from kivy.uix.label import Label
         from kivy.clock import Clock
 
-        content = BoxLayout(orientation='vertical', padding=15, spacing=10)  # ← увеличены отступы
+        # ========== АДАПТИВНЫЕ РАЗМЕРЫ ==========
+        category = get_screen_category()
+        if category == 'tablet':
+            padding = dp(20)
+            spacing = dp(15)
+            msg_height = dp(100)
+            btn_height = dp(55)
+            font_size_msg = dp(16)
+            font_size_btn = dp(15)
+            popup_size = (0.75, 0.45)
+        elif category == 'large_phone':
+            padding = dp(15)
+            spacing = dp(12)
+            msg_height = dp(85)
+            btn_height = dp(50)
+            font_size_msg = dp(14)
+            font_size_btn = dp(13)
+            popup_size = (0.85, 0.42)
+        else:
+            padding = dp(12)
+            spacing = dp(10)
+            msg_height = dp(75)
+            btn_height = dp(45)
+            font_size_msg = dp(13)
+            font_size_btn = dp(12)
+            popup_size = (0.9, 0.45)
 
-        # Увеличиваем размер шрифта и высоту
-        message = f"{tr.get('unsaved_changes', 'Unsaved changes')}\n'{tab_title}'\n\n{tr.get('save_before_exit', 'Save before closing?')}"
+        content = BoxLayout(orientation='vertical', padding=padding, spacing=spacing)
 
-        content.add_widget(Label(
+        message = f"{tr.get('unsaved_changes', 'Unsaved changes')}\n\n'{tab_title}'\n\n{tr.get('save_before_exit', 'Save before closing?')}"
+
+        msg_label = Label(
             text=message,
             color=theme['text_color'],
-            font_size=14,  # ← было 11
+            font_size=font_size_msg,
             font_name='SourceBold',
             halign='center',
+            valign='middle',
             size_hint_y=None,
-            height=55  # ← было 45
-        ))
+            height=msg_height
+        )
+        msg_label.bind(width=lambda inst, val: setattr(inst, 'text_size', (val, None)))
+        content.add_widget(msg_label)
 
-        btn_layout = BoxLayout(size_hint_y=None, height=40, spacing=10)  # ← было 30
+        btn_layout = BoxLayout(size_hint_y=None, height=btn_height, spacing=spacing)
 
         # Используем ThemedPopup
         popup = ThemedPopup(
             title=tr.get('confirm_title', 'Unsaved changes'),
             title_color=theme['popup_title'],
             title_bg=theme.get('popup_title_bg', theme['widget_bg']),
-            popup_bg=theme.get('popup_bg', (1.0, 1.0, 1.0, 1)),
+            popup_bg=theme.get('popup_bg', theme.get('widget_bg', (0.188, 0.204, 0.251, 1))),
             separator_color=theme.get('popup_separator', (0.25, 0.25, 0.25, 1)),
             content=content,
-            size_hint=(0.85, 0.38),  # ← было 0.32, увеличили высоту
-            pos_hint={'top': 0.85},  # ← ПРИЖИМАЕМ К ВЕРХУ
+            size_hint=popup_size,
             auto_dismiss=False
         )
 
@@ -5127,16 +5155,14 @@ class TabManager:
         def on_cancel(x):
             popup.dismiss()
 
-        # Увеличиваем размер кнопок
         btn_save = Button(
             text=tr.get('save', 'Save'),
             font_name='SourceBold',
             background_color=(0.2, 0.5, 0.2, 1),
             background_normal='', background_down='',
             color=(1, 1, 1, 1),
-            font_size=13,  # ← было 11
-            size_hint_y=None,
-            height=35,  # ← добавили высоту
+            font_size=font_size_btn,
+            size_hint=(1, 1),
             on_release=on_save
         )
 
@@ -5145,22 +5171,20 @@ class TabManager:
             font_name='SourceBold',
             background_color=(0.5, 0.2, 0.2, 1),
             background_normal='', background_down='',
-            color=theme['text_color'],
-            font_size=13,  # ← было 11
-            size_hint_y=None,
-            height=35,  # ← добавили высоту
+            color=(1, 1, 1, 1),
+            font_size=font_size_btn,
+            size_hint=(1, 1),
             on_release=on_discard
         )
 
         btn_cancel = Button(
             text=tr.get('cancel', 'Cancel'),
             font_name='SourceBold',
-            background_color=theme['widget_bg'],
+            background_color=theme.get('widget_bg', (0.141, 0.145, 0.149, 1)),
             background_normal='', background_down='',
             color=theme['text_color'],
-            font_size=13,  # ← было 11
-            size_hint_y=None,
-            height=35,  # ← добавили высоту
+            font_size=font_size_btn,
+            size_hint=(1, 1),
             on_release=on_cancel
         )
 
