@@ -207,7 +207,7 @@ Copyright (c) 2025 Python Learning IDE
 
 Email: [emerlukov@gmail.com]
 
-GitHub: github.com/emerlukov-bot
+GitHub: github.com/emerlukov
 
 ## 🙏 Благодарности
 Kivy — за отличный фреймворк
