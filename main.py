@@ -1699,14 +1699,6 @@ class PythonLearningApp(MDApp):
     def on_splash_finished(self):
         """Вызывается, когда заставка завершила работу"""
         self.splash_finished = True
-
-        # ДОБАВИТЬ: принудительное восстановление кнопки Run
-        Clock.schedule_once(lambda dt: self._restore_run_button(), 0.3)
-
-        # ДОБАВИТЬ: принудительное обновление темы
-        theme = ThemeManager.get_theme()
-        self.apply_theme(theme)
-
         print("✓ Splash screen finished, app ready")
 
     def _request_android_permissions(self):
@@ -2179,58 +2171,43 @@ class PythonLearningApp(MDApp):
         return top_bar
 
     def _restore_run_button(self):
-        """Восстанавливает иконку на кнопке запуска (исправленная версия)"""
+        """Восстанавливает иконку на кнопке запуска"""
+        print(f"[DEBUG] _restore_run_button called, run_btn={hasattr(self, 'run_btn')}")
+
         if not hasattr(self, 'run_btn') or self.run_btn is None:
+            print("[DEBUG] run_btn не существует!")
             return
 
-        # Проверяем, есть ли уже иконка play
-        has_play_icon = False
-        for child in self.run_btn.children[:]:
-            if hasattr(child, 'icon') and child.icon == 'play':
-                has_play_icon = True
-                break
+        print(f"[DEBUG] run_btn.children = {self.run_btn.children}")
 
-        # Если иконки нет - пересоздаём
-        if not has_play_icon:
-            # Очищаем кнопку
-            self.run_btn.clear_widgets()
+        # Очищаем и пересоздаём иконку принудительно
+        self.run_btn.clear_widgets()
 
-            from kivymd.uix.label import MDIcon
+        from kivymd.uix.label import MDIcon
+        category = get_screen_category()
+        if category == 'tablet':
+            icon_size = dp(32)
+        elif category == 'large_phone':
+            icon_size = dp(28)
+        else:
+            icon_size = dp(23)
 
-            # Адаптивный размер иконки
-            category = get_screen_category()
-            if category == 'tablet':
-                icon_size = dp(32)
-            elif category == 'large_phone':
-                icon_size = dp(28)
-            else:
-                icon_size = dp(23)
+        theme = ThemeManager.get_theme()
+        if theme.get('name') == 'dark':
+            icon_color = theme.get('run_btn_text', (0.18, 0.18, 0.19, 1))
+        else:
+            icon_color = theme.get('run_btn_text', (0, 0, 0, 1))
 
-            theme = ThemeManager.get_theme()
-            if theme.get('name') == 'dark':
-                icon_color = theme.get('run_btn_text', (0.18, 0.18, 0.19, 1))
-            else:
-                icon_color = theme.get('run_btn_text', (0, 0, 0, 1))
-
-            play_icon = MDIcon(
-                icon='play',
-                font_size=f"{icon_size}sp",
-                theme_text_color="Custom",
-                text_color=icon_color,
-                pos_hint={"center_x": 0.5, "center_y": 0.5}
-            )
-            self.run_btn.add_widget(play_icon)
-
-            # Обновляем фон кнопки
-            def update_bg(btn, *args):
-                btn.canvas.before.clear()
-                with btn.canvas.before:
-                    Color(*theme.get('run_btn_bg', (0.85, 0.88, 0.90, 1)))
-                    from kivy.graphics import Ellipse
-                    Ellipse(pos=btn.pos, size=btn.size)
-
-            self.run_btn.bind(pos=update_bg, size=update_bg)
-            self.run_btn.canvas.ask_update()
+        play_icon = MDIcon(
+            icon='play',
+            font_size=f"{icon_size}sp",
+            theme_text_color="Custom",
+            text_color=icon_color,
+            pos_hint={"center_x": 0.5, "center_y": 0.5}
+        )
+        self.run_btn.add_widget(play_icon)
+        self.run_btn.canvas.ask_update()
+        print("[DEBUG] Иконка добавлена")
 
     def _update_top_panels(self):
         """Обновляет обе верхние панели (при смене темы, языка или повороте)"""
@@ -3042,7 +3019,7 @@ class PythonLearningApp(MDApp):
         ThemeManager.unregister(self)
 
     def run_code(self, instance):
-        # Защита от повторного запуска (уже есть, но усиливаем)
+        # Защита от повторного запуска
         if hasattr(self, '_code_running') and self._code_running:
             self.show_result_popup("Код уже выполняется...")
             return
@@ -3063,25 +3040,19 @@ class PythonLearningApp(MDApp):
 
         # Устанавливаем флаг, что код запущен
         self._code_running = True
-
-        # ДОБАВИТЬ: отключаем кнопку во время выполнения
-        if hasattr(self, 'run_btn'):
-            self.run_btn.disabled = True
+        instance.disabled = True
 
         def input_handler(prompt=""):
             return self._handle_input(prompt)
 
         def result_callback(result):
-            self._code_running = False
-            # ДОБАВИТЬ: включаем кнопку обратно
-            if hasattr(self, 'run_btn'):
-                self.run_btn.disabled = False
+            self._code_running = False  # Сбрасываем флаг
+            instance.disabled = False
             self._show_result(result)
 
         if not self.code_executor.run(code, input_handler, result_callback):
-            self._code_running = False
-            if hasattr(self, 'run_btn'):
-                self.run_btn.disabled = False
+            self._code_running = False  # Сбрасываем флаг при ошибке
+            instance.disabled = False
 
     def _check_emergency_backup(self, dt):
         """Проверяет, есть ли emergency бэкап после аварийного закрытия"""
