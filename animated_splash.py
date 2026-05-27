@@ -269,9 +269,6 @@ class AnimatedSplashScreen(Screen):
         if hasattr(self.main_app, 'on_splash_finished'):
             self.main_app.on_splash_finished()
 
-        # ДОБАВИТЬ: дополнительное восстановление через 0.5 секунды
-        Clock.schedule_once(lambda dt: self._final_restore(), 0.5)
-
     def _final_restore(self):
         """Финальное восстановление после загрузки"""
         if hasattr(self.main_app, '_restore_run_button'):
