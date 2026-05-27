@@ -2179,26 +2179,29 @@ class PythonLearningApp(MDApp):
         return top_bar
 
     def _restore_run_button(self):
-        """Восстанавливает иконку на кнопке запуска (исправленная версия)"""
+        """Восстанавливает кнопку запуска (исправленная версия - НЕ ломает иконку)"""
         if not hasattr(self, 'run_btn') or self.run_btn is None:
             return
 
-        # Проверяем, есть ли уже иконка play
+        # НЕ ОЧИЩАЕМ КНОПКУ, а только проверяем, есть ли иконка
         has_play_icon = False
-        for child in self.run_btn.children[:]:
+        for child in self.run_btn.children:
             if hasattr(child, 'icon') and child.icon == 'play':
                 has_play_icon = True
                 break
+            # Проверяем для Label с текстом
+            if hasattr(child, 'text') and child.text == '▶':
+                has_play_icon = True
+                break
 
-        # Если иконки нет - пересоздаём
+        # ТОЛЬКО если иконки нет - пересоздаём
         if not has_play_icon:
-            # Очищаем кнопку
-            self.run_btn.clear_widgets()
-
             from kivymd.uix.label import MDIcon
+            from kivy.uix.label import Label
 
-            # Адаптивный размер иконки
+            theme = ThemeManager.get_theme()
             category = get_screen_category()
+
             if category == 'tablet':
                 icon_size = dp(32)
             elif category == 'large_phone':
@@ -2206,30 +2209,32 @@ class PythonLearningApp(MDApp):
             else:
                 icon_size = dp(23)
 
-            theme = ThemeManager.get_theme()
             if theme.get('name') == 'dark':
                 icon_color = theme.get('run_btn_text', (0.18, 0.18, 0.19, 1))
             else:
                 icon_color = theme.get('run_btn_text', (0, 0, 0, 1))
 
-            play_icon = MDIcon(
-                icon='play',
-                font_size=f"{icon_size}sp",
-                theme_text_color="Custom",
-                text_color=icon_color,
-                pos_hint={"center_x": 0.5, "center_y": 0.5}
-            )
+            # Пробуем MDIcon, если не работает - используем Label
+            try:
+                play_icon = MDIcon(
+                    icon='play',
+                    font_size=f"{icon_size}sp",
+                    theme_text_color="Custom",
+                    text_color=icon_color,
+                    pos_hint={"center_x": 0.5, "center_y": 0.5}
+                )
+            except:
+                play_icon = Label(
+                    text='▶',
+                    font_size=icon_size,
+                    font_name='DejaVuSans',
+                    color=icon_color,
+                    size_hint=(1, 1),
+                    halign='center',
+                    valign='middle'
+                )
+
             self.run_btn.add_widget(play_icon)
-
-            # Обновляем фон кнопки
-            def update_bg(btn, *args):
-                btn.canvas.before.clear()
-                with btn.canvas.before:
-                    Color(*theme.get('run_btn_bg', (0.85, 0.88, 0.90, 1)))
-                    from kivy.graphics import Ellipse
-                    Ellipse(pos=btn.pos, size=btn.size)
-
-            self.run_btn.bind(pos=update_bg, size=update_bg)
             self.run_btn.canvas.ask_update()
 
     def _update_top_panels(self):
