@@ -2179,43 +2179,58 @@ class PythonLearningApp(MDApp):
         return top_bar
 
     def _restore_run_button(self):
-        """Восстанавливает иконку на кнопке запуска"""
-        print(f"[DEBUG] _restore_run_button called, run_btn={hasattr(self, 'run_btn')}")
-
+        """Восстанавливает иконку на кнопке запуска (исправленная версия)"""
         if not hasattr(self, 'run_btn') or self.run_btn is None:
-            print("[DEBUG] run_btn не существует!")
             return
 
-        print(f"[DEBUG] run_btn.children = {self.run_btn.children}")
+        # Проверяем, есть ли уже иконка play
+        has_play_icon = False
+        for child in self.run_btn.children[:]:
+            if hasattr(child, 'icon') and child.icon == 'play':
+                has_play_icon = True
+                break
 
-        # Очищаем и пересоздаём иконку принудительно
-        self.run_btn.clear_widgets()
+        # Если иконки нет - пересоздаём
+        if not has_play_icon:
+            # Очищаем кнопку
+            self.run_btn.clear_widgets()
 
-        from kivymd.uix.label import MDIcon
-        category = get_screen_category()
-        if category == 'tablet':
-            icon_size = dp(32)
-        elif category == 'large_phone':
-            icon_size = dp(28)
-        else:
-            icon_size = dp(23)
+            from kivymd.uix.label import MDIcon
 
-        theme = ThemeManager.get_theme()
-        if theme.get('name') == 'dark':
-            icon_color = theme.get('run_btn_text', (0.18, 0.18, 0.19, 1))
-        else:
-            icon_color = theme.get('run_btn_text', (0, 0, 0, 1))
+            # Адаптивный размер иконки
+            category = get_screen_category()
+            if category == 'tablet':
+                icon_size = dp(32)
+            elif category == 'large_phone':
+                icon_size = dp(28)
+            else:
+                icon_size = dp(23)
 
-        play_icon = MDIcon(
-            icon='play',
-            font_size=f"{icon_size}sp",
-            theme_text_color="Custom",
-            text_color=icon_color,
-            pos_hint={"center_x": 0.5, "center_y": 0.5}
-        )
-        self.run_btn.add_widget(play_icon)
-        self.run_btn.canvas.ask_update()
-        print("[DEBUG] Иконка добавлена")
+            theme = ThemeManager.get_theme()
+            if theme.get('name') == 'dark':
+                icon_color = theme.get('run_btn_text', (0.18, 0.18, 0.19, 1))
+            else:
+                icon_color = theme.get('run_btn_text', (0, 0, 0, 1))
+
+            play_icon = MDIcon(
+                icon='play',
+                font_size=f"{icon_size}sp",
+                theme_text_color="Custom",
+                text_color=icon_color,
+                pos_hint={"center_x": 0.5, "center_y": 0.5}
+            )
+            self.run_btn.add_widget(play_icon)
+
+            # Обновляем фон кнопки
+            def update_bg(btn, *args):
+                btn.canvas.before.clear()
+                with btn.canvas.before:
+                    Color(*theme.get('run_btn_bg', (0.85, 0.88, 0.90, 1)))
+                    from kivy.graphics import Ellipse
+                    Ellipse(pos=btn.pos, size=btn.size)
+
+            self.run_btn.bind(pos=update_bg, size=update_bg)
+            self.run_btn.canvas.ask_update()
 
     def _update_top_panels(self):
         """Обновляет обе верхние панели (при смене темы, языка или повороте)"""
@@ -3027,20 +3042,29 @@ class PythonLearningApp(MDApp):
         ThemeManager.unregister(self)
 
     def run_code(self, instance):
+        # Защита от повторного запуска (уже есть, но усиливаем)
         if hasattr(self, '_code_running') and self._code_running:
-            self.show_result_popup(self.tr.get('code_already_running', 'Code is already running, please wait...'))
+            self.show_result_popup("Код уже выполняется...")
             return
 
+        self.vibrate_short()
+
+        tr = self.tr
+
+        # Проверка наличия редактора
         if not hasattr(self, 'code_input') or not self.code_input:
-            self.show_result_popup(self.tr.get('editor_not_initialized', 'Error: editor not initialized'))
+            self.show_result_popup("Ошибка: редактор не инициализирован")
             return
 
         code = self.code_input.text
         if not code.strip():
-            self.show_result_popup(self.tr.get('enter_code_first', 'Enter code before running'))
+            self.show_result_popup(tr.get('enter_code', 'X Enter code'))
             return
 
+        # Устанавливаем флаг, что код запущен
         self._code_running = True
+
+        # ДОБАВИТЬ: отключаем кнопку во время выполнения
         if hasattr(self, 'run_btn'):
             self.run_btn.disabled = True
 
@@ -3049,6 +3073,7 @@ class PythonLearningApp(MDApp):
 
         def result_callback(result):
             self._code_running = False
+            # ДОБАВИТЬ: включаем кнопку обратно
             if hasattr(self, 'run_btn'):
                 self.run_btn.disabled = False
             self._show_result(result)
