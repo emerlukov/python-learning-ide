@@ -2179,63 +2179,43 @@ class PythonLearningApp(MDApp):
         return top_bar
 
     def _restore_run_button(self):
-        """Восстанавливает кнопку запуска (исправленная версия - НЕ ломает иконку)"""
+        """Восстанавливает иконку на кнопке запуска"""
+        print(f"[DEBUG] _restore_run_button called, run_btn={hasattr(self, 'run_btn')}")
+
         if not hasattr(self, 'run_btn') or self.run_btn is None:
+            print("[DEBUG] run_btn не существует!")
             return
 
-        # НЕ ОЧИЩАЕМ КНОПКУ, а только проверяем, есть ли иконка
-        has_play_icon = False
-        for child in self.run_btn.children:
-            if hasattr(child, 'icon') and child.icon == 'play':
-                has_play_icon = True
-                break
-            # Проверяем для Label с текстом
-            if hasattr(child, 'text') and child.text == '▶':
-                has_play_icon = True
-                break
+        print(f"[DEBUG] run_btn.children = {self.run_btn.children}")
 
-        # ТОЛЬКО если иконки нет - пересоздаём
-        if not has_play_icon:
-            from kivymd.uix.label import MDIcon
-            from kivy.uix.label import Label
+        # Очищаем и пересоздаём иконку принудительно
+        self.run_btn.clear_widgets()
 
-            theme = ThemeManager.get_theme()
-            category = get_screen_category()
+        from kivymd.uix.label import MDIcon
+        category = get_screen_category()
+        if category == 'tablet':
+            icon_size = dp(32)
+        elif category == 'large_phone':
+            icon_size = dp(28)
+        else:
+            icon_size = dp(23)
 
-            if category == 'tablet':
-                icon_size = dp(32)
-            elif category == 'large_phone':
-                icon_size = dp(28)
-            else:
-                icon_size = dp(23)
+        theme = ThemeManager.get_theme()
+        if theme.get('name') == 'dark':
+            icon_color = theme.get('run_btn_text', (0.18, 0.18, 0.19, 1))
+        else:
+            icon_color = theme.get('run_btn_text', (0, 0, 0, 1))
 
-            if theme.get('name') == 'dark':
-                icon_color = theme.get('run_btn_text', (0.18, 0.18, 0.19, 1))
-            else:
-                icon_color = theme.get('run_btn_text', (0, 0, 0, 1))
-
-            # Пробуем MDIcon, если не работает - используем Label
-            try:
-                play_icon = MDIcon(
-                    icon='play',
-                    font_size=f"{icon_size}sp",
-                    theme_text_color="Custom",
-                    text_color=icon_color,
-                    pos_hint={"center_x": 0.5, "center_y": 0.5}
-                )
-            except:
-                play_icon = Label(
-                    text='▶',
-                    font_size=icon_size,
-                    font_name='DejaVuSans',
-                    color=icon_color,
-                    size_hint=(1, 1),
-                    halign='center',
-                    valign='middle'
-                )
-
-            self.run_btn.add_widget(play_icon)
-            self.run_btn.canvas.ask_update()
+        play_icon = MDIcon(
+            icon='play',
+            font_size=f"{icon_size}sp",
+            theme_text_color="Custom",
+            text_color=icon_color,
+            pos_hint={"center_x": 0.5, "center_y": 0.5}
+        )
+        self.run_btn.add_widget(play_icon)
+        self.run_btn.canvas.ask_update()
+        print("[DEBUG] Иконка добавлена")
 
     def _update_top_panels(self):
         """Обновляет обе верхние панели (при смене темы, языка или повороте)"""
