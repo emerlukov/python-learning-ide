@@ -1389,6 +1389,7 @@ class PythonLearningApp(MDApp):
         self.current_input_widget = None
         self.search_popup = None
         self.saved_api_key = ''
+        self.error_explainer_enabled = True
         self.current_theme_name = 'dark'
         self.code_executor = CodeExecutor()
         self.tab_manager = TabManager()
