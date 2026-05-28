@@ -8,6 +8,7 @@ import threading
 import traceback
 from kivy.clock import Clock
 from kivy.app import App
+from utils.error_explainer import explain_error
 
 
 class CodeExecutor:
@@ -82,8 +83,21 @@ class CodeExecutor:
             except RecursionError as e:
                 error_msg = tr.get('recursion_error', 'Error: maximum recursion depth exceeded')
                 result = f"{error_msg}\n{str(e)}"
-            except Exception:
-                result = f"Error:\n{traceback.format_exc()}"
+            except Exception as e:
+                error_text = traceback.format_exc()
+                app = App.get_running_app()
+
+                use_explainer = True
+                if app and hasattr(app, 'error_explainer_enabled'):
+                    use_explainer = app.error_explainer_enabled
+
+                if use_explainer and app:
+                    locale = app.current_language if app else 'ru'
+                    # explain_error уже определяет тип ошибки внутри
+                    friendly_error = explain_error(error_text, code, locale)
+                    result = friendly_error
+                else:
+                    result = f"Error:\n{error_text}"
             finally:
                 sys.stdout = old_stdout
                 builtins.input = original_input
