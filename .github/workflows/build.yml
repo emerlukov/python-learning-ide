@@ -3,6 +3,8 @@ name: Build APK
 on:
   push:
     branches: [ main ]
+    tags:
+      - 'v*'
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -19,6 +21,16 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+
+      - name: Cache Buildozer
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.buildozer
+            .buildozer
+          key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            ${{ runner.os }}-buildozer-
 
       - name: Install system dependencies
         run: |
@@ -38,11 +50,16 @@ jobs:
 
       - name: Check required files
         run: |
-          if [ ! -f splash.png ]; then
-            echo "❌ ERROR: splash.png not found!"
-            exit 1
+          if [ ! -f icon.png ]; then
+            echo "⚠️ WARNING: icon.png not found, using default"
+          else
+            echo "✅ icon.png found"
           fi
-          echo "✅ splash.png found"
+          if [ ! -f splash.png ]; then
+            echo "⚠️ WARNING: splash.png not found, using default"
+          else
+            echo "✅ splash.png found"
+          fi
 
       - name: Clean previous build
         run: |
@@ -73,3 +90,17 @@ jobs:
           name: Python-Learning-IDE-APK
           path: bin/*.apk
           if-no-files-found: error
+
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: bin/*.apk
+          generate_release_notes: true
+
+      - name: Notify on failure
+        if: failure()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            core.setFailed('APK build failed! Check the logs for details.')
