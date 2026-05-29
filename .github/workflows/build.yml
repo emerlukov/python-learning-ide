@@ -84,13 +84,13 @@ jobs:
           
           buildozer -v android debug
 
-      - name: Upload APK to artifacts
-        if: startsWith(github.ref, 'refs/tags/')  # Только для тегов
-        uses: actions/upload-artifact@v4
-        with:
-          name: Python-Learning-IDE-APK
-          path: bin/*.apk
-          retention-days: 7
+      #- name: Upload APK to artifacts
+        #if: startsWith(github.ref, 'refs/tags/')  # Только для тегов
+        #uses: actions/upload-artifact@v4
+        #with:
+          #name: Python-Learning-IDE-APK
+          #path: bin/*.apk
+          #retention-days: 7
 
       - name: Upload to Release
         if: startsWith(github.ref, 'refs/tags/')
