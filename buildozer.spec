@@ -41,6 +41,8 @@ android.manifest.extra_queries =
     </intent>
 
 android.permissions = INTERNET, VIBRATE, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, MANAGE_EXTERNAL_STORAGE
+android.add_src = yes
+android.gradle_dependencies = 'androidx.legacy:legacy-support-v4:1.0.0'
 android.enable_androidx = True
 android.accept_sdk_license = True
 android.statusbar_color = #FFFFFF
