@@ -4,10 +4,10 @@ on:
   push:
     branches: [ main ]
     tags:
-      - 'v*'              # ← Запуск при создании тега v1.0.0, v1.1.0 и т.д.
+      - 'v*'
   pull_request:
     branches: [ main ]
-  workflow_dispatch:      # Ручной запуск
+  workflow_dispatch:
 
 jobs:
   build:
@@ -68,22 +68,10 @@ jobs:
           fi
 
       # =============================================
-      # ЗАГРУЗКА АРТЕФАКТА - ТОЛЬКО ДЛЯ ТЕГОВ
-      # =============================================
-      - name: Upload APK to artifacts
-        if: startsWith(github.ref, 'refs/tags/')   # ← ТОЛЬКО ДЛЯ ТЕГОВ!
-        uses: actions/upload-artifact@v4
-        with:
-          name: Python-Learning-IDE-APK-${{ github.ref_name }}  # ← v1.0.0 в имени
-          path: bin/*.apk
-          retention-days: 7                         # ← Хранить 7 дней
-          if-no-files-found: error
-
-      # =============================================
-      # ЗАГРУЗКА В РЕЛИЗ - ТОЛЬКО ДЛЯ ТЕГОВ
+      # ЗАГРУЗКА ТОЛЬКО В РЕЛИЗ (БЕЗ АРТЕФАКТОВ)
       # =============================================
       - name: Upload to Release
-        if: startsWith(github.ref, 'refs/tags/')   # ← ТОЛЬКО ДЛЯ ТЕГОВ!
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
           files: bin/*.apk
