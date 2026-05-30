@@ -39,69 +39,45 @@ jobs:
             zlib1g-dev libncurses-dev libtinfo6 cmake libffi-dev libssl-dev automake \
             autopoint gettext libltdl-dev
 
-      - name: Install Buildozer and dependencies
+      - name: Install Buildozer
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          pip install buildozer cython==0.29.36 autopep8 pycodestyle requests
-
-      - name: Test autopep8 installation
-        run: |
-          python -c "import autopep8, pycodestyle; print('✅ autopep8 version:', autopep8.__version__); print('✅ pycodestyle version:', pycodestyle.__version__)"
-
-      - name: Check required files
-        run: |
-          if [ ! -f icon.png ]; then
-            echo "⚠️ WARNING: icon.png not found, using default"
-          else
-            echo "✅ icon.png found"
-          fi
-          if [ ! -f splash.png ]; then
-            echo "⚠️ WARNING: splash.png not found, using default"
-          else
-            echo "✅ splash.png found"
-          fi
+          pip install buildozer cython==0.29.36
 
       - name: Clean previous build
         run: |
+          rm -rf .buildozer bin
           buildozer -v android clean || true
 
       - name: Build APK
         run: |
-          mkdir -p .buildozer/android/platform
-          cd .buildozer/android/platform
+          buildozer -v android debug 2>&1 | tee build.log
           
-          if [ ! -d python-for-android ]; then
-            git clone -b develop --single-branch --depth 1 https://github.com/kivy/python-for-android.git
-          else
-            cd python-for-android && git pull && cd ..
+          if [ $? -ne 0 ]; then
+            echo "❌ Buildozer failed! Last 50 lines:"
+            tail -50 build.log
+            exit 1
           fi
           
-          cd python-for-android
-          sed -i "s|pip install -U pip|pip install pip==24.3.1 --no-deps --force-reinstall|g" pythonforandroid/build.py
-          sed -i "s|'pip install -U pip'|'pip install pip==24.3.1 --no-deps --force-reinstall'|g" pythonforandroid/build.py
-          
-          cd ../../../..
-          
-          buildozer -v android debug
+          if ls bin/*.apk 1> /dev/null 2>&1; then
+            echo "✅ APK built successfully!"
+            ls -la bin/
+          else
+            echo "❌ No APK found in bin/ directory!"
+            exit 1
+          fi
 
       - name: Upload APK to artifacts
-        if: startsWith(github.ref, 'refs/tags/')  # Только для тегов
         uses: actions/upload-artifact@v4
         with:
           name: Python-Learning-IDE-APK
           path: bin/*.apk
-          retention-days: 7
+          if-no-files-found: warn
+        continue-on-error: true
 
       - name: Upload to Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') && success()
         uses: softprops/action-gh-release@v1
         with:
           files: bin/*.apk
           generate_release_notes: true
-
-      - name: Notify on failure
-        if: failure()
-        uses: actions/github-script@v6
-        with:
-          script: |
-            core.setFailed('APK build failed! Check the logs for details.')
