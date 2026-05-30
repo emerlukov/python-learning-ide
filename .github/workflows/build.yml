@@ -1,5 +1,9 @@
 name: Build APK
 
+# ДОБАВЛЯЕМ ПРАВА ДЛЯ СОЗДАНИЯ РЕЛИЗА
+permissions:
+  contents: write
+
 on:
   push:
     branches: [ main ]
@@ -67,12 +71,10 @@ jobs:
             exit 1
           fi
 
-      # =============================================
-      # ЗАГРУЗКА ТОЛЬКО В РЕЛИЗ (БЕЗ АРТЕФАКТОВ)
-      # =============================================
       - name: Upload to Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
           files: bin/*.apk
           generate_release_notes: true
+          token: ${{ secrets.GITHUB_TOKEN }}
