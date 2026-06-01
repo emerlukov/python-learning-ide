@@ -70,6 +70,13 @@ jobs:
             echo "❌ No APK found in bin/ directory!"
             exit 1
           fi
+      
+      - name: Upload APK as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Python-Learning-IDE-APK-${{ github.ref_name }}
+          path: bin/*.apk
+          retention-days: 7
 
       - name: Upload to Release
         if: startsWith(github.ref, 'refs/tags/')
