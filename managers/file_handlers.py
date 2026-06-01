@@ -98,11 +98,13 @@ class FileOperationHandlers:
                 try:
                     from jnius import autoclass
                     Environment = autoclass('android.os.Environment')
+                    tr = self.app.tr
                     if Environment.isExternalStorageManager():
-                        self.app.show_result_popup("✓ Полный доступ к файлам получен!\nПерезапустите приложение.")
+                        self.app.show_result_popup(tr.get('storage_permission_success',
+                                                          "✓ Full file access granted!\nPlease restart the app."))
                     else:
-                        self.app.show_result_popup(
-                            "✗ Полный доступ к файлам не получен.\nНекоторые файлы могут быть не видны.")
+                        self.app.show_result_popup(tr.get('storage_permission_failed',
+                                                          "✗ Full file access not granted.\nSome files may not be visible."))
                     # Обновляем состояние file_manager
                     if hasattr(self.app, 'file_manager'):
                         self.app.file_manager.refresh_file_list()
