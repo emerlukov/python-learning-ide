@@ -16,6 +16,7 @@ from kivymd.uix.button import MDRectangleFlatButton, MDIconButton
 from kivymd.uix.textfield import MDTextField
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.scrollview import MDScrollView
+from core.settings import SettingsManager
 
 # ====================== ИМПОРТ ТЕМ ======================
 try:
@@ -338,6 +339,12 @@ class FileManager:
                 self._rename_lock = False
 
         threading.Thread(target=rename, daemon=True).start()
+
+    def refresh_file_list(self):
+        """Обновляет список файлов в текущей папке"""
+        self._cache.pop(self.current_path, None)
+        if hasattr(self.app, '_current_file_popup') and self.app._current_file_popup:
+            self.app._current_file_popup._refresh_list()
 
     def set_saf_root(self, uri):
         """Устанавливает URI для SAF (Storage Access Framework)"""
