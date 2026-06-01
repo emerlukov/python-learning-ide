@@ -132,6 +132,8 @@ class PythonLearningApp(MDApp):
         Clock.schedule_once(lambda dt: self.emergency_recovery.check_and_restore(), 1.0)
         # Проверка разрешений через 1 секунду после запуска
         Clock.schedule_once(lambda dt: self.check_and_request_manage_storage(), 1)
+        # Применяем язык после загрузки UI
+        Clock.schedule_once(lambda dt: self._apply_language_to_ui(), 0.5)
 
         return sm
 
@@ -375,24 +377,74 @@ class PythonLearningApp(MDApp):
 
     def _load_language(self):
         """Загружает сохранённый язык"""
+        # Сначала пробуем из настроек
+        try:
+            lang = SettingsManager.get_language()
+            if lang in ['ru', 'en']:
+                print(f"[DEBUG] Loaded language from settings: {lang}")
+                return lang
+        except Exception as e:
+            print(f"[DEBUG] Error reading language from settings: {e}")
+
+        # Затем из файла
         try:
             lang_file = os.path.join(os.getcwd(), 'language.txt')
             if os.path.exists(lang_file):
                 with open(lang_file, 'r') as f:
                     lang = f.read().strip()
                     if lang in ['ru', 'en']:
+                        print(f"[DEBUG] Loaded language from file: {lang}")
+                        # Сохраняем в настройки для синхронизации
+                        SettingsManager.save_language(lang)
                         return lang
-        except:
-            pass
+        except Exception as e:
+            print(f"[DEBUG] Error reading language file: {e}")
 
-        try:
-            lang = SettingsManager.get_language()
-            if lang in ['ru', 'en']:
-                return lang
-        except:
-            pass
-
+        print("[DEBUG] Using default language: en")
         return 'en'
+
+    def _save_language(self):
+        """Сохраняет текущий язык"""
+        try:
+            # Сохраняем в настройки
+            SettingsManager.save_language(self.current_language)
+            # Сохраняем в файл
+            lang_file = os.path.join(os.getcwd(), 'language.txt')
+            with open(lang_file, 'w') as f:
+                f.write(self.current_language)
+            print(f"[DEBUG] Language saved: {self.current_language}")
+        except Exception as e:
+            print(f"[DEBUG] Error saving language: {e}")
+
+    def _apply_language_to_ui(self):
+        """Применяет сохранённый язык ко всем UI элементам"""
+        print(f"[DEBUG] Applying language: {self.current_language}")
+
+        # Обновляем спиннер примеров
+        if hasattr(self, 'spinner'):
+            self.spinner.text = self.tr.get('examples', 'Examples')
+            self.spinner.values = self._get_example_titles()
+
+        # Обновляем заголовки вкладок
+        if hasattr(self, 'tab_manager'):
+            for tab in self.tab_manager.tabs:
+                current_title = tab['title']
+                has_asterisk = current_title.startswith('*')
+                clean_title = current_title.lstrip('*')
+
+                if clean_title in ['Untitled', 'New', 'Новый']:
+                    new_title = self.tr.get('untitled_tab', 'New')
+                    if has_asterisk:
+                        new_title = '*' + new_title
+                    tab['title'] = new_title
+            self.tab_manager._update_tab_bar()
+
+        # Обновляем меню
+        if hasattr(self, '_menu_dropdown'):
+            self._create_menu_items(ThemeManager.get_theme())
+
+        # Обновляем заголовок окна
+        self._update_title_from_current_tab()
 
     def _load_api_key_async(self):
         """Асинхронно загружает API ключ"""
@@ -1461,7 +1513,7 @@ class PythonLearningApp(MDApp):
             Line(rectangle=(instance.pos[0], instance.pos[1], instance.size[0], instance.size[1]), width=dp(0.5))
 
     def _update_ui_language(self):
-        """Обновляет язык интерфейса"""
+        """Обновляет язык интерфейса при смене языка"""
         tr = self.tr
 
         # Переименовываем вкладки
@@ -1489,16 +1541,20 @@ class PythonLearningApp(MDApp):
         # Обновляем заголовок
         self._update_title_from_current_tab()
 
-        # ========== НОВОЕ: Перезагружаем примеры при смене языка ==========
+        # Перезагружаем примеры при смене языка
         from managers import examples_manager
-        examples_manager.reload()  # Принудительно перезагружаем примеры
+        examples_manager.reload()
 
-        # Обновляем спиннер (заголовки примеров не меняются, но код будет на новом языке)
+        # Обновляем спиннер
         if hasattr(self, 'spinner') and self.spinner:
-            # Сохраняем текущее значение, чтобы не триггерить загрузку
             current_text = self.spinner.text
             self.spinner.values = self._get_example_titles()
             self.spinner.text = current_text
+
+        # Сохраняем язык
+        self._save_language()
+
+        print(f"[DEBUG] Language changed to: {self.current_language}")
 
     # ====================== ВИБРАЦИЯ ======================
 
@@ -1514,6 +1570,11 @@ class PythonLearningApp(MDApp):
 
     def on_start(self):
         """Запуск приложения"""
+        from kivy.clock import Clock
+
+        # Применяем язык при старте
+        Clock.schedule_once(lambda dt: self._apply_language_to_ui(), 0.2)
+
         if platform == 'android':
             from android.permissions import request_permissions, Permission
             from kivy.clock import Clock
