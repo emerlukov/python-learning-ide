@@ -129,7 +129,6 @@ class PythonLearningApp(MDApp):
         # Прогрев Pygments
         self._warmup_pygments()
 
-        self.request_storage_permission()
 
         # Проверка emergency бэкапа после загрузки
         Clock.schedule_once(lambda dt: self.emergency_recovery.check_and_restore(), 1.0)
@@ -138,7 +137,7 @@ class PythonLearningApp(MDApp):
 
     def _create_main_widget(self):
         """Создаёт главный виджет приложения"""
-        self._request_android_permissions()
+        self._request_storage_permission()
         self._load_fonts()
 
         Window.keyboard_anim_args = {'d': 0.2, 't': 'in_out_quad'}
@@ -538,17 +537,15 @@ class PythonLearningApp(MDApp):
         except:
             pass
 
-    def _request_android_permissions(self):
-        """Запрашивает разрешения для Android"""
-        if platform != 'android':
-            return
-
+    def _request_storage_permission(self):
         try:
-            from android.permissions import request_permissions, Permission
-            permissions = [Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE]
-            if hasattr(Permission, 'MANAGE_EXTERNAL_STORAGE'):
-                permissions.append(Permission.MANAGE_EXTERNAL_STORAGE)
-            request_permissions(permissions)
+            from jnius import autoclass
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            activity = PythonActivity.mActivity
+            permissions = ["android.permission.READ_EXTERNAL_STORAGE", "android.permission.WRITE_EXTERNAL_STORAGE"]
+            VERSION = autoclass('android.os.Build$VERSION')
+            if VERSION.SDK_INT >= 23:
+                activity.requestPermissions(permissions, 1)
         except:
             pass
 
@@ -568,27 +565,6 @@ class PythonLearningApp(MDApp):
                 json.dump(tabs_data, f, indent=2)
         except:
             pass
-
-    def request_storage_permission(self):
-        """Запрашивает разрешение на управление файлами (Android 11+)"""
-        if platform == 'android':
-            try:
-                from jnius import autoclass
-                from android.permissions import request_permissions, Permission
-
-                # Проверяем версию Android
-                Build = autoclass('android.os.Build$VERSION')
-                if Build.SDK_INT >= 30:  # Android 11+
-                    # Запрашиваем MANAGE_EXTERNAL_STORAGE
-                    request_permissions([Permission.MANAGE_EXTERNAL_STORAGE])
-                else:
-                    # Для старых версий
-                    request_permissions([
-                        Permission.READ_EXTERNAL_STORAGE,
-                        Permission.WRITE_EXTERNAL_STORAGE
-                    ])
-            except Exception as e:
-                print(f"Permission error: {e}")
 
     # ====================== ОБНОВЛЕНИЕ UI ======================
 
