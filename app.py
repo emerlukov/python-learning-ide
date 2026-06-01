@@ -589,6 +589,7 @@ class PythonLearningApp(MDApp):
     def show_manage_storage_dialog(self):
         """Показывает диалог с инструкцией по включению доступа к файлам"""
         theme = ThemeManager.get_theme()
+        tr = self.tr  # ← используем текущий язык
 
         from kivy.uix.boxlayout import BoxLayout
         from kivy.uix.label import Label
@@ -598,13 +599,12 @@ class PythonLearningApp(MDApp):
 
         content = BoxLayout(orientation='vertical', padding=dp(15), spacing=dp(15))
 
-        message = (
-            "[b]Доступ к файлам[/b]\n\n"
-            "Для работы с файлами на Android 11+ нужно разрешить управление файлами.\n\n"
-            "1. Нажмите 'Открыть настройки'\n"
-            "2. Включите 'Разрешить управление всеми файлами'\n"
-            "3. Вернитесь в приложение"
-        )
+        message = tr.get('storage_permission_message',
+                         "To work with files on Android 11+, you need to allow file management.\n\n"
+                         "1. Click 'Open Settings'\n"
+                         "2. Enable 'Allow managing all files'\n"
+                         "3. Return to the app"
+                         )
 
         msg_label = Label(
             text=message,
@@ -622,7 +622,7 @@ class PythonLearningApp(MDApp):
         btn_layout = BoxLayout(size_hint_y=None, height=dp(45), spacing=dp(10))
 
         popup = ThemedPopup(
-            title="Доступ к файлам",
+            title=tr.get('storage_permission_title', 'Storage Permission'),
             title_color=theme['popup_title'],
             title_bg=theme.get('popup_title_bg', theme['widget_bg']),
             popup_bg=theme.get('popup_bg', theme['widget_bg']),
@@ -647,10 +647,11 @@ class PythonLearningApp(MDApp):
                 PythonActivity.mActivity.startActivityForResult(intent, 1005)
             except Exception as e:
                 print(f"Failed to open settings: {e}")
-                self.show_result_popup("Не удалось открыть настройки.\nВключите разрешение вручную.")
+                self.show_result_popup(tr.get('storage_permission_failed',
+                                              "Failed to open settings.\nEnable permission manually."))
 
         btn_settings = Button(
-            text="Открыть настройки",
+            text=tr.get('storage_permission_open_settings', 'Open Settings'),
             font_name='SourceBold',
             background_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1)),
             background_normal='', background_down='',
@@ -660,7 +661,7 @@ class PythonLearningApp(MDApp):
         )
 
         btn_later = Button(
-            text="Позже",
+            text=tr.get('storage_permission_later', 'Later'),
             font_name='SourceBold',
             background_color=theme['widget_bg'],
             background_normal='', background_down='',
