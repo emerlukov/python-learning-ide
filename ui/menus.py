@@ -85,7 +85,17 @@ class LanguageSelectMenu:
         if lang_code != self.app.current_language:
             self.app.current_language = lang_code
             self.app.tr = TRANSLATIONS[lang_code]
+
+            # Сохраняем язык в настройки
             SettingsManager.save_language(lang_code)
+
+            # Сохраняем язык в файл
+            try:
+                with open(os.path.join(os.getcwd(), 'language.txt'), 'w') as f:
+                    f.write(lang_code)
+            except:
+                pass
+
             self.app._update_ui_language()
             self.app.show_result_popup(
                 f"{self.app.tr.get('language', 'Language')}: {self.LANGUAGE_NAMES.get(lang_code, lang_code.upper())}")
