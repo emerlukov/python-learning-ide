@@ -103,6 +103,9 @@ class FileOperationHandlers:
                     else:
                         self.app.show_result_popup(
                             "✗ Полный доступ к файлам не получен.\nНекоторые файлы могут быть не видны.")
+                    # Обновляем состояние file_manager
+                    if hasattr(self.app, 'file_manager'):
+                        self.app.file_manager.refresh_file_list()
                 except:
                     pass
                 return
