@@ -251,6 +251,8 @@ TRANSLATIONS = {
         'vibration_settings': 'Вибрация',
         'vibration_on': 'Вкл',
         'vibration_off': 'Выкл',
+        'close_other_confirm': 'Закрыть другие вкладки без сохранения?',
+        'close_all_confirm': 'Закрыть все вкладки без сохранения?',
     },
     'en': {
         'no_code': 'No code to format',
@@ -499,5 +501,7 @@ TRANSLATIONS = {
         'vibration_settings': 'Vibrate',
         'vibration_on': 'On',
         'vibration_off': 'Off',
+        'close_other_confirm': 'Close other tabs without saving?',
+        'close_all_confirm': 'Close all tabs without saving?',
     },
 }
