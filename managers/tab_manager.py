@@ -361,6 +361,10 @@ class TabManager:
         btn_layout.add_widget(btn_cancel)
         content.add_widget(btn_layout)
 
+        # ========== ОБЁРТКА КНОПОК ДЛЯ ВИБРАЦИИ ==========
+        if self.app and hasattr(self.app, 'wrap_widget_buttons'):
+            self.app.wrap_widget_buttons(content)
+
         popup.open()
 
     def _do_close_tab_by_id(self, tab_id):
@@ -589,6 +593,11 @@ class TabManager:
                                    background_color=bg_color, background_normal='', background_down='',
                                    color=theme.get('tab_close_btn_text', text_color), font_size=dp(15))
                 btn_close.bind(on_release=lambda x, idx=i: self._on_tab_close(idx))
+
+                # ========== ОБЁРТКА КНОПКИ ЗАКРЫТИЯ ==========
+                if self.app and hasattr(self.app, 'wrap_widget_buttons'):
+                    self.app.wrap_widget_buttons(btn_close)
+
                 tab_box.add_widget(btn_close)
             self.tab_buttons_container.add_widget(tab_box)
 
