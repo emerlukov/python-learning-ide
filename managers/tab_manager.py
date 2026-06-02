@@ -720,28 +720,196 @@ class TabManager:
 
     def _close_other_tabs(self, index, menu):
         # ВИБРАЦИЯ
-        #if self.app and hasattr(self.app, 'vibrate_short'):
-            #self.app.vibrate_short()
+        # if self.app and hasattr(self.app, 'vibrate_short'):
+            # self.app.vibrate_short()
 
         menu.dismiss()
         if 0 <= index < len(self.tabs):
-            tab = self.tabs[index]
-            for t in self.tabs:
-                if t != tab and hasattr(t['editor'], 'cleanup'):
-                    t['editor'].cleanup()
-            self.tabs = [tab]
-            self.active_index = 0
-            self._update_tab_bar()
-            self.save_all_tabs()
-            if self.app:
-                self.app._on_tab_changed(tab['editor'])
+            # Находим целевую вкладку (которую оставляем)
+            target_tab = self.tabs[index]
+
+            # Собираем вкладки для закрытия (все, кроме целевой)
+            tabs_to_close = []
+            for i, t in enumerate(self.tabs):
+                if i != index:
+                    # Проверяем, есть ли несохранённые изменения
+                    current_text = t['editor'].get_text() if t['editor'] else ""
+                    original = t.get('original_content', "")
+                    if current_text != original and current_text.strip():
+                        tabs_to_close.append({
+                            'id': t.get('id'),
+                            'title': t.get('title', 'Untitled'),
+                            'content': current_text,
+                            'file': t.get('file'),
+                            'tab_obj': t,
+                            'tab_index': i
+                        })
+
+            if tabs_to_close:
+                # Показываем диалог для закрытия других вкладок с несохранёнными
+                self._show_close_other_tabs_dialog(target_tab, tabs_to_close)
+            else:
+                # Нет несохранённых — просто закрываем
+                self._do_close_other_tabs(target_tab)
+
+    def _do_close_other_tabs(self, target_tab):
+        """Фактическое закрытие других вкладок (без проверки)"""
+        for t in self.tabs:
+            if t != target_tab and hasattr(t['editor'], 'cleanup'):
+                t['editor'].cleanup()
+        self.tabs = [target_tab]
+        self.active_index = 0
+        self._update_tab_bar()
+        self.save_all_tabs()
+        if self.app:
+            self.app._on_tab_changed(target_tab['editor'])
+
+    def _show_close_other_tabs_dialog(self, target_tab, tabs_to_close):
+        """Показывает диалог для закрытия других вкладок с несохранёнными"""
+        if not self.app:
+            return
+
+        tr = self.app.tr
+        theme = ThemeManager.get_theme()
+
+        from kivy.uix.boxlayout import BoxLayout
+        from kivy.uix.button import Button
+        from kivy.uix.label import Label
+        from kivy.uix.scrollview import ScrollView
+        from widgets.dialogs import ThemedPopup
+
+        # Адаптивные размеры
+        category = get_screen_category()
+        if category == 'tablet':
+            padding = dp(20)
+            spacing = dp(15)
+            msg_height = dp(140)
+            btn_height = dp(55)
+            font_size_msg = dp(14)
+            font_size_btn = dp(14)
+            popup_size = (0.8, 0.58)
+        elif category == 'large_phone':
+            padding = dp(15)
+            spacing = dp(12)
+            msg_height = dp(125)
+            btn_height = dp(50)
+            font_size_msg = dp(13)
+            font_size_btn = dp(13)
+            popup_size = (0.88, 0.6)
+        else:
+            padding = dp(12)
+            spacing = dp(10)
+            msg_height = dp(115)
+            btn_height = dp(45)
+            font_size_msg = dp(12)
+            font_size_btn = dp(12)
+            popup_size = (0.92, 0.65)
+
+        content = BoxLayout(orientation='vertical', padding=padding, spacing=spacing)
+
+        # Список несохранённых вкладок
+        tabs_list = "\n".join([f"• {tab['title']}" for tab in tabs_to_close[:10]])
+        if len(tabs_to_close) > 10:
+            tabs_list += f"\n... и {len(tabs_to_close) - 10} других"
+
+        message = f"{tr.get('unsaved_changes', 'Unsaved changes')}:\n\n{tabs_list}\n\n{tr.get('close_other_confirm', 'Close other tabs without saving?')}"
+
+        scroll = ScrollView(size_hint=(1, 0.6))
+        msg_label = Label(
+            text=message,
+            color=theme['text_color'],
+            font_size=font_size_msg,
+            font_name='SourceBold',
+            halign='left',
+            valign='top',
+            size_hint_y=None
+        )
+        msg_label.bind(width=lambda inst, val: setattr(inst, 'text_size', (val, None)))
+        msg_label.bind(texture_size=lambda inst, sz: setattr(inst, 'height', sz[1] + dp(10)))
+        scroll.add_widget(msg_label)
+        content.add_widget(scroll)
+
+        btn_layout = BoxLayout(size_hint_y=None, height=btn_height, spacing=spacing)
+
+        popup = ThemedPopup(
+            title=tr.get('close_other_tabs', 'Close other tabs'),
+            title_color=theme['popup_title'],
+            title_bg=theme.get('popup_title_bg', theme['widget_bg']),
+            popup_bg=theme.get('popup_bg', theme.get('widget_bg', (0.188, 0.204, 0.251, 1))),
+            separator_color=theme.get('popup_separator', (0.25, 0.25, 0.25, 1)),
+            content=content,
+            size_hint=popup_size,
+            auto_dismiss=False
+        )
+
+        def on_close_others(x):
+            popup.dismiss()
+            self._do_close_other_tabs(target_tab)
+
+        def on_cancel(x):
+            popup.dismiss()
+
+        btn_close_others = Button(
+            text=tr.get('close_other_tabs', 'Close others'),
+            font_name='SourceBold',
+            background_color=theme.get('btn_danger_bg', (0.5, 0.2, 0.2, 1)),
+            background_normal='', background_down='',
+            color=(1, 1, 1, 1),
+            font_size=font_size_btn,
+            size_hint=(1, 1),
+            on_release=on_close_others
+        )
+
+        btn_cancel = Button(
+            text=tr.get('cancel', 'Cancel'),
+            font_name='SourceBold',
+            background_color=theme.get('widget_bg', (0.141, 0.145, 0.149, 1)),
+            background_normal='', background_down='',
+            color=theme['text_color'],
+            font_size=font_size_btn,
+            size_hint=(1, 1),
+            on_release=on_cancel
+        )
+
+        btn_layout.add_widget(btn_cancel)
+        btn_layout.add_widget(btn_close_others)
+        content.add_widget(btn_layout)
+
+        # Обёртка для вибрации
+        if self.app and hasattr(self.app, 'wrap_widget_buttons'):
+            self.app.wrap_widget_buttons(content)
+
+        popup.open()
 
     def _close_all_tabs(self, menu):
         # ВИБРАЦИЯ
-        #if self.app and hasattr(self.app, 'vibrate_short'):
-            #self.app.vibrate_short()
+        # if self.app and hasattr(self.app, 'vibrate_short'):
+            # self.app.vibrate_short()
 
         menu.dismiss()
+
+        # Проверяем, есть ли несохранённые вкладки
+        unsaved_tabs = []
+        for tab in self.tabs:
+            current_text = tab['editor'].get_text() if tab['editor'] else ""
+            original = tab.get('original_content', "")
+            if current_text != original and current_text.strip():
+                unsaved_tabs.append({
+                    'id': tab.get('id'),
+                    'title': tab.get('title', 'Untitled'),
+                    'content': current_text,
+                    'file': tab.get('file')
+                })
+
+        if unsaved_tabs:
+            # Показываем диалог для закрытия всех вкладок с несохранёнными
+            self._show_close_all_tabs_dialog(unsaved_tabs)
+        else:
+            # Нет несохранённых вкладок — просто закрываем
+            self._do_close_all_tabs()
+
+    def _do_close_all_tabs(self):
+        """Фактическое закрытие всех вкладок (без проверки)"""
         for tab in self.tabs:
             if hasattr(tab['editor'], 'cleanup'):
                 tab['editor'].cleanup()
@@ -752,6 +920,123 @@ class TabManager:
         self.save_all_tabs()
         if self.app:
             self.app._on_tab_changed(editor)
+
+    def _show_close_all_tabs_dialog(self, unsaved_tabs):
+        """Показывает диалог для закрытия всех вкладок с несохранёнными"""
+        if not self.app:
+            return
+
+        tr = self.app.tr
+        theme = ThemeManager.get_theme()
+
+        from kivy.uix.boxlayout import BoxLayout
+        from kivy.uix.button import Button
+        from kivy.uix.label import Label
+        from kivy.uix.scrollview import ScrollView
+        from widgets.dialogs import ThemedPopup
+
+        # Адаптивные размеры
+        category = get_screen_category()
+        if category == 'tablet':
+            padding = dp(20)
+            spacing = dp(15)
+            msg_height = dp(140)
+            btn_height = dp(55)
+            font_size_msg = dp(14)
+            font_size_btn = dp(14)
+            popup_size = (0.8, 0.58)
+        elif category == 'large_phone':
+            padding = dp(15)
+            spacing = dp(12)
+            msg_height = dp(125)
+            btn_height = dp(50)
+            font_size_msg = dp(13)
+            font_size_btn = dp(13)
+            popup_size = (0.88, 0.6)
+        else:
+            padding = dp(12)
+            spacing = dp(10)
+            msg_height = dp(115)
+            btn_height = dp(45)
+            font_size_msg = dp(12)
+            font_size_btn = dp(12)
+            popup_size = (0.92, 0.65)
+
+        content = BoxLayout(orientation='vertical', padding=padding, spacing=spacing)
+
+        # Список несохранённых вкладок
+        tabs_list = "\n".join([f"• {tab['title']}" for tab in unsaved_tabs[:10]])
+        if len(unsaved_tabs) > 10:
+            tabs_list += f"\n... и {len(unsaved_tabs) - 10} других"
+
+        message = f"{tr.get('unsaved_changes', 'Unsaved changes')}:\n\n{tabs_list}\n\n{tr.get('close_all_confirm', 'Close all tabs without saving?')}"
+
+        scroll = ScrollView(size_hint=(1, 0.6))
+        msg_label = Label(
+            text=message,
+            color=theme['text_color'],
+            font_size=font_size_msg,
+            font_name='SourceBold',
+            halign='left',
+            valign='top',
+            size_hint_y=None
+        )
+        msg_label.bind(width=lambda inst, val: setattr(inst, 'text_size', (val, None)))
+        msg_label.bind(texture_size=lambda inst, sz: setattr(inst, 'height', sz[1] + dp(10)))
+        scroll.add_widget(msg_label)
+        content.add_widget(scroll)
+
+        btn_layout = BoxLayout(size_hint_y=None, height=btn_height, spacing=spacing)
+
+        popup = ThemedPopup(
+            title=tr.get('close_all_tabs', 'Close all tabs'),
+            title_color=theme['popup_title'],
+            title_bg=theme.get('popup_title_bg', theme['widget_bg']),
+            popup_bg=theme.get('popup_bg', theme.get('widget_bg', (0.188, 0.204, 0.251, 1))),
+            separator_color=theme.get('popup_separator', (0.25, 0.25, 0.25, 1)),
+            content=content,
+            size_hint=popup_size,
+            auto_dismiss=False
+        )
+
+        def on_close_all(x):
+            popup.dismiss()
+            self._do_close_all_tabs()
+
+        def on_cancel(x):
+            popup.dismiss()
+
+        btn_close_all = Button(
+            text=tr.get('close_all_tabs', 'Close all'),
+            font_name='SourceBold',
+            background_color=theme.get('btn_danger_bg', (0.5, 0.2, 0.2, 1)),
+            background_normal='', background_down='',
+            color=(1, 1, 1, 1),
+            font_size=font_size_btn,
+            size_hint=(1, 1),
+            on_release=on_close_all
+        )
+
+        btn_cancel = Button(
+            text=tr.get('cancel', 'Cancel'),
+            font_name='SourceBold',
+            background_color=theme.get('widget_bg', (0.141, 0.145, 0.149, 1)),
+            background_normal='', background_down='',
+            color=theme['text_color'],
+            font_size=font_size_btn,
+            size_hint=(1, 1),
+            on_release=on_cancel
+        )
+
+        btn_layout.add_widget(btn_cancel)
+        btn_layout.add_widget(btn_close_all)
+        content.add_widget(btn_layout)
+
+        # Обёртка для вибрации
+        if self.app and hasattr(self.app, 'wrap_widget_buttons'):
+            self.app.wrap_widget_buttons(content)
+
+        popup.open()
 
     def save_all_tabs(self):
         try:
