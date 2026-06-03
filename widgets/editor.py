@@ -1,5 +1,5 @@
 """
-Code editor widget with line numbers and syntax highlighting
+Code editor widget with line numbers, syntax highlighting and block folding
 """
 import re
 import time
@@ -9,7 +9,7 @@ from kivy.uix.codeinput import CodeInput
 from kivy.uix.label import Label
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
-from kivy.graphics import Color, Rectangle, Line
+from kivy.graphics import Color, Rectangle, Line, RoundedRectangle
 from kivy.core.window import Window
 from kivy.clock import Clock
 from kivy.metrics import dp
@@ -24,9 +24,365 @@ from core.themes import ThemeManager, HAS_PYGMENTS
 if HAS_PYGMENTS:
     from pygments.lexers import PythonLexer
 
+# Маркер свёрнутого блока — уникальный, не встречается в обычном коде
+_FOLD_MARKER = '\u25B6'  # ▶
+
+
+def _get_fold_ranges(lines):
+    """Улучшенная версия с защитой от строк с маркерами"""
+    ranges = []
+    n = len(lines)
+    i = 0
+    while i < n:
+        line = lines[i]
+        stripped = line.rstrip()
+        if not stripped or _FOLD_MARKER in line or '▶' in line:
+            i += 1
+            continue
+
+        indent = len(line) - len(line.lstrip())
+        lstripped = line.lstrip()
+
+        if stripped.endswith(':') and not lstripped.startswith('#'):
+            block_end = i
+            j = i + 1
+            while j < n:
+                jline = lines[j]
+                jstripped = jline.strip()
+                if not jstripped:
+                    j += 1
+                    continue
+                jindent = len(jline) - len(jline.lstrip())
+                if jindent > indent:
+                    block_end = j
+                    j += 1
+                else:
+                    break
+            if block_end > i:
+                ranges.append((i, block_end))
+            i += 1
+        else:
+            i += 1
+    return ranges
+
+
+class FoldingManager:
+    """Управляет свёрнутыми блоками.
+
+    Хранит оригинальный текст со всеми строками.
+    При сворачивании/разворачивании пересчитывает «отображаемый» текст.
+
+    Структура _folds: { display_line_index: {'orig_start', 'orig_end', 'orig_lines'} }
+    """
+
+    def __init__(self):
+        self._orig_lines = []   # полный оригинал (список строк)
+        self._folds = {}        # {orig_start_line: {'end': orig_end, 'lines': [...]}}
+        self._fold_ranges = []  # [(start, end), ...] — все доступные блоки
+
+    def set_lines(self, lines):
+        """Вызывается при изменении текста. Сбрасывает все сворачивания."""
+        self._orig_lines = list(lines)
+        self._folds = {}
+        self._fold_ranges = _get_fold_ranges(self._orig_lines)
+
+    def get_orig_lines(self):
+        return self._orig_lines
+
+    def get_display_lines(self):
+        result = []
+        i = 0
+        n = len(self._orig_lines)
+        while i < n:
+            if i in self._folds:
+                header = self._orig_lines[i]
+                count = self._folds[i]['end'] - i  # количество скрытых строк
+                # Добавляем три точки ... и информацию
+                result.append(header.rstrip() + f'  ... ▶ {count} lines folded')
+                i = self._folds[i]['end'] + 1
+            else:
+                result.append(self._orig_lines[i])
+                i += 1
+        return result
+
+    def is_foldable(self, orig_line):
+        """Есть ли на этой строке (в оригинале) сворачиваемый блок."""
+        return any(s == orig_line for s, e in self._fold_ranges)
+
+    def get_fold_ranges(self):
+        return self._fold_ranges
+
+    def is_folded(self, orig_line):
+        return orig_line in self._folds
+
+    def fold(self, orig_line):
+        """Свернуть блок, начинающийся с orig_line."""
+        for s, e in self._fold_ranges:
+            if s == orig_line and orig_line not in self._folds:
+                hidden = self._orig_lines[s + 1: e + 1]
+                self._folds[s] = {'end': e, 'lines': hidden}
+                return True
+        return False
+
+    def unfold(self, orig_line):
+        """Развернуть блок."""
+        if orig_line in self._folds:
+            del self._folds[orig_line]
+            return True
+        return False
+
+    def toggle(self, orig_line):
+        if orig_line in self._folds:
+            self.unfold(orig_line)
+        else:
+            self.fold(orig_line)
+
+    def display_to_orig(self, display_line):
+        """Перевод номера отображаемой строки в номер оригинальной."""
+        di = 0
+        oi = 0
+        n = len(self._orig_lines)
+        while oi < n:
+            if di == display_line:
+                return oi
+            if oi in self._folds:
+                oi = self._folds[oi]['end'] + 1
+            else:
+                oi += 1
+            di += 1
+        return oi
+
+    def orig_to_display(self, orig_line):
+        """Перевод номера оригинальной строки в номер отображаемой."""
+        di = 0
+        oi = 0
+        while oi < orig_line and oi < len(self._orig_lines):
+            if oi in self._folds:
+                oi = self._folds[oi]['end'] + 1
+            else:
+                oi += 1
+            di += 1
+        return di
+
+    def apply_display_edit(self, new_display_lines):
+        """Вызывается когда пользователь отредактировал текст напрямую."""
+        if not new_display_lines:
+            self._orig_lines = []
+            self._folds = {}
+            self._fold_ranges = []
+            return
+
+        old_folds = self._folds.copy()
+        old_orig_lines = self._orig_lines.copy()
+
+        # === Основная идея: восстанавливаем оригинальные строки ===
+        new_orig = []
+        i = 0
+        while i < len(new_display_lines):
+            line = new_display_lines[i]
+
+            if _FOLD_MARKER in line or '▶' in line:  # это свёрнутый блок
+                # Ищем соответствующий старый folded блок
+                found = False
+                for start, fold_data in old_folds.items():
+                    old_header = old_orig_lines[start].rstrip()
+                    # Пытаемся сопоставить заголовок
+                    if (old_header in line or
+                            line.rstrip().startswith(old_header.rstrip()) or
+                            old_header.startswith(line.split('...')[0].strip())):
+                        # Восстанавливаем весь блок из старого оригинала
+                        end = fold_data['end']
+                        new_orig.extend(old_orig_lines[start:end + 1])
+                        i += 1
+                        found = True
+                        break
+
+                if not found:
+                    # Не смогли восстановить — вставляем как обычную строку
+                    new_orig.append(line)
+                    i += 1
+            else:
+                new_orig.append(line)
+                i += 1
+
+        # Обновляем состояние
+        self._orig_lines = new_orig
+        self._folds = {}  # временно сбрасываем
+
+        # Пересчитываем возможные диапазоны сворачивания
+        self._fold_ranges = _get_fold_ranges(self._orig_lines)
+
+        # Восстанавливаем сворачивания там, где заголовки совпадают
+        for start, fold_data in old_folds.items():
+            if start < len(self._orig_lines):
+                old_header = old_orig_lines[start].rstrip()
+                new_header = self._orig_lines[start].rstrip()
+
+                if (old_header == new_header or
+                        old_header.startswith(new_header) or
+                        new_header.startswith(old_header.split(':')[0] if ':' in old_header else old_header)):
+
+                    # Проверяем, что блок всё ещё существует
+                    for s, e in self._fold_ranges:
+                        if s == start:
+                            self._folds[start] = {
+                                'end': e,
+                                'lines': self._orig_lines[s + 1:e + 1]
+                            }
+                            break
+
+
+class VirtualLinePanel(Widget):
+    """Панель номеров строк + кнопки сворачивания на Canvas.
+    Рисует только видимые строки, касания обрабатывает напрямую."""
+
+    def __init__(self, on_fold_toggle=None, **kwargs):
+        super().__init__(**kwargs)
+        self._line_count = 0
+        self._line_height = 16
+        self._font_size = 12
+        self._theme = {}
+        self._scroll_y = 1.0
+        self._editor_height = 0
+        self._redraw_ev = None
+        self._fold_ranges = []      # [(start, end), ...] оригинальные диапазоны
+        self._folded_set = set()    # {orig_line, ...} свёрнутые заголовки
+        self._display_to_orig = {}  # {display_i: orig_i} — для хит-теста
+        self._on_fold_toggle = on_fold_toggle  # callback(orig_line)
+        self.bind(pos=self._schedule_redraw, size=self._schedule_redraw)
+
+    def update(self, line_count, line_height, font_size, theme, scroll_y,
+               editor_height, fold_ranges=None, folded_set=None, display_to_orig=None):
+        self._line_count = line_count
+        self._line_height = line_height
+        self._font_size = font_size
+        self._theme = theme
+        self._scroll_y = scroll_y
+        self._editor_height = editor_height
+        self._fold_ranges = fold_ranges or []
+        self._folded_set = folded_set or set()
+        self._display_to_orig = display_to_orig or {}
+        self._schedule_redraw()
+
+    def _schedule_redraw(self, *args):
+        if self._redraw_ev:
+            self._redraw_ev.cancel()
+        self._redraw_ev = Clock.schedule_once(self._redraw, 0)
+
+    def _redraw(self, dt=None):
+        self.canvas.clear()
+        if self._line_count == 0 or self._line_height <= 0:
+            return
+
+        lh = self._line_height
+        n = self._line_count
+        total_height = n * lh
+        panel_width = self.width
+
+        theme = self._theme
+        bg_color = theme.get('panel_bg', (0.12, 0.13, 0.14, 1))
+        text_color = theme.get('panel_text', (0.45, 0.48, 0.50, 1))
+        fold_color = theme.get('fold_button_color', (0.4, 0.6, 0.9, 0.85))
+        folded_bg = theme.get('fold_button_folded_bg', (0.3, 0.5, 0.8, 0.3))
+
+        editor_h = self._editor_height or self.height
+        scroll_y = self._scroll_y
+        max_scroll_offset = max(0, total_height - editor_h)
+        scroll_offset = (1.0 - scroll_y) * max_scroll_offset
+
+        first_visible = max(0, int(scroll_offset / lh) - 1)
+        visible_count = int(editor_h / lh) + 3
+        last_visible = min(n, first_visible + visible_count)
+
+        # Набор orig-строк с foldable блоками (для быстрого поиска)
+        foldable_orig = {s for s, e in self._fold_ranges}
+
+        from kivy.core.text import Label as CoreLabel
+
+        with self.canvas:
+            Color(*bg_color)
+            Rectangle(pos=self.pos, size=self.size)
+
+            btn_size = min(lh * 0.55, dp(13))
+            btn_margin_right = dp(3)   # отступ кнопки от правого края панели
+            num_pad_right = btn_size + btn_margin_right * 2 + dp(2)  # цифры левее кнопки
+
+            for di in range(first_visible, last_visible):
+                orig_i = self._display_to_orig.get(di, di)
+                y = self.y + self.height - (di + 1) * lh + scroll_offset
+                if y + lh < self.y or y > self.y + self.height:
+                    continue
+
+                is_foldable = orig_i in foldable_orig
+                is_folded = orig_i in self._folded_set
+
+                # ── Номер строки — выровнен правее середины, левее кнопки ──
+                Color(*text_color)
+                num_text = str(orig_i + 1)
+                lbl = CoreLabel(text=num_text, font_size=self._font_size,
+                                halign='right', valign='middle')
+                lbl.refresh()
+                tex = lbl.texture
+                if tex:
+                    tw, th = tex.size
+                    tx = self.x + panel_width - num_pad_right - tw
+                    ty = y + (lh - th) / 2
+                    Rectangle(texture=tex, pos=(tx, ty), size=(tw, th))
+
+                # ── Кнопка свернуть/развернуть — крайняя правая ──
+                if is_foldable:
+                    btn_x = self.x + panel_width - btn_size - btn_margin_right
+                    btn_y = y + (lh - btn_size) / 2
+                    if is_folded:
+                        Color(*folded_bg)
+                        RoundedRectangle(pos=(btn_x, btn_y), size=(btn_size, btn_size),
+                                         radius=[dp(2)])
+                    Color(*fold_color)
+                    arrow = '▶' if is_folded else '▼'
+                    albl = CoreLabel(text=arrow, font_name='SourceBold', font_size=btn_size * 0.85,
+                                     halign='center', valign='middle')
+                    albl.refresh()
+                    atex = albl.texture
+                    if atex:
+                        aw, ah = atex.size
+                        ax = btn_x + (btn_size - aw) / 2
+                        ay = btn_y + (btn_size - ah) / 2
+                        Rectangle(texture=atex, pos=(ax, ay), size=(aw, ah))
+
+    def on_touch_down(self, touch):
+        if not self.collide_point(*touch.pos):
+            return False
+        if not self._on_fold_toggle:
+            return False
+
+        lh = self._line_height
+        n = self._line_count
+        total_height = n * lh
+        editor_h = self._editor_height or self.height
+        scroll_y = self._scroll_y
+        max_scroll_offset = max(0, total_height - editor_h)
+        scroll_offset = (1.0 - scroll_y) * max_scroll_offset
+
+        btn_size = min(lh * 0.55, dp(13))
+        btn_margin_right = dp(3)
+        foldable_orig = {s for s, e in self._fold_ranges}
+
+        # Определяем строку по Y касания
+        rel_y = self.y + self.height - touch.y + scroll_offset
+        di = int(rel_y / lh)
+        if 0 <= di < n:
+            orig_i = self._display_to_orig.get(di, di)
+            if orig_i in foldable_orig:
+                # Кнопка — правый край панели
+                btn_left = self.x + self.width - btn_size - btn_margin_right - dp(2)
+                if touch.x >= btn_left:
+                    self._on_fold_toggle(orig_i)
+                    return True
+        return False
+
 
 class LineNumberTextInput(BoxLayout):
-    """Основной компонент редактора кода с нумерацией строк"""
+    """Основной компонент редактора кода с нумерацией строк и сворачиванием блоков"""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -44,10 +400,16 @@ class LineNumberTextInput(BoxLayout):
         self._redraw_pending = False
         self._indent_guides_pending = False
 
-        # Переменные для throttle
+        # Throttle
         self._panel_update_scheduled = False
         self._cached_line_count = 0
         self._cached_max_line_length = 0
+        self._text_width_ev = None
+        self._width_cache = {}
+
+        # Сворачивание блоков
+        self._folding = FoldingManager()
+        self._ignore_text_change = False  # при fold/unfold не пересчитываем оригинал
 
         self._create_ui()
         self.apply_theme(ThemeManager.get_theme())
@@ -55,6 +417,119 @@ class LineNumberTextInput(BoxLayout):
         self.text_input.bind(on_key_down=self._on_key_down)
         self.text_input.bind(font_name=self._on_font_changed)
         Window.bind(on_key_down=self._on_window_key_down)
+
+    # ------------------------------------------------------------------ folding
+
+    def _on_fold_toggle(self, orig_line):
+        """Вызывается при тапе по кнопке ▶/▼ в панели."""
+        try:
+            self._folding.toggle(orig_line)
+            self._apply_folding_to_editor(toggled_orig_line=orig_line)
+
+            self.debug_folding()
+
+        except Exception as e:
+            log_error(f"fold toggle error: {e}")
+
+    def _apply_folding_to_editor(self, toggled_orig_line=None):
+        """Обновляет текст в text_input согласно текущему состоянию сворачивания.
+        toggled_orig_line — оригинальная строка только что свёрнутого/развёрнутого блока.
+        Курсор фиксируется на строке заголовка этого блока."""
+        try:
+            # Запоминаем текущую display-строку курсора до изменений
+            try:
+                old_cursor_idx = self.text_input.cursor_index()
+                old_display_line = self.text_input.text[:old_cursor_idx].count('\n')
+            except:
+                old_cursor_idx = 0
+                old_display_line = 0
+
+            display_lines = self._folding.get_display_lines()
+            new_text = '\n'.join(display_lines)
+
+            self._ignore_text_change = True
+            self.text_input.text = new_text
+            self.original_lines = display_lines
+            self._ignore_text_change = False
+
+            # Определяем display-строку, на которой должен оказаться курсор.
+            # Приоритет: строка только что свёрнутого/развёрнутого блока.
+            if toggled_orig_line is not None:
+                target_display_line = self._folding.orig_to_display(toggled_orig_line)
+            else:
+                # Сохраняем ту же display-строку, что была (она не сдвигается
+                # при fold выше курсора; при fold ниже — вообще не меняется)
+                target_display_line = old_display_line
+
+            # Переводим номер display-строки в символьный индекс (начало строки)
+            try:
+                lines_before = display_lines[:target_display_line]
+                char_pos = sum(len(l) + 1 for l in lines_before)
+                char_pos = min(char_pos, len(new_text))
+                self.text_input.cursor = self.text_input.get_cursor_from_index(char_pos)
+                # Прокручиваем к строке заголовка
+                Clock.schedule_once(lambda dt: self._scroll_to_display_line(target_display_line), 0.05)
+            except:
+                pass
+
+            self._refresh_virtual_panel()
+            Clock.schedule_once(self._draw_indent_guides, 0.15)
+        except Exception as e:
+            log_error(f"_apply_folding_to_editor error: {e}")
+
+    def _scroll_to_display_line(self, display_line):
+        """Прокручивает редактор так, чтобы display_line была видна."""
+        try:
+            lh = getattr(self.text_input, 'line_height', self._font_size * 1.2)
+            total_lines = len(self.original_lines)
+            total_height = total_lines * lh
+            editor_h = self.editor_scroll.height
+            if total_height <= editor_h:
+                return  # всё помещается — скролл не нужен
+            # Y верха целевой строки (от верха документа)
+            line_top = display_line * lh
+            line_bot = line_top + lh
+            # Текущий viewport
+            scroll_y = self.editor_scroll.scroll_y
+            max_offset = total_height - editor_h
+            current_top = (1.0 - scroll_y) * max_offset
+            current_bot = current_top + editor_h
+            # Если строка уже видна — ничего не делаем
+            margin = lh * 2
+            if line_top >= current_top + margin and line_bot <= current_bot - margin:
+                return
+            # Центрируем строку в viewport
+            desired_top = line_top - editor_h / 2 + lh / 2
+            desired_top = max(0, min(desired_top, max_offset))
+            new_scroll_y = 1.0 - desired_top / max_offset
+            self.editor_scroll.scroll_y = max(0.0, min(1.0, new_scroll_y))
+        except Exception as e:
+            log_error(f"_scroll_to_display_line error: {e}")
+
+    def fold_line(self, line_num):
+        """Публичный API: свернуть блок на строке line_num (0-based, display)."""
+        orig = self._folding.display_to_orig(line_num)
+        if self._folding.fold(orig):
+            self._apply_folding_to_editor()
+
+    def unfold_line(self, line_num):
+        """Публичный API: развернуть блок на строке line_num (0-based, display)."""
+        orig = self._folding.display_to_orig(line_num)
+        if self._folding.unfold(orig):
+            self._apply_folding_to_editor()
+
+    def fold_all(self):
+        """Свернуть все блоки верхнего уровня."""
+        for s, e in self._folding.get_fold_ranges():
+            self._folding.fold(s)
+        self._apply_folding_to_editor()
+
+    def unfold_all(self):
+        """Развернуть все блоки."""
+        self._folding._folds.clear()
+        self._apply_folding_to_editor()
+
+    # ------------------------------------------------------------------ fonts
 
     def _on_font_changed(self, instance, value):
         Clock.schedule_once(self.force_full_font_reset, 0.1)
@@ -76,7 +551,7 @@ class LineNumberTextInput(BoxLayout):
             self._rebuild_line_panel_completely()
             Clock.schedule_once(self._update_text_width, 0.05)
             Clock.schedule_once(self._update_separator, 0.1)
-            Clock.schedule_once(self._update_line_panel, 0.15)
+            Clock.schedule_once(self._refresh_virtual_panel, 0.15)
             Clock.schedule_once(self._force_line_panel_refresh, 0.2)
             if old_cursor <= len(ti.text):
                 Clock.schedule_once(lambda x: setattr(ti, 'cursor', ti.get_cursor_from_index(old_cursor)), 0.25)
@@ -84,32 +559,11 @@ class LineNumberTextInput(BoxLayout):
             log_error(f"force_full_font_reset error: {e}")
 
     def _rebuild_line_panel_completely(self):
-        if not hasattr(self, 'line_panel'):
-            return
-        theme = ThemeManager.get_theme()
-        lh = getattr(self.text_input, 'line_height', self._font_size * 1.2)
-        n_lines = max(1, len(self.original_lines))
-
-        # Определяем ширину панели
-        category = get_screen_category()
-        if category == 'tablet':
-            panel_width = dp(65)
-        elif category == 'large_phone':
-            panel_width = dp(55)
-        else:
-            panel_width = dp(45)
-
-        self.line_panel.clear_widgets()
-        for i in range(n_lines):
-            row = BoxLayout(orientation='horizontal', size_hint_y=None, height=lh)
-            lbl = Label(text=str(i + 1), font_size=self._font_size, size_hint_x=None, width=panel_width,
-                        color=theme.get('panel_text', (0.45, 0.48, 0.50, 1)), halign='right', valign='middle',
-                        padding=(0, 0, dp(3), 0))
-            row.add_widget(lbl)
-            self.line_panel.add_widget(row)
-
-        self.line_panel.height = max(self.text_input.height, n_lines * lh)
+        """Пересоздаём виртуальную панель."""
+        self._refresh_virtual_panel()
         self._update_separator()
+
+    # ------------------------------------------------------------------ theme
 
     def apply_theme(self, theme):
         self.current_theme_name = theme['name']
@@ -118,12 +572,10 @@ class LineNumberTextInput(BoxLayout):
         if hasattr(self, 'bg_color'):
             self.bg_color.rgba = theme['app_bg']
 
-        # Обновляем верхние панели (только если есть в главном приложении)
         app = App.get_running_app()
         if app and hasattr(app, '_update_top_panels'):
             app._update_top_panels()
-        if hasattr(self, 'panel_bg_color'):
-            self.panel_bg_color.rgba = theme['panel_bg']
+        # panel_bg рисуется в VirtualLinePanel.canvas
         if hasattr(self, 'text_input'):
             new_style = ThemeManager.get_syntax_style()
             self.text_input.background_color = theme['editor_bg']
@@ -158,29 +610,35 @@ class LineNumberTextInput(BoxLayout):
         if hasattr(self, 'separator_color'):
             self.separator_color.rgba = (0.3, 0.3, 0.3, 0.3)
         if hasattr(self, 'original_lines') and self.original_lines:
-            self._update_line_panel()
-        if hasattr(self, 'text_input') and hasattr(self, 'line_panel'):
-            if hasattr(self.text_input, 'line_height'):
-                lh = self.text_input.line_height
-            else:
-                lh = self._font_size * 1.2
-            n_lines = len(self.original_lines) if self.original_lines else 1
-            self.line_panel.height = max(self.text_input.height, n_lines * lh)
-            self._update_line_panel()
+            self._refresh_virtual_panel()
+
+    # ------------------------------------------------------------------ public
 
     def get_text(self):
+        """Возвращает полный текст (с развёрнутыми блоками)."""
+        orig = self._folding.get_orig_lines()
+        if orig:
+            return '\n'.join(orig)
         return self.text_input.text if hasattr(self, 'text_input') else ""
 
     def set_text(self, text):
         if hasattr(self, 'text_input'):
-            self.text_input.text = text if text is not None else ""
-            self.original_lines = text.split('\n')
+            lines = (text or '').split('\n')
+            self._folding.set_lines(lines)
+            display = self._folding.get_display_lines()
+            display_text = '\n'.join(display)
+            self._ignore_text_change = True
+            self.text_input.text = display_text
+            self.original_lines = display
+            self._ignore_text_change = False
             if hasattr(self, '_cached_max_line_length'):
                 del self._cached_max_line_length
             if hasattr(self, '_cached_max_line_index'):
                 del self._cached_max_line_index
-            self._update_line_panel()
+            self._refresh_virtual_panel()
             Clock.schedule_once(self._draw_indent_guides, 0.3)
+
+    # ------------------------------------------------------------------ undo/redo
 
     def undo(self):
         if not self._undo_stack:
@@ -190,7 +648,8 @@ class LineNumberTextInput(BoxLayout):
         state = self._undo_stack.pop()
         self.text_input.text = state['text']
         self.original_lines = state['text'].split('\n')
-        self._update_line_panel()
+        self._folding.apply_display_edit(self.original_lines)
+        self._refresh_virtual_panel()
         try:
             pos = min(state['cursor'], len(state['text']))
             self.text_input.cursor = self.text_input.get_cursor_from_index(pos)
@@ -207,7 +666,8 @@ class LineNumberTextInput(BoxLayout):
         state = self._redo_stack.pop()
         self.text_input.text = state['text']
         self.original_lines = state['text'].split('\n')
-        self._update_line_panel()
+        self._folding.apply_display_edit(self.original_lines)
+        self._refresh_virtual_panel()
         try:
             pos = min(state['cursor'], len(state['text']))
             self.text_input.cursor = self.text_input.get_cursor_from_index(pos)
@@ -215,6 +675,8 @@ class LineNumberTextInput(BoxLayout):
             pass
         self._undo_lock = False
         return True
+
+    # ------------------------------------------------------------------ UI creation
 
     def _create_ui(self):
         self.layout = BoxLayout(orientation='horizontal', spacing=0)
@@ -238,19 +700,13 @@ class LineNumberTextInput(BoxLayout):
             panel_width = dp(55)
         else:
             panel_width = dp(45)
-        self.line_panel = BoxLayout(orientation='vertical', size_hint=(None, None), width=panel_width, spacing=0)
-        self.line_panel.bind(minimum_height=self.line_panel.setter('height'))
-        theme = ThemeManager.get_theme()
-        with self.line_panel.canvas.before:
-            self.panel_bg_color = Color(*theme.get('panel_bg', (1, 1, 1, 1)))
-            self.panel_bg_rect = Rectangle(pos=self.line_panel.pos, size=self.line_panel.size)
-        self.line_panel.bind(pos=self._update_panel_bg, size=self._update_panel_bg)
-        theme = ThemeManager.get_theme()
-        scroll_bar_color = theme.get('scroll_bar_color', (0.4, 0.4, 0.4, 0.9))
-        scroll_bar_inactive = theme.get('scroll_bar_inactive', (0.25, 0.25, 0.25, 0.6))
-        self.line_panel_scroll = ScrollView(size_hint=(None, 1), width=panel_width, do_scroll_x=False, do_scroll_y=True,
-                                            scroll_type=['bars'], bar_width=0, effect_cls='ScrollEffect',
-                                            scroll_distance=dp(17), scroll_timeout=dp(45))
+        self._panel_width = panel_width
+        self.line_panel = VirtualLinePanel(
+            on_fold_toggle=self._on_fold_toggle,
+            size_hint=(None, 1),
+            width=panel_width,
+        )
+        self.line_panel_scroll = BoxLayout(size_hint=(None, 1), width=panel_width)
         self.line_panel_scroll.add_widget(self.line_panel)
 
     def _create_code_input_scroll(self):
@@ -304,22 +760,206 @@ class LineNumberTextInput(BoxLayout):
         self.text_input.bind(text=self._on_text_change)
         self.text_input.bind(focus=self._on_focus)
         self.text_input.bind(on_touch_down=self._on_touch_down)
+        self.text_input.bind(on_copy=self._on_copy)
         self._current_line_highlight = None
         self.text_input.bind(cursor=self._update_current_line_highlight)
 
+    # ------------------------------------------------------------------ scroll sync
+
     def _bind_scroll_sync(self, *args):
         def sync_scroll(instance, value):
-            self.line_panel_scroll.scroll_y = value
+            self._refresh_virtual_panel()
             Clock.unschedule(self._draw_indent_guides)
             Clock.schedule_once(self._draw_indent_guides, 0.1)
 
         self.editor_scroll.bind(scroll_y=sync_scroll)
+        self.editor_scroll.bind(size=lambda *a: self._refresh_virtual_panel())
+
+    def _refresh_virtual_panel(self, *args):
+        """Обновляет VirtualLinePanel без создания виджетов."""
+        if not hasattr(self, 'line_panel') or not isinstance(self.line_panel, VirtualLinePanel):
+            return
+        lh = getattr(self.text_input, 'line_height', self._font_size * 1.2)
+        theme = ThemeManager.get_theme()
+        scroll_y = getattr(self.editor_scroll, 'scroll_y', 1.0)
+        editor_h = self.editor_scroll.height
+
+        # Строим mapping display → orig
+        display_to_orig = {}
+        oi = 0
+        di = 0
+        orig_lines = self._folding.get_orig_lines()
+        folds = self._folding._folds
+        n_orig = len(orig_lines)
+        while oi < n_orig:
+            display_to_orig[di] = oi
+            if oi in folds:
+                oi = folds[oi]['end'] + 1
+            else:
+                oi += 1
+            di += 1
+
+        self.line_panel.update(
+            line_count=len(self.original_lines),
+            line_height=lh,
+            font_size=self._font_size,
+            theme=theme,
+            scroll_y=scroll_y,
+            editor_height=editor_h,
+            fold_ranges=self._folding.get_fold_ranges(),
+            folded_set=set(self._folding._folds.keys()),
+            display_to_orig=display_to_orig,
+        )
+
+    # ------------------------------------------------------------------ text change
+
+    # ------------------------------------------------------------------ copy with folded content
+
+    def _get_real_selection_text(self):
+        """Возвращает текст выделения с развёрнутым содержимым свёрнутых блоков."""
+        try:
+            ti = self.text_input
+            print(f"[DEBUG] _get_real_selection_text called")
+
+            if not ti.selection_text:
+                return ti.selection_text
+
+            # Проверяем, есть ли в выделении маркер свёрнутого блока
+            if _FOLD_MARKER not in ti.selection_text:
+                return ti.selection_text
+
+            print("[DEBUG] Fold marker found, processing...")
+
+            # Получаем выделенный текст
+            selected = ti.selection_text
+            selected_lines = selected.split('\n')
+
+            # Получаем все оригинальные строки
+            orig_lines = self._folding.get_orig_lines()
+            folds = self._folding._folds
+
+            result_lines = []
+
+            # Проходим по каждой строке выделения
+            for line in selected_lines:
+                if _FOLD_MARKER in line:
+                    # Очищаем строку от маркеров сворачивания
+                    # Убираем всё после ▶ (включая пробелы и точки)
+                    if '▶' in line:
+                        # Берём часть до ▶
+                        clean_header = line.split('▶')[0].strip()
+                    else:
+                        clean_header = line.split(_FOLD_MARKER)[0].strip()
+
+                    # Убираем три точки и пробелы в конце
+                    clean_header = clean_header.rstrip(' .')
+                    print(f"[DEBUG] Original line: '{line}'")
+                    print(f"[DEBUG] Clean header: '{clean_header}'")
+
+                    # Ищем этот заголовок в оригинальных строках
+                    found_block = False
+                    for i, orig_line in enumerate(orig_lines):
+                        # Сравниваем очищенные строки
+                        if orig_line.rstrip() == clean_header:
+                            print(f"[DEBUG] Found exact match at index {i}")
+                            if i in folds:
+                                fold_end = folds[i]['end']
+                                block_lines = orig_lines[i:fold_end + 1]
+                                result_lines.extend(block_lines)
+                                found_block = True
+                                break
+
+                    if not found_block:
+                        # Пробуем найти без учета отступов
+                        clean_stripped = clean_header.strip()
+                        for i, orig_line in enumerate(orig_lines):
+                            if orig_line.strip() == clean_stripped:
+                                print(f"[DEBUG] Found stripped match at index {i}")
+                                if i in folds:
+                                    fold_end = folds[i]['end']
+                                    block_lines = orig_lines[i:fold_end + 1]
+                                    result_lines.extend(block_lines)
+                                    found_block = True
+                                    break
+
+                    if not found_block:
+                        # Если всё равно не нашли, пробуем найти по началу строки
+                        for i, orig_line in enumerate(orig_lines):
+                            if orig_line.startswith(clean_stripped.split()[0] if clean_stripped else ''):
+                                print(f"[DEBUG] Found partial match at index {i}: '{orig_line}'")
+                                if i in folds:
+                                    fold_end = folds[i]['end']
+                                    block_lines = orig_lines[i:fold_end + 1]
+                                    result_lines.extend(block_lines)
+                                    found_block = True
+                                    break
+
+                    if not found_block:
+                        print(f"[DEBUG] No block found for: '{clean_header}'")
+                        result_lines.append(line)
+                else:
+                    result_lines.append(line)
+
+            if result_lines:
+                result = '\n'.join(result_lines)
+                print(f"[DEBUG] Result length: {len(result)}")
+                print(f"[DEBUG] Result preview: {result[:200]}")
+                return result
+            else:
+                return selected
+
+        except Exception as e:
+            log_error(f"_get_real_selection_text error: {e}")
+            import traceback
+            traceback.print_exc()
+            return self.text_input.selection_text
+
+    def _on_copy(self, instance):
+        """Перехватываем Ctrl+C / команду Copy: кладём в буфер развёрнутый текст."""
+        try:
+            print("[DEBUG] _on_copy called!")  # ← ДОБАВИТЬ
+            print(f"[DEBUG] Selection text: '{self.text_input.selection_text}'")  # ← ДОБАВИТЬ
+
+            real_text = self._get_real_selection_text()
+            print(f"[DEBUG] Real text length: {len(real_text)}")  # ← ДОБАВИТЬ
+            print(f"[DEBUG] Real text first 100 chars: '{real_text[:100]}'")  # ← ДОБАВИТЬ
+
+            if real_text:
+                from kivy.core.clipboard import Clipboard
+                Clipboard.copy(real_text)
+                print("[DEBUG] Copied to clipboard!")  # ← ДОБАВИТЬ
+            else:
+                print("[DEBUG] No real text to copy!")  # ← ДОБАВИТЬ
+        except Exception as e:
+            log_error(f"_on_copy error: {e}")
+            print(f"[DEBUG] Exception in _on_copy: {e}")  # ← ДОБАВИТЬ
 
     def _on_text_change(self, instance, value):
-        self.original_lines = value.split('\n')
+        if self._ignore_text_change:
+            return
 
-        # ДОБАВИТЬ: кэширование количества строк
-        new_line_count = len(self.original_lines)
+        old_cursor = instance.cursor_index() if hasattr(instance, 'cursor_index') else 0
+        old_line_count = len(self.original_lines) if self.original_lines else 0
+
+        new_lines = value.split('\n')
+        self.original_lines = new_lines
+
+        # Проверяем, было ли изменение в строке-заглушке
+        was_fold_line = False
+        for line in new_lines:
+            if _FOLD_MARKER in line:
+                was_fold_line = True
+                break
+
+        if was_fold_line and old_line_count > 0:
+            # Пользователь редактирует свёрнутый блок
+            # Нужно сохранить состояние до редактирования
+            print("[DEBUG] Editing a folded line - preserving fold state")
+
+        # Синхронизируем FoldingManager с реальным редактированием
+        self._folding.apply_display_edit(new_lines)
+
+        new_line_count = len(new_lines)
 
         if not self._undo_lock and hasattr(self, '_undo_stack'):
             text_len = len(value)
@@ -336,10 +976,12 @@ class LineNumberTextInput(BoxLayout):
                 self._undo_counter = 0
             self._undo_counter += 1
             if self._undo_counter % save_every == 0:
-                prev_text = '\n'.join(self.original_lines) if self.original_lines else ''
+                prev_text = '\n'.join(new_lines)
                 if not self._undo_stack or self._undo_stack[-1]['text'] != value:
-                    self._undo_stack.append({'text': prev_text, 'cursor': instance.cursor_index() if hasattr(instance,
-                                                                                                             'cursor_index') else 0})
+                    self._undo_stack.append({
+                        'text': prev_text,
+                        'cursor': instance.cursor_index() if hasattr(instance, 'cursor_index') else 0,
+                    })
                     while len(self._undo_stack) > max_states:
                         self._undo_stack.pop(0)
                     self._redo_stack.clear()
@@ -355,18 +997,23 @@ class LineNumberTextInput(BoxLayout):
             except:
                 pass
 
-        # ДОБАВИТЬ: обновляем панель только если изменилось количество строк
         if new_line_count != self._cached_line_count:
             self._cached_line_count = new_line_count
             if not self._redraw_pending:
                 self._redraw_pending = True
                 Clock.schedule_once(self._delayed_update_panel, 0.05)
+        else:
+            self._refresh_virtual_panel()
+
+        # Дебаунс на обновление ширины
+        if self._text_width_ev:
+            self._text_width_ev.cancel()
+        self._text_width_ev = Clock.schedule_once(self._update_text_width, 0.3)
 
         if not self._indent_guides_pending:
             self._indent_guides_pending = True
             Clock.schedule_once(self._draw_indent_guides, 0.15)
 
-        # Убеждаемся, что в конце всегда есть пустые строки
         Clock.unschedule(self._ensure_trailing)
         Clock.schedule_once(self._ensure_trailing, 0)
 
@@ -380,7 +1027,6 @@ class LineNumberTextInput(BoxLayout):
         if not self.original_lines:
             return
 
-        # Находим последнюю непустую строку
         last_non_empty = -1
         for i in range(len(self.original_lines) - 1, -1, -1):
             if self.original_lines[i].strip() != '':
@@ -388,7 +1034,6 @@ class LineNumberTextInput(BoxLayout):
                 break
 
         if last_non_empty == -1:
-            # Вообще нет текста — ничего не делаем
             return
 
         trailing = len(self.original_lines) - last_non_empty - 1
@@ -397,15 +1042,11 @@ class LineNumberTextInput(BoxLayout):
 
         self._ensuring_trailing = True
         try:
-            # Сохраняем позицию курсора ДО изменений
             cursor_index = self.text_input.cursor_index()
-
             lines_to_add = TARGET - trailing
             current_text = self.text_input.text
             self.text_input.text = current_text + '\n' * lines_to_add
             self.original_lines = self.text_input.text.split('\n')
-
-            # Восстанавливаем курсор на то же место
             safe_cursor = min(cursor_index, len(self.text_input.text))
 
             def restore_cursor(dt):
@@ -422,17 +1063,17 @@ class LineNumberTextInput(BoxLayout):
             Clock.schedule_once(reset_flag, 0.3)
 
     def _delayed_update_panel(self, dt):
-        """Обновляет панель с throttle для частых вызовов"""
-        # ДОБАВИТЬ: проверка на повторный вызов
+        """Throttle для обновления панели."""
         if self._panel_update_scheduled:
             return
-
         self._panel_update_scheduled = True
         try:
-            self._update_line_panel()
+            self._refresh_virtual_panel()
         finally:
             self._panel_update_scheduled = False
         self._redraw_pending = False
+
+    # ------------------------------------------------------------------ layout helpers
 
     def _update_separator(self, instance=None, value=None):
         if hasattr(self, 'separator_line') and hasattr(self, 'line_panel_scroll'):
@@ -442,107 +1083,37 @@ class LineNumberTextInput(BoxLayout):
             self.separator_line.points = [x, y1, x, y2]
 
     def _update_panel_bg(self, instance, value):
-        """Обновляет фон панели"""
-        if hasattr(self, 'panel_bg_rect'):
-            self.panel_bg_rect.pos = instance.pos
-            self.panel_bg_rect.size = instance.size
+        """Фон теперь в VirtualLinePanel.canvas."""
+        pass
 
     def _update_text_width(self, *args):
         if not self.original_lines:
             return
-        max_line_length = max(len(line) for line in self.original_lines) if self.original_lines else 0
+        n = len(self.original_lines)
+        cached = getattr(self, '_cached_max_line_length', 0)
+        cached_n = getattr(self, '_cached_max_line_n', -1)
+        if cached_n != n:
+            cached = max((len(line) for line in self.original_lines), default=0)
+            self._cached_max_line_length = cached
+            self._cached_max_line_n = n
+        max_line_length = cached
         char_width = self.text_input.font_size * 0.6
         min_width = dp(400)
         calculated_width = max(min_width, max_line_length * char_width + dp(33))
         new_width = min(calculated_width, dp(3333))
-        self.text_input.width = new_width
-        self._update_separator()
+        if abs(self.text_input.width - new_width) > 1:
+            self.text_input.width = new_width
+            self._update_separator()
 
     def _update_line_panel(self, *args):
-        if hasattr(self.text_input, 'line_height'):
-            lh = self.text_input.line_height
-        else:
-            lh = self._font_size * 1.2
-        theme = ThemeManager.get_theme()
-        n_lines = len(self.original_lines)
-        panel_width = self.line_panel.width
-        current_widgets = len(self.line_panel.children)
-
-        if current_widgets == n_lines:
-            # Обновляем существующие метки
-            for i, child in enumerate(reversed(self.line_panel.children)):
-                if hasattr(child, 'children') and child.children:
-                    lbl = child.children[0]
-                    if isinstance(lbl, Label):
-                        lbl.text = str(i + 1)
-                        lbl.width = panel_width
-                        lbl.text_size = (panel_width - dp(3), None)
-            return
-        diff = n_lines - current_widgets
-        if 0 < diff <= 10:
-            for i in range(current_widgets, n_lines):
-                row = BoxLayout(orientation='horizontal', size_hint_y=None, height=lh)
-                lbl = Label(text=str(i + 1), font_size=self._font_size, size_hint_x=None, width=panel_width,
-                            color=theme['panel_text'], halign='right', valign='top', padding=(0, 0, dp(3), 0))
-                lbl.text_size = (panel_width - dp(3), None)
-                row.add_widget(lbl)
-                self.line_panel.add_widget(row)
-            self.line_panel.height = max(self.text_input.height, n_lines * lh)
-            self._update_separator()
-            return
-        if -10 <= diff < 0:
-            for _ in range(abs(diff)):
-                if self.line_panel.children:
-                    child = self.line_panel.children[0]
-                    self.line_panel.remove_widget(child)
-            for i, child in enumerate(reversed(self.line_panel.children)):
-                if hasattr(child, 'children') and child.children:
-                    lbl = child.children[0]
-                    if isinstance(lbl, Label):
-                        lbl.text = str(i + 1)
-            self.line_panel.height = max(self.text_input.height, n_lines * lh)
-            self._update_separator()
-            return
-        self.line_panel.clear_widgets()
-        batch_size = 50
-        for batch_start in range(0, n_lines, batch_size):
-            batch_end = min(batch_start + batch_size, n_lines)
-            for i in range(batch_start, batch_end):
-                row = BoxLayout(orientation='horizontal', size_hint_y=None, height=lh)
-                lbl = Label(text=str(i + 1), font_size=self._font_size, size_hint_x=None, width=panel_width,
-                            color=theme['panel_text'], halign='right', valign='top', padding=(0, 0, dp(3), 0))
-                lbl.text_size = (panel_width - dp(3), None)
-                row.add_widget(lbl)
-                self.line_panel.add_widget(row)
-            if batch_end < n_lines:
-                Clock.schedule_once(lambda dt: None, 0)
-        self.line_panel.height = max(self.text_input.height, n_lines * lh)
-        self._update_separator()
-        Clock.schedule_once(self._force_line_panel_refresh, 0.05)
+        """Обратная совместимость — делегирует в _refresh_virtual_panel."""
+        self._refresh_virtual_panel()
 
     def _force_line_panel_refresh(self, dt=None):
-        """Принудительно обновляет ширину и текст всех меток с номерами строк"""
-        if not hasattr(self, 'line_panel') or not self.line_panel.children:
-            return
-
-        # Получаем актуальную ширину панели
-        panel_width = self.line_panel.width
-
-        # Обновляем каждую метку
-        for i, child in enumerate(reversed(self.line_panel.children)):
-            if hasattr(child, 'children') and child.children:
-                lbl = child.children[0]
-                if isinstance(lbl, Label):
-                    # Обновляем текст (номер строки)
-                    lbl.text = str(i + 1)
-                    # Обновляем ширину и размер текста
-                    lbl.width = panel_width
-                    lbl.text_size = (panel_width - dp(3), None)
-                    # Принудительно перерисовываем
-                    lbl.texture_update()
-
-        # Обновляем разделитель
+        self._refresh_virtual_panel()
         self._update_separator()
+
+    # ------------------------------------------------------------------ keyboard
 
     def _on_window_keyboard(self, window, key, scancode, codepoint, modifier):
         if key == 27:
@@ -584,7 +1155,8 @@ class LineNumberTextInput(BoxLayout):
                 except:
                     pass
                 self.original_lines = new_text.split('\n')
-                self._update_line_panel()
+                self._folding.apply_display_edit(self.original_lines)
+                self._refresh_virtual_panel()
                 return True
             except Exception as e:
                 log_error(f"Backspace error: {e}")
@@ -615,7 +1187,8 @@ class LineNumberTextInput(BoxLayout):
                     instance.text = new_text
                     if hasattr(self, 'original_lines'):
                         self.original_lines = new_text.split('\n')
-                        self._update_line_panel()
+                        self._folding.apply_display_edit(self.original_lines)
+                        self._refresh_virtual_panel()
 
                     def restore(dt):
                         try:
@@ -635,6 +1208,8 @@ class LineNumberTextInput(BoxLayout):
                 log_error(f"Tab handler error: {e}")
                 return False
         return False
+
+    # ------------------------------------------------------------------ focus / touch
 
     def _on_focus(self, instance, focused):
         if focused:
@@ -675,6 +1250,8 @@ class LineNumberTextInput(BoxLayout):
                         pass
         except Exception as e:
             log_error(f"Error showing keyboard: {e}")
+
+    # ------------------------------------------------------------------ indent guides
 
     def _draw_indent_guides(self, *args):
         self._indent_guides_pending = False
@@ -731,6 +1308,8 @@ class LineNumberTextInput(BoxLayout):
                     line = Line(points=[x_pos, y_start, x_pos, y_end], width=dp(0.3))
                     self._indent_guides.append(line)
 
+    # ------------------------------------------------------------------ current line highlight
+
     def _update_current_line_highlight(self, instance, cursor_pos):
         if not hasattr(self, 'text_input') or not self.text_input:
             return
@@ -753,6 +1332,8 @@ class LineNumberTextInput(BoxLayout):
                 self._current_line_highlight = Rectangle(pos=(x, y), size=(self.text_input.width, lh))
         except:
             pass
+
+    # ------------------------------------------------------------------ recreate code input
 
     def _recreate_code_input(self, theme):
         try:
@@ -795,11 +1376,14 @@ class LineNumberTextInput(BoxLayout):
             Clock.schedule_once(restore_cursor, 0.05)
             if saved_text:
                 self.original_lines = saved_text.split('\n')
-                self._update_line_panel()
+                self._folding.apply_display_edit(self.original_lines)
+                self._refresh_virtual_panel()
         except ImportError as e:
             log_error(f"Cannot recreate CodeInput: {e}")
         except Exception as e:
             log_error(f"Error in _recreate_code_input: {e}")
+
+    # ------------------------------------------------------------------ cleanup
 
     def cleanup(self):
         ThemeManager.unregister(self)
@@ -809,3 +1393,12 @@ class LineNumberTextInput(BoxLayout):
             self._redo_stack.clear()
         Window.unbind(on_keyboard=self._on_window_keyboard)
         Window.unbind(on_key_down=self._on_window_key_down)
+
+    def debug_folding(self):
+        """Отладочный метод для проверки сворачивания"""
+        print("=== FOLDING DEBUG ===")
+        print(f"Original lines count: {len(self._folding.get_orig_lines())}")
+        print(f"Display lines count: {len(self._folding.get_display_lines())}")
+        print(f"Folds: {self._folding._folds}")
+        print(f"Fold ranges: {self._folding.get_fold_ranges()}")
+        print("===================")
