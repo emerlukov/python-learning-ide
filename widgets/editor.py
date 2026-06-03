@@ -418,6 +418,9 @@ class LineNumberTextInput(BoxLayout):
         self.text_input.bind(font_name=self._on_font_changed)
         Window.bind(on_key_down=self._on_window_key_down)
 
+        self._scroll_timer = None
+        self._last_cursor_pos = None
+
     # ------------------------------------------------------------------ folding
 
     def _on_fold_toggle(self, orig_line):
@@ -756,6 +759,7 @@ class LineNumberTextInput(BoxLayout):
                                         scroll_type=['bars', 'content'], bar_width=dp(8), bar_color=scroll_bar_color,
                                         bar_inactive_color=scroll_bar_inactive, effect_cls='ScrollEffect',
                                         scroll_distance=dp(17), scroll_timeout=dp(33))
+        self.text_input.bind(on_touch_move=self._on_touch_move)
         self.editor_scroll.add_widget(self.text_input)
         self.text_input.bind(text=self._on_text_change)
         self.text_input.bind(focus=self._on_focus)
@@ -1230,6 +1234,110 @@ class LineNumberTextInput(BoxLayout):
             if app and hasattr(app, 'autocomplete'):
                 app.autocomplete.hide()
             return False
+
+    def _on_touch_move(self, instance, touch):
+        """Обрабатывает движение пальца при выделении текста"""
+        if not instance.focus:
+            return False
+
+        try:
+            if hasattr(instance, 'get_cursor_from_xy'):
+                try:
+                    new_cursor = instance.get_cursor_from_xy(touch.x, touch.y)
+                    if new_cursor != instance.cursor_index():
+                        instance.cursor = new_cursor
+                except:
+                    pass
+
+            self._auto_scroll_by_cursor(instance)
+
+        except Exception as e:
+            log_error(f"Touch move error: {e}")
+
+        return False
+
+    def _auto_scroll_by_cursor(self, text_input):
+        """Прокручивает редактор, если курсор находится за пределами видимой области"""
+        if not text_input or not text_input.parent:
+            return
+
+        scroll_view = None
+        parent = text_input.parent
+        while parent:
+            from kivy.uix.scrollview import ScrollView
+            if isinstance(parent, ScrollView):
+                scroll_view = parent
+                break
+            parent = parent.parent
+
+        if not scroll_view:
+            return
+
+        try:
+            cursor_line = text_input.cursor[1]
+            line_height = text_input.line_height if hasattr(text_input, 'line_height') else self._font_size * 1.2
+
+            sv_height = scroll_view.height
+            sv_width = scroll_view.width
+
+            total_lines = max(1, len(text_input.text.split('\n')))
+            total_height = total_lines * line_height
+
+            scroll_y = scroll_view.scroll_y
+            cursor_y_top = cursor_line * line_height
+
+            visible_top = (1.0 - scroll_y) * max(0, total_height - sv_height)
+            visible_bottom = visible_top + sv_height
+
+            scroll_margin = line_height * 1.5
+            scroll_speed = 0.03
+
+            # Вертикальная прокрутка
+            if cursor_y_top < visible_top + scroll_margin:
+                target_scroll = 1.0 - (cursor_y_top - sv_height / 2) / max(1, total_height - sv_height)
+                target_scroll = max(0.0, min(1.0, target_scroll))
+                new_scroll = scroll_y + (target_scroll - scroll_y) * 0.3
+                scroll_view.scroll_y = new_scroll
+
+            elif cursor_y_top + line_height > visible_bottom - scroll_margin:
+                target_scroll = 1.0 - (cursor_y_top + line_height - sv_height / 2) / max(1, total_height - sv_height)
+                target_scroll = max(0.0, min(1.0, target_scroll))
+                new_scroll = scroll_y + (target_scroll - scroll_y) * 0.3
+                scroll_view.scroll_y = new_scroll
+
+            # Горизонтальная прокрутка
+            cursor_index = text_input.cursor_index()
+            text_before_cursor = text_input.text[:cursor_index]
+            current_line_start = text_before_cursor.rfind('\n') + 1
+            cursor_col = cursor_index - current_line_start
+
+            lines = text_input.text.split('\n')
+            current_line = lines[cursor_line] if cursor_line < len(lines) else ""
+
+            char_width = text_input.font_size * 0.6
+            cursor_x_pos = cursor_col * char_width
+            line_width = len(current_line) * char_width
+
+            scroll_x = scroll_view.scroll_x
+            visible_left = scroll_x * max(0, line_width - sv_width)
+            visible_right = visible_left + sv_width
+
+            h_margin = char_width * 5
+
+            if cursor_x_pos < visible_left + h_margin:
+                target_scroll_x = max(0.0, (cursor_x_pos - sv_width / 2) / max(1, line_width - sv_width))
+                target_scroll_x = max(0.0, min(1.0, target_scroll_x))
+                new_scroll_x = scroll_x + (target_scroll_x - scroll_x) * 0.4
+                scroll_view.scroll_x = new_scroll_x
+
+            elif cursor_x_pos + char_width > visible_right - h_margin:
+                target_scroll_x = min(1.0, (cursor_x_pos + char_width - sv_width / 2) / max(1, line_width - sv_width))
+                target_scroll_x = max(0.0, min(1.0, target_scroll_x))
+                new_scroll_x = scroll_x + (target_scroll_x - scroll_x) * 0.4
+                scroll_view.scroll_x = new_scroll_x
+
+        except Exception as e:
+            log_error(f"Auto scroll error: {e}")
 
     def _show_keyboard(self, dt=None):
         try:
