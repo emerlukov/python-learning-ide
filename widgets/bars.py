@@ -222,11 +222,31 @@ class MyActionBar(BoxLayout):
     def _copy_action(self, ti):
         try:
             if hasattr(ti, 'selection_text') and ti.selection_text:
-                Clipboard.copy(ti.selection_text)
+                # Пытаемся получить редактор из приложения
+                app = App.get_running_app()
+                real_text = None
+
+                # Если есть editor с методом разворачивания
+                if app and hasattr(app, 'editor') and app.editor:
+                    if hasattr(app.editor, '_get_real_selection_text'):
+                        real_text = app.editor._get_real_selection_text()
+                        print(f"[DEBUG] Using _get_real_selection_text, length: {len(real_text) if real_text else 0}")
+
+                # Если не получили развёрнутый текст - используем обычный
+                if not real_text:
+                    real_text = ti.selection_text
+                    print("[DEBUG] Using regular selection text")
+
+                # Копируем
+                Clipboard.copy(real_text)
                 if platform == 'android':
-                    android_copy(ti.selection_text)
+                    android_copy(real_text)
+
+                print(f"[DEBUG] Copied {len(real_text)} characters")
+
         except Exception as e:
             log_error(f"Copy error: {e}")
+            print(f"[DEBUG] Copy exception: {e}")
 
     def _paste_action(self, ti):
         try:
