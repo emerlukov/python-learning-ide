@@ -1264,8 +1264,10 @@ class LineNumberTextInput(BoxLayout):
                 lines = instance.text.split('\n')
                 clicked_cursor = 0
                 for i in range(row):
-                    clicked_cursor += len(lines[i]) + 1
+                    if i < len(lines):
+                        clicked_cursor += len(lines[i]) + 1
                 clicked_cursor += col
+                clicked_cursor = min(clicked_cursor, len(instance.text))
             except:
                 clicked_cursor = instance.cursor_index()
             
@@ -1281,11 +1283,16 @@ class LineNumberTextInput(BoxLayout):
                 if dist_to_from <= dist_to_to:
                     # Тянем за начало — якорь в конце
                     self._selection_anchor = sel_to
-                    instance.select_text(clicked_cursor, self._selection_anchor)
+                    # select_text требует start < end
+                    start = min(clicked_cursor, self._selection_anchor)
+                    end = max(clicked_cursor, self._selection_anchor)
+                    instance.select_text(start, end)
                 else:
                     # Тянем за конец — якорь в начале
                     self._selection_anchor = sel_from
-                    instance.select_text(self._selection_anchor, clicked_cursor)
+                    start = min(self._selection_anchor, clicked_cursor)
+                    end = max(self._selection_anchor, clicked_cursor)
+                    instance.select_text(start, end)
             else:
                 # Нет выделения — начинаем новое
                 self._selection_anchor = clicked_cursor
@@ -1307,22 +1314,20 @@ class LineNumberTextInput(BoxLayout):
     
         try:
             if hasattr(instance, 'get_cursor_from_xy'):
-                # get_cursor_from_xy всегда возвращает (col, row)
                 col, row = instance.get_cursor_from_xy(touch.x, touch.y)
                 lines = instance.text.split('\n')
                 new_cursor = 0
                 for i in range(row):
-                    new_cursor += len(lines[i]) + 1
+                    if i < len(lines):
+                        new_cursor += len(lines[i]) + 1
                 new_cursor += col
                 new_cursor = min(new_cursor, len(instance.text))
                 
                 if self._selection_anchor is not None:
-                    # Расширяем выделение от якоря до текущей позиции
-                    instance.select_text(self._selection_anchor, new_cursor)
-                else:
-                    # Начинаем выделение
-                    self._selection_anchor = new_cursor
-                    instance.select_text(new_cursor, new_cursor)
+                    # select_text требует start < end
+                    start = min(self._selection_anchor, new_cursor)
+                    end = max(self._selection_anchor, new_cursor)
+                    instance.select_text(start, end)
                 
                 self._auto_scroll_by_cursor(instance)
     
