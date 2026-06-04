@@ -66,36 +66,159 @@ def _get_fold_ranges(lines):
     return ranges
 
 
-class NoMenuTextInput(TextInput):
-    """TextInput без контекстного меню"""
+class IDESelectionMixin:
+    """
+    Миксин для TextInput/CodeInput — реализует выделение как в IDE:
+    - ЛКМ зажата + движение мыши  →  выделение не сбрасывается при скролле колесом
+    - После отпускания ЛКМ        →  выделение СОХРАНЯЕТСЯ (как в VSCode/PyCharm)
+    - ЛКМ зажата + колесо мыши   →  расширяет выделение (обрабатывается в LineNumberTextInput)
+    - Телефон: тап+тянуть         →  выделение с автопрокруткой
+
+    Ключевой принцип: управляем внутренними полями Kivy _selection_from / _selection_to /
+    _selection / _selection_finished напрямую, чтобы обойти стандартную логику сброса.
+    """
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.disable_long_touch_menu = True
+        self._ide_selecting = False         # идёт ли сейчас протяжка мышью/пальцем
+        self._ide_select_origin = None      # индекс начала выделения
+        self._ide_mouse_down = False        # зажата ли ЛКМ прямо сейчас
+
+    # ---- Отключаем контекстное меню ----
 
     def _on_long_touch(self, *args):
-        """Полностью отключаем долгое нажатие"""
         return True
 
     def show_long_touch_menu(self, *args):
-        """Отключаем меню"""
         pass
 
+    def _show_selection_menu(self, *args):
+        pass
 
-class NoMenuCodeInput(CodeInput):
-    """CodeInput без контекстного меню"""
+    def _show_cut_copy_paste(self, *args, **kwargs):
+        pass
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.disable_long_touch_menu = True
+    # ---- Основная логика: перехватываем touch ----
 
-    def _on_long_touch(self, *args):
-        """Полностью отключаем долгое нажатие"""
+    def on_touch_down(self, touch):
+        if not self.collide_point(*touch.pos):
+            return super().on_touch_down(touch)
+
+        # Скролл-колесо на ПК — НЕ сбрасываем выделение, передаём дальше
+        if hasattr(touch, 'button') and touch.button in ('scrolldown', 'scrollup',
+                                                          'scrollleft', 'scrollright'):
+            # Передаём в родитель для прокрутки ScrollView, но НЕ трогаем выделение
+            return False  # пусть ScrollView сам обработает
+
+        # Обычный клик/тап
+        if hasattr(touch, 'button') and touch.button == 'left':
+            self._ide_mouse_down = True
+
+        # Запоминаем стартовый индекс ДО того, как родитель переместит курсор
+        # Родитель сдвинет курсор на позицию клика — нам нужно именно это место
+        result = super().on_touch_down(touch)
+
+        # После super() курсор стоит там, куда кликнули — это начало выделения
+        self._ide_select_origin = self.cursor_index()
+        self._ide_selecting = True
+
+        # Гарантируем, что выделение не сбрасывается сразу же
+        self._selection_touch = touch
+
+        return result
+
+    def on_touch_move(self, touch):
+        if not self._ide_selecting:
+            return super().on_touch_move(touch)
+        if not self.collide_point(*touch.pos) and not self._ide_selecting:
+            return super().on_touch_move(touch)
+
+        # Передвигаем курсор к текущей позиции пальца/мыши
+        try:
+            if hasattr(self, 'get_cursor_from_xy'):
+                new_cursor = self.get_cursor_from_xy(touch.x, touch.y)
+                # Обновляем курсор без сброса выделения
+                self._cursor = list(new_cursor)
+                new_idx = self.cursor_index()
+
+                origin = self._ide_select_origin
+                if origin is not None:
+                    self._selection_from = origin
+                    self._selection_to = new_idx
+                    self._selection = True
+                    self._selection_finished = False
+                    self._selection_touch = touch
+                    self._update_graphics_selection()
+        except Exception:
+            pass
+
+        return True  # поглощаем, чтобы ScrollView не перехватил во время выделения
+
+    def on_touch_up(self, touch):
+        if not self._ide_selecting:
+            return super().on_touch_up(touch)
+
+        if hasattr(touch, 'button') and touch.button == 'left':
+            self._ide_mouse_down = False
+
+        # Фиксируем финальное положение курсора
+        try:
+            if self.collide_point(*touch.pos) and hasattr(self, 'get_cursor_from_xy'):
+                new_cursor = self.get_cursor_from_xy(touch.x, touch.y)
+                self._cursor = list(new_cursor)
+                new_idx = self.cursor_index()
+                origin = self._ide_select_origin
+
+                if origin is not None and origin != new_idx:
+                    # Есть реальное выделение — фиксируем его
+                    self._selection_from = origin
+                    self._selection_to = new_idx
+                    self._selection = True
+                    self._selection_finished = True   # ← выделение завершено, но НЕ сбрасывается
+                    self._selection_touch = None
+                    # Обновляем selection_text
+                    a, b = min(origin, new_idx), max(origin, new_idx)
+                    self.selection_text = self._get_text(encode=False)[a:b]
+                    self._update_graphics_selection()
+                else:
+                    # Просто клик без выделения
+                    self._selection = False
+                    self._selection_finished = True
+                    self._selection_touch = None
+                    self.selection_text = ''
+                    self._update_graphics_selection()
+        except Exception:
+            pass
+
+        self._ide_selecting = False
         return True
 
-    def show_long_touch_menu(self, *args):
-        """Отключаем меню"""
-        pass
+    def _restore_selection(self, sel_from, sel_to):
+        """Восстановить выделение (вызывается после скролла колесом)."""
+        try:
+            if sel_from is not None and sel_to is not None and sel_from != sel_to:
+                self._selection_from = sel_from
+                self._selection_to = sel_to
+                self._selection = True
+                self._selection_finished = True
+                self._selection_touch = None
+                a, b = min(sel_from, sel_to), max(sel_from, sel_to)
+                self.selection_text = self._get_text(encode=False)[a:b]
+                self._update_graphics_selection()
+        except Exception:
+            pass
+
+
+class NoMenuTextInput(IDESelectionMixin, TextInput):
+    """TextInput с IDE-выделением и без контекстного меню"""
+    pass
+
+
+class NoMenuCodeInput(IDESelectionMixin, CodeInput):
+    """CodeInput с IDE-выделением и без контекстного меню"""
+    pass
+
 
 
 class FoldingManager:
@@ -449,6 +572,14 @@ class LineNumberTextInput(BoxLayout):
 
         self._is_selecting = False
         self._keyboard_height = 0
+        self._touch_select_origin = None   # начало выделения (индекс)
+        self._touch_last_pos = None        # последняя позиция пальца
+        self._auto_scroll_event = None     # Clock event непрерывной прокрутки
+        self._auto_scroll_ti = None
+
+        # Привязываем обработчик скролла колесиком для ПК
+        if platform in ('win', 'linux', 'macosx', 'darwin'):
+            Window.bind(on_mousewheel=self._on_window_mousewheel)
 
     # ------------------------------------------------------------------ folding
 
@@ -801,6 +932,7 @@ class LineNumberTextInput(BoxLayout):
         self.text_input.bind(focus=self._on_focus)
         self.text_input.bind(on_touch_down=self._on_touch_down)
         self.text_input.bind(on_touch_up=self._on_touch_up)
+        # on_mousewheel при зажатой ЛКМ обрабатывается через Window.on_mousewheel
         self.text_input.bind(on_copy=self._on_copy)
         self._current_line_highlight = None
         self.text_input.bind(cursor=self._update_current_line_highlight)
@@ -885,7 +1017,7 @@ class LineNumberTextInput(BoxLayout):
             for line in selected_lines:
                 if _FOLD_MARKER in line:
                     # Очищаем строку от маркеров сворачивания
-                    # Убираем всё после ▶ (включая пробелы и точки)
+                    # Убераем всё после ▶ (включая пробелы и точки)
                     if '▶' in line:
                         # Берём часть до ▶
                         clean_header = line.split('▶')[0].strip()
@@ -1260,179 +1392,276 @@ class LineNumberTextInput(BoxLayout):
         else:
             self._keyboard_visible = False
             self._is_selecting = False
+            self._stop_auto_scroll_loop()
 
     def _on_touch_down(self, instance, touch):
+        """Дополнительная логика поверх IDESelectionMixin."""
+        # Скролл-колесо — не трогаем выделение
+        if hasattr(touch, 'button') and touch.button in (
+                'scrolldown', 'scrollup', 'scrollleft', 'scrollright'):
+            return False
         if instance.collide_point(*touch.pos):
             instance.focus = True
-
-            # ДОБАВИТЬ: Начинаем режим выделения
-            self._is_selecting = True
-
+            self._stop_auto_scroll_loop()
             Clock.schedule_once(self._show_keyboard, 0.05)
             Clock.schedule_once(self._show_keyboard, 0.1)
-            return False
         else:
-            self._is_selecting = False  # Сбрасываем флаг
+            self._stop_auto_scroll_loop()
             app = App.get_running_app()
             if app and hasattr(app, 'autocomplete'):
                 app.autocomplete.hide()
-            return False
+        return False
 
     def _on_touch_move(self, instance, touch):
-        """Обрабатывает движение пальца при выделении текста"""
+        """Автопрокрутка при протяжке. Выделением управляет IDESelectionMixin."""
         if not instance.focus:
             return False
+        if hasattr(touch, 'button') and touch.button in (
+                'scrolldown', 'scrollup', 'scrollleft', 'scrollright'):
+            return False
+        if platform not in ('win', 'linux', 'macosx', 'darwin'):
+            self._is_selecting = True
+            self._touch_last_pos = (touch.x, touch.y)
+            self._start_auto_scroll_loop(instance)
+        else:
+            self._auto_scroll_pc(instance, touch)
+        return False
 
-        # ДОБАВИТЬ: Убеждаемся что мы в режиме выделения
-        self._is_selecting = True
-
+    def _auto_scroll_pc(self, text_input, touch):
+        """Автопрокрутка на ПК при выходе мыши за границы ScrollView."""
         try:
-            # Обновляем позицию курсора
-            if hasattr(instance, 'get_cursor_from_xy'):
-                try:
-                    new_cursor = instance.get_cursor_from_xy(touch.x, touch.y)
-                    if new_cursor != instance.cursor_index():
-                        instance.cursor = new_cursor
-                except:
-                    pass
+            sv = self.editor_scroll
+            sv_top = sv.y + sv.height
+            sv_bot = sv.y
+            zone = dp(40)
+            speed = 0.015
 
-            # Вызываем автопрокрутку с учётом клавиатуры
-            self._auto_scroll_by_cursor_with_keyboard(instance)
+            if touch.y < sv_bot + zone:
+                ratio = 1.0 - max(0.0, (touch.y - sv_bot) / zone)
+                sv.scroll_y = max(0.0, sv.scroll_y - speed * ratio * 2)
+            elif touch.y > sv_top - zone:
+                ratio = 1.0 - max(0.0, (sv_top - touch.y) / zone)
+                sv.scroll_y = min(1.0, sv.scroll_y + speed * ratio * 2)
 
+            sv_right = sv.x + sv.width
+            sv_left = sv.x
+            if touch.x < sv_left + zone:
+                ratio = 1.0 - max(0.0, (touch.x - sv_left) / zone)
+                sv.scroll_x = max(0.0, sv.scroll_x - speed * ratio * 2)
+            elif touch.x > sv_right - zone:
+                ratio = 1.0 - max(0.0, (sv_right - touch.x) / zone)
+                sv.scroll_x = min(1.0, sv.scroll_x + speed * ratio * 2)
         except Exception as e:
-            log_error(f"Touch move error: {e}")
+            log_error(f"_auto_scroll_pc error: {e}")
 
-        return False
+    def _start_auto_scroll_loop(self, text_input):
+        """Запускает непрерывный цикл автопрокрутки (для мобильных)."""
+        if getattr(self, '_auto_scroll_event', None):
+            return  # уже запущен
+        self._auto_scroll_ti = text_input
 
-    def _on_touch_up(self, instance, touch):
-        """Завершение выделения"""
-        self._is_selecting = False
-        # Не вызываем super, так как у BoxLayout нет _on_touch_up
-        return False
+        def loop(dt):
+            if not self._is_selecting:
+                self._stop_auto_scroll_loop()
+                return
+            pos = getattr(self, '_touch_last_pos', None)
+            if pos is None:
+                return
+            self._auto_scroll_step(self._auto_scroll_ti, pos[0], pos[1])
 
-    def _get_keyboard_height(self):
-        """Возвращает высоту открытой клавиатуры в пикселях"""
+        self._auto_scroll_event = Clock.schedule_interval(loop, 1 / 30.0)
+
+    def _stop_auto_scroll_loop(self):
+        """Останавливает цикл автопрокрутки."""
+        ev = getattr(self, '_auto_scroll_event', None)
+        if ev:
+            ev.cancel()
+            self._auto_scroll_event = None
+
+    def _auto_scroll_step(self, text_input, touch_x, touch_y):
+        """Один шаг автопрокрутки + обновление выделения (мобильные)."""
         try:
-            if platform == 'android':
-                from jnius import autoclass
-                PythonActivity = autoclass('org.kivy.android.PythonActivity')
-                activity = PythonActivity.mActivity
-                if activity:
-                    rect = autoclass('android.graphics.Rect')()
-                    activity.getWindow().getDecorView().getWindowVisibleDisplayFrame(rect)
-                    screen_height = activity.getWindow().getDecorView().getHeight()
-                    visible_height = rect.height()
-                    keyboard_height = screen_height - visible_height
-                    if keyboard_height > 100:  # Клавиатура открыта
-                        return keyboard_height
-            return 0
-        except:
-            return 0
+            sv = self.editor_scroll
+            win_h = Window.height
+            win_w = Window.width
+            zone = dp(70)
+            min_sp, max_sp = 0.004, 0.025
 
-    def _auto_scroll_by_cursor_with_keyboard(self, text_input):
-        """Прокручивает редактор с учётом высоты клавиатуры"""
-        if not text_input or not text_input.parent:
-            return
+            def speed(dist):
+                ratio = 1.0 - max(0.0, dist / zone)
+                return min_sp + (max_sp - min_sp) * ratio
 
-        # Проверяем, что мы в режиме выделения
-        if not self._is_selecting:
-            return
+            scrolled = False
+            if touch_y < zone:
+                sv.scroll_y = max(0.0, sv.scroll_y - speed(touch_y))
+                scrolled = True
+            elif touch_y > win_h - zone:
+                sv.scroll_y = min(1.0, sv.scroll_y + speed(win_h - touch_y))
+                scrolled = True
 
-        scroll_view = None
-        parent = text_input.parent
-        while parent:
-            from kivy.uix.scrollview import ScrollView
-            if isinstance(parent, ScrollView):
-                scroll_view = parent
-                break
-            parent = parent.parent
+            if touch_x < zone:
+                sv.scroll_x = max(0.0, sv.scroll_x - speed(touch_x))
+                scrolled = True
+            elif touch_x > win_w - zone:
+                sv.scroll_x = min(1.0, sv.scroll_x + speed(win_w - touch_x))
+                scrolled = True
 
-        if not scroll_view:
-            return
+            # После прокрутки обновляем конец выделения
+            if scrolled and hasattr(text_input, '_ide_select_origin') and \
+                    text_input._ide_select_origin is not None:
+                try:
+                    new_cursor = text_input.get_cursor_from_xy(touch_x, touch_y)
+                    text_input._cursor = list(new_cursor)
+                    new_idx = text_input.cursor_index()
+                    origin = text_input._ide_select_origin
+                    text_input._selection_from = origin
+                    text_input._selection_to = new_idx
+                    text_input._selection = True
+                    text_input._selection_finished = False
+                    text_input._selection_touch = None
+                    a, b = min(origin, new_idx), max(origin, new_idx)
+                    text_input.selection_text = text_input._get_text(encode=False)[a:b]
+                    text_input._update_graphics_selection()
+                except Exception:
+                    pass
+        except Exception as e:
+            log_error(f"_auto_scroll_step error: {e}")
 
+    def _auto_scroll_with_speed(self, text_input, touch):
+        """Устаревший метод — оставлен для обратной совместимости."""
+        self._touch_last_pos = (touch.x, touch.y)
+        self._start_auto_scroll_loop(text_input)
+
+    def _on_window_mousewheel(self, window, touch, delta):
+        """ПК: скролл колесом. Если ЛКМ зажата — расширяем выделение как в IDE."""
+        if not self.text_input or not self.text_input.focus:
+            return False
+
+        ti = self.text_input
+        sv = self.editor_scroll
+        lines = ti.text.split('\n')
+
+        # Скроллим viewport (3 строки за клик)
+        step = 3
+        cursor_col, cursor_row = ti.cursor
+        if delta < 0:
+            new_row = min(cursor_row + step, len(lines) - 1)
+        else:
+            new_row = max(cursor_row - step, 0)
+        new_col = min(cursor_col, len(lines[new_row]))
+        new_idx = sum(len(lines[i]) + 1 for i in range(new_row)) + new_col
+
+        mouse_buttons = getattr(Window, 'mouse_buttons', {})
+        left_pressed = mouse_buttons.get('left', False) or getattr(ti, '_ide_mouse_down', False)
+
+        if left_pressed and ti._ide_selecting:
+            # ЛКМ зажата — расширяем выделение
+            origin = ti._ide_select_origin
+            if origin is None:
+                origin = ti.cursor_index()
+                ti._ide_select_origin = origin
+
+            ti._cursor = [new_col, new_row]
+            ti._selection_from = origin
+            ti._selection_to = new_idx
+            ti._selection = True
+            ti._selection_finished = False
+            ti._selection_touch = None
+            a, b = min(origin, new_idx), max(origin, new_idx)
+            ti.selection_text = ti._get_text(encode=False)[a:b]
+            ti._update_graphics_selection()
+        else:
+            # Просто скролл — двигаем курсор, выделение НЕ трогаем
+            # Сохраняем текущее выделение
+            sel_from = ti._selection_from
+            sel_to = ti._selection_to
+            had_selection = ti._selection and sel_from != sel_to
+
+            ti._cursor = [new_col, new_row]
+
+            # Восстанавливаем выделение если оно было
+            if had_selection:
+                ti._selection_from = sel_from
+                ti._selection_to = sel_to
+                ti._selection = True
+                ti._selection_finished = True
+                ti._update_graphics_selection()
+
+        # Прокручиваем ScrollView
+        lh = getattr(ti, 'line_height', self._font_size * 1.2)
+        total_h = max(1, len(lines)) * lh
+        sv_h = sv.height
+        if total_h > sv_h:
+            max_off = total_h - sv_h
+            cursor_y = new_row * lh
+            margin = lh * 2
+            if cursor_y < (1.0 - sv.scroll_y) * max_off + margin:
+                sv.scroll_y = min(1.0, 1.0 - max(0, cursor_y - margin) / max_off)
+            elif cursor_y + lh > (1.0 - sv.scroll_y) * max_off + sv_h - margin:
+                sv.scroll_y = max(0.0, 1.0 - (cursor_y + lh + margin - sv_h) / max_off)
+
+        return True
+
+    def _scroll_to_cursor(self, text_input):
+        """Прокручивает редактор так, чтобы курсор был виден"""
         try:
-            # Получаем высоту клавиатуры
-            keyboard_height = self._get_keyboard_height()
+            # Находим ScrollView
+            scroll_view = None
+            parent = text_input.parent
+            while parent:
+                if isinstance(parent, ScrollView):
+                    scroll_view = parent
+                    break
+                parent = parent.parent
 
-            # Получаем позицию курсора
+            if not scroll_view:
+                return
+
+            # Получаем параметры
             cursor_line = text_input.cursor[1]
-            line_height = text_input.line_height if hasattr(text_input, 'line_height') else self._font_size * 1.2
-
-            # ВАЖНО: Учитываем клавиатуру при расчёте видимой высоты
-            sv_height = scroll_view.height
-
-            # Если клавиатура открыта, уменьшаем видимую область
-            if keyboard_height > 100:
-                visible_height = sv_height - keyboard_height
-            else:
-                visible_height = sv_height
-
-            sv_width = scroll_view.width
+            line_height = getattr(text_input, 'line_height', self._font_size * 1.2)
 
             total_lines = max(1, len(text_input.text.split('\n')))
             total_height = total_lines * line_height
+            sv_height = scroll_view.height
 
+            if total_height <= sv_height:
+                return
+
+            # Позиция курсора в пикселях
+            cursor_y = cursor_line * line_height
+
+            # Текущая видимая область
             scroll_y = scroll_view.scroll_y
-            cursor_y_top = cursor_line * line_height
+            max_offset = total_height - sv_height
+            visible_top = (1.0 - scroll_y) * max_offset
+            visible_bottom = visible_top + sv_height
 
-            # Вычисляем видимую область
-            if total_height > sv_height:
-                max_scroll_offset = total_height - sv_height
-                visible_top = (1.0 - scroll_y) * max_scroll_offset
-                visible_bottom = visible_top + visible_height  # ← используем visible_height с учётом клавиатуры
-            else:
-                visible_top = 0
-                visible_bottom = visible_height
+            # Отступы для комфортного отображения
+            margin = line_height * 2
 
-            # Отступ для активации (меньше, чтобы реагировать раньше)
-            scroll_margin = line_height * 0.8
+            # Если курсор выше видимой области
+            if cursor_y < visible_top + margin:
+                new_scroll_y = 1.0 - (max(0, cursor_y - margin) / max_offset)
+                scroll_view.scroll_y = max(0.0, min(1.0, new_scroll_y))
 
-            # ===== ВЕРТИКАЛЬНАЯ ПРОКРУТКА =====
-            # Если курсор выше видимой области + отступ
-            if cursor_y_top < visible_top + scroll_margin:
-                new_scroll_y = scroll_y + 0.06
-                scroll_view.scroll_y = min(1.0, new_scroll_y)
-
-            # Если курсор ниже видимой области - отступ (С УЧЁТОМ КЛАВИАТУРЫ)
-            elif cursor_y_top + line_height > visible_bottom - scroll_margin:
-                new_scroll_y = scroll_y - 0.06
-                scroll_view.scroll_y = max(0.0, new_scroll_y)
-
-            # ===== ГОРИЗОНТАЛЬНАЯ ПРОКРУТКА =====
-            cursor_index = text_input.cursor_index()
-            text_before_cursor = text_input.text[:cursor_index]
-            current_line_start = text_before_cursor.rfind('\n') + 1
-            cursor_col = cursor_index - current_line_start
-
-            lines = text_input.text.split('\n')
-            current_line = lines[cursor_line] if cursor_line < len(lines) else ""
-
-            char_width = text_input.font_size * 0.6
-            cursor_x_pos = cursor_col * char_width
-            line_width = len(current_line) * char_width
-
-            scroll_x = scroll_view.scroll_x
-
-            if line_width > sv_width:
-                max_scroll_x_offset = line_width - sv_width
-                visible_left = scroll_x * max_scroll_x_offset
-                visible_right = visible_left + sv_width
-            else:
-                visible_left = 0
-                visible_right = sv_width
-
-            h_margin = char_width * 3
-
-            if cursor_x_pos < visible_left + h_margin:
-                new_scroll_x = scroll_x - 0.06
-                scroll_view.scroll_x = max(0.0, new_scroll_x)
-
-            elif cursor_x_pos + char_width > visible_right - h_margin:
-                new_scroll_x = scroll_x + 0.06
-                scroll_view.scroll_x = min(1.0, new_scroll_x)
+            # Если курсор ниже видимой области
+            elif cursor_y + line_height > visible_bottom - margin:
+                new_scroll_y = 1.0 - (min(max_offset, cursor_y + line_height + margin - sv_height) / max_offset)
+                scroll_view.scroll_y = max(0.0, min(1.0, new_scroll_y))
 
         except Exception as e:
-            log_error(f"Auto scroll error: {e}")
+            log_error(f"_scroll_to_cursor error: {e}")
+
+    def _on_touch_up(self, instance, touch):
+        """Завершение — останавливаем автопрокрутку. Выделение сохраняет IDESelectionMixin."""
+        self._is_selecting = False
+        self._stop_auto_scroll_loop()
+        return False
+
+    # _on_mousewheel_with_selection удалён — заменён на _on_window_mousewheel
+
+    # second _scroll_to_cursor removed — use the one defined above
 
     def _show_keyboard(self, dt=None):
         try:
@@ -1590,12 +1819,16 @@ class LineNumberTextInput(BoxLayout):
 
     def cleanup(self):
         ThemeManager.unregister(self)
+        self._stop_auto_scroll_loop()
         if hasattr(self, '_undo_stack'):
             self._undo_stack.clear()
         if hasattr(self, '_redo_stack'):
             self._redo_stack.clear()
         Window.unbind(on_keyboard=self._on_window_keyboard)
         Window.unbind(on_key_down=self._on_window_key_down)
+
+        if platform in ('win', 'linux', 'macosx', 'darwin'):
+            Window.unbind(on_mousewheel=self._on_window_mousewheel)
 
     def debug_folding(self):
         """Отладочный метод для проверки сворачивания"""
