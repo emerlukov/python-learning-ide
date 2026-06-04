@@ -400,9 +400,6 @@ class LineNumberTextInput(BoxLayout):
         self._redraw_pending = False
         self._indent_guides_pending = False
 
-        # === НОВОЕ: якорь для продолжения выделения ===
-        self._selection_anchor = None
-
         # Throttle
         self._panel_update_scheduled = False
         self._cached_line_count = 0
@@ -1256,13 +1253,19 @@ class LineNumberTextInput(BoxLayout):
         else:
             self._keyboard_visible = False
 
-    # === ИЗМЕНЁН: _on_touch_down с поддержкой продолжения выделения ===
     def _on_touch_down(self, instance, touch):
         if instance.collide_point(*touch.pos):
             instance.focus = True
             
             try:
-                clicked_cursor = instance.get_cursor_from_xy(touch.x, touch.y)
+                # get_cursor_from_xy всегда возвращает (col, row)
+                col, row = instance.get_cursor_from_xy(touch.x, touch.y)
+                # Вычисляем индекс из col, row
+                lines = instance.text.split('\n')
+                clicked_cursor = 0
+                for i in range(row):
+                    clicked_cursor += len(lines[i]) + 1
+                clicked_cursor += col
             except:
                 clicked_cursor = instance.cursor_index()
             
@@ -1278,17 +1281,14 @@ class LineNumberTextInput(BoxLayout):
                 if dist_to_from <= dist_to_to:
                     # Тянем за начало — якорь в конце
                     self._selection_anchor = sel_to
-                    instance.cursor = clicked_cursor
                     instance.select_text(clicked_cursor, self._selection_anchor)
                 else:
                     # Тянем за конец — якорь в начале
                     self._selection_anchor = sel_from
-                    instance.cursor = clicked_cursor
                     instance.select_text(self._selection_anchor, clicked_cursor)
             else:
                 # Нет выделения — начинаем новое
                 self._selection_anchor = clicked_cursor
-                instance.cursor = clicked_cursor
             
             Clock.schedule_once(self._show_keyboard, 0.05)
             Clock.schedule_once(self._show_keyboard, 0.1)
@@ -1298,33 +1298,39 @@ class LineNumberTextInput(BoxLayout):
             if app and hasattr(app, 'autocomplete'):
                 app.autocomplete.hide()
             return False
-
-    # === ИЗМЕНЁН: _on_touch_move с поддержкой расширения выделения ===
+    
+    
     def _on_touch_move(self, instance, touch):
         """Обрабатывает движение пальца при выделении текста"""
         if not instance.focus:
             return False
-
+    
         try:
             if hasattr(instance, 'get_cursor_from_xy'):
-                new_cursor = instance.get_cursor_from_xy(touch.x, touch.y)
+                # get_cursor_from_xy всегда возвращает (col, row)
+                col, row = instance.get_cursor_from_xy(touch.x, touch.y)
+                lines = instance.text.split('\n')
+                new_cursor = 0
+                for i in range(row):
+                    new_cursor += len(lines[i]) + 1
+                new_cursor += col
+                new_cursor = min(new_cursor, len(instance.text))
                 
                 if self._selection_anchor is not None:
                     # Расширяем выделение от якоря до текущей позиции
                     instance.select_text(self._selection_anchor, new_cursor)
                 else:
-                    # Начинаем выделение от текущего курсора
-                    instance.cursor = new_cursor
+                    # Начинаем выделение
                     self._selection_anchor = new_cursor
+                    instance.select_text(new_cursor, new_cursor)
                 
                 self._auto_scroll_by_cursor(instance)
-
+    
         except Exception as e:
             log_error(f"Touch move error: {e}")
-
+    
         return False
 
-    # === ИЗМЕНЁН: _auto_scroll_by_cursor с ограничением горизонтальной прокрутки ===
     def _auto_scroll_by_cursor(self, text_input):
         """Прокручивает редактор, если курсор находится за пределами видимой области"""
         if not text_input or not text_input.parent:
@@ -1374,7 +1380,7 @@ class LineNumberTextInput(BoxLayout):
                 new_scroll = scroll_y + (target_scroll - scroll_y) * 0.3
                 scroll_view.scroll_y = new_scroll
 
-            # === ИЗМЕНЕНИЕ: Ограниченная горизонтальная прокрутка ===
+            # Горизонтальная прокрутка
             cursor_index = text_input.cursor_index()
             text_before_cursor = text_input.text[:cursor_index]
             current_line_start = text_before_cursor.rfind('\n') + 1
@@ -1385,21 +1391,25 @@ class LineNumberTextInput(BoxLayout):
 
             char_width = text_input.font_size * 0.6
             cursor_x_pos = cursor_col * char_width
-            line_width = max(len(current_line) * char_width, sv_width)
+            line_width = len(current_line) * char_width
 
             scroll_x = scroll_view.scroll_x
             visible_left = scroll_x * max(0, line_width - sv_width)
             visible_right = visible_left + sv_width
 
-            h_margin = char_width * 8
+            h_margin = char_width * 5
 
-            if cursor_x_pos > visible_right - h_margin:
-                # Прокручиваем ровно до курсора + небольшой запас
-                target = (cursor_x_pos - sv_width + h_margin) / max(1, line_width - sv_width)
-                scroll_view.scroll_x = min(0.98, max(scroll_x, target))
-            elif cursor_x_pos < visible_left + h_margin and scroll_x > 0:
-                target = (cursor_x_pos - h_margin) / max(1, line_width - sv_width)
-                scroll_view.scroll_x = max(0.0, min(scroll_x, target))
+            if cursor_x_pos < visible_left + h_margin:
+                target_scroll_x = max(0.0, (cursor_x_pos - sv_width / 2) / max(1, line_width - sv_width))
+                target_scroll_x = max(0.0, min(1.0, target_scroll_x))
+                new_scroll_x = scroll_x + (target_scroll_x - scroll_x) * 0.4
+                scroll_view.scroll_x = new_scroll_x
+
+            elif cursor_x_pos + char_width > visible_right - h_margin:
+                target_scroll_x = min(1.0, (cursor_x_pos + char_width - sv_width / 2) / max(1, line_width - sv_width))
+                target_scroll_x = max(0.0, min(1.0, target_scroll_x))
+                new_scroll_x = scroll_x + (target_scroll_x - scroll_x) * 0.4
+                scroll_view.scroll_x = new_scroll_x
 
         except Exception as e:
             log_error(f"Auto scroll error: {e}")
@@ -1575,3 +1585,27 @@ class LineNumberTextInput(BoxLayout):
         print(f"Folds: {self._folding._folds}")
         print(f"Fold ranges: {self._folding.get_fold_ranges()}")
         print("===================")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
