@@ -957,13 +957,13 @@ class PythonLearningApp(MDApp):
             self.show_result_popup("Код уже выполняется...")
             return
 
-        #self.vibrate_short()
-
-        if not hasattr(self, 'code_input') or not self.code_input:
+        if not hasattr(self, 'editor') or not self.editor:
             self.show_result_popup("Ошибка: редактор не инициализирован")
             return
 
-        code = self.code_input.text
+        # === ИСПРАВЛЕНИЕ ===
+        code = self.editor.get_text()
+
         if not code.strip():
             self.show_result_popup(self.tr.get('enter_code', 'X Enter code'))
             return
