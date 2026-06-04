@@ -10,6 +10,8 @@ from kivy.clock import Clock
 from kivy.app import App
 from utils.error_explainer import explain_error
 
+_FOLD_MARKER = '\u25B6'  # ▶
+
 
 class CodeExecutor:
     def __init__(self):
@@ -20,6 +22,24 @@ class CodeExecutor:
         self.TIMEOUT_SECONDS = 30
         self._stop_requested = False
 
+    def _clean_code(self, code):
+        """Удаляет маркеры сворачивания из кода"""
+        if not code:
+            return code
+        lines = code.split('\n')
+        cleaned = []
+        for line in lines:
+            if _FOLD_MARKER in line or '▶' in line:
+                # Оставляем только часть до маркера
+                if '▶' in line:
+                    clean_line = line.split('▶')[0].rstrip(' .')
+                else:
+                    clean_line = line.split(_FOLD_MARKER)[0].rstrip(' .')
+                cleaned.append(clean_line)
+            else:
+                cleaned.append(line)
+        return '\n'.join(cleaned)
+
     def _trace_stop(self, frame, event, arg):
         """Трассировщик для остановки выполнения"""
         if self._stop_requested:
@@ -29,6 +49,13 @@ class CodeExecutor:
     def run(self, code, input_handler, result_callback):
         app = App.get_running_app()
         tr = app.tr if app else {}
+
+        print("=== EXECUTOR DEBUG ===")
+        print(f"Code length: {len(code)}")
+        print("First 6 lines:")
+        for i, line in enumerate(code.split('\n')[:6]):
+            print(f"{i + 1:2d}: {repr(line)}")
+        print("=====================")
 
         if self.is_running:
             msg = tr.get('code_already_running', 'Code is already running, please wait...')
@@ -93,7 +120,6 @@ class CodeExecutor:
 
                 if use_explainer and app:
                     locale = app.current_language if app else 'ru'
-                    # explain_error уже определяет тип ошибки внутри
                     friendly_error = explain_error(error_text, code, locale)
                     result = friendly_error
                 else:
