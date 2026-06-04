@@ -66,6 +66,38 @@ def _get_fold_ranges(lines):
     return ranges
 
 
+class NoMenuTextInput(TextInput):
+    """TextInput без контекстного меню"""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.disable_long_touch_menu = True
+
+    def _on_long_touch(self, *args):
+        """Полностью отключаем долгое нажатие"""
+        return True
+
+    def show_long_touch_menu(self, *args):
+        """Отключаем меню"""
+        pass
+
+
+class NoMenuCodeInput(CodeInput):
+    """CodeInput без контекстного меню"""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.disable_long_touch_menu = True
+
+    def _on_long_touch(self, *args):
+        """Полностью отключаем долгое нажатие"""
+        return True
+
+    def show_long_touch_menu(self, *args):
+        """Отключаем меню"""
+        pass
+
+
 class FoldingManager:
     """Управляет свёрнутыми блоками.
 
@@ -172,57 +204,51 @@ class FoldingManager:
             self._fold_ranges = []
             return
 
-        old_folds = self._folds.copy()
-        old_orig_lines = self._orig_lines.copy()
+        old_folds = dict(self._folds)
+        old_orig_lines = list(self._orig_lines)
 
-        # === Основная идея: восстанавливаем оригинальные строки ===
         new_orig = []
         i = 0
-        while i < len(new_display_lines):
+        n = len(new_display_lines)
+
+        while i < n:
             line = new_display_lines[i]
 
-            if _FOLD_MARKER in line or '▶' in line:  # это свёрнутый блок
-                # Ищем соответствующий старый folded блок
-                found = False
+            if _FOLD_MARKER in line or '▶' in line:
+                # Пытаемся восстановить полный блок
+                restored = False
+                clean_header = line.split('▶')[0].strip() if '▶' in line else line.split(_FOLD_MARKER)[0].strip()
+                clean_header = clean_header.rstrip(' .')
+
                 for start, fold_data in old_folds.items():
+                    if start >= len(old_orig_lines):
+                        continue
                     old_header = old_orig_lines[start].rstrip()
-                    # Пытаемся сопоставить заголовок
-                    if (old_header in line or
-                            line.rstrip().startswith(old_header.rstrip()) or
-                            old_header.startswith(line.split('...')[0].strip())):
-                        # Восстанавливаем весь блок из старого оригинала
+                    if old_header == clean_header or old_header.startswith(clean_header):
                         end = fold_data['end']
                         new_orig.extend(old_orig_lines[start:end + 1])
                         i += 1
-                        found = True
+                        restored = True
                         break
 
-                if not found:
-                    # Не смогли восстановить — вставляем как обычную строку
-                    new_orig.append(line)
+                if not restored:
+                    # Если не нашли — вставляем как есть (заголовок)
+                    new_orig.append(clean_header)
                     i += 1
             else:
                 new_orig.append(line)
                 i += 1
 
-        # Обновляем состояние
         self._orig_lines = new_orig
-        self._folds = {}  # временно сбрасываем
-
-        # Пересчитываем возможные диапазоны сворачивания
+        self._folds = {}
         self._fold_ranges = _get_fold_ranges(self._orig_lines)
 
-        # Восстанавливаем сворачивания там, где заголовки совпадают
-        for start, fold_data in old_folds.items():
+        # Восстанавливаем сворачивания
+        for start, old_fold_data in old_folds.items():
             if start < len(self._orig_lines):
                 old_header = old_orig_lines[start].rstrip()
                 new_header = self._orig_lines[start].rstrip()
-
-                if (old_header == new_header or
-                        old_header.startswith(new_header) or
-                        new_header.startswith(old_header.split(':')[0] if ':' in old_header else old_header)):
-
-                    # Проверяем, что блок всё ещё существует
+                if old_header == new_header or old_header.startswith(new_header):
                     for s, e in self._fold_ranges:
                         if s == start:
                             self._folds[start] = {
@@ -421,6 +447,9 @@ class LineNumberTextInput(BoxLayout):
         self._scroll_timer = None
         self._last_cursor_pos = None
 
+        self._is_selecting = False
+        self._keyboard_height = 0
+
     # ------------------------------------------------------------------ folding
 
     def _on_fold_toggle(self, orig_line):
@@ -435,11 +464,9 @@ class LineNumberTextInput(BoxLayout):
             log_error(f"fold toggle error: {e}")
 
     def _apply_folding_to_editor(self, toggled_orig_line=None):
-        """Обновляет текст в text_input согласно текущему состоянию сворачивания.
-        toggled_orig_line — оригинальная строка только что свёрнутого/развёрнутого блока.
-        Курсор фиксируется на строке заголовка этого блока."""
+        """Обновляет текст в text_input согласно текущему состоянию сворачивания."""
         try:
-            # Запоминаем текущую display-строку курсора до изменений
+            # Запоминаем позицию курсора
             try:
                 old_cursor_idx = self.text_input.cursor_index()
                 old_display_line = self.text_input.text[:old_cursor_idx].count('\n')
@@ -447,36 +474,33 @@ class LineNumberTextInput(BoxLayout):
                 old_cursor_idx = 0
                 old_display_line = 0
 
+            # Получаем отображаемый текст (с маркерами)
             display_lines = self._folding.get_display_lines()
             new_text = '\n'.join(display_lines)
 
             self._ignore_text_change = True
             self.text_input.text = new_text
-            self.original_lines = display_lines
+            self.original_lines = display_lines   # ← здесь display!
             self._ignore_text_change = False
 
-            # Определяем display-строку, на которой должен оказаться курсор.
-            # Приоритет: строка только что свёрнутого/развёрнутого блока.
+            # Восстанавливаем курсор
             if toggled_orig_line is not None:
                 target_display_line = self._folding.orig_to_display(toggled_orig_line)
             else:
-                # Сохраняем ту же display-строку, что была (она не сдвигается
-                # при fold выше курсора; при fold ниже — вообще не меняется)
                 target_display_line = old_display_line
 
-            # Переводим номер display-строки в символьный индекс (начало строки)
             try:
                 lines_before = display_lines[:target_display_line]
                 char_pos = sum(len(l) + 1 for l in lines_before)
                 char_pos = min(char_pos, len(new_text))
                 self.text_input.cursor = self.text_input.get_cursor_from_index(char_pos)
-                # Прокручиваем к строке заголовка
                 Clock.schedule_once(lambda dt: self._scroll_to_display_line(target_display_line), 0.05)
             except:
                 pass
 
             self._refresh_virtual_panel()
             Clock.schedule_once(self._draw_indent_guides, 0.15)
+
         except Exception as e:
             log_error(f"_apply_folding_to_editor error: {e}")
 
@@ -618,11 +642,23 @@ class LineNumberTextInput(BoxLayout):
     # ------------------------------------------------------------------ public
 
     def get_text(self):
-        """Возвращает полный текст (с развёрнутыми блоками)."""
-        orig = self._folding.get_orig_lines()
-        if orig:
-            return '\n'.join(orig)
-        return self.text_input.text if hasattr(self, 'text_input') else ""
+        """Возвращает полный текст (с развёрнутыми блоками) — для запуска, сохранения и т.д."""
+        try:
+            orig_lines = self._folding.get_orig_lines()
+            if orig_lines:
+                full_code = '\n'.join(orig_lines)
+                print(f"[get_text] SUCCESS: Returned {len(full_code)} chars from original lines")
+                # Дополнительная проверка
+                if any('▶' in line or _FOLD_MARKER in line for line in orig_lines):
+                    print("[get_text] WARNING: Fold marker still in original lines!")
+                return full_code
+        except Exception as e:
+            log_error(f"get_text error: {e}")
+
+        # Fallback
+        fallback = self.text_input.text if hasattr(self, 'text_input') else ""
+        print(f"[get_text] Fallback used: {len(fallback)} chars")
+        return fallback
 
     def set_text(self, text):
         if hasattr(self, 'text_input'):
@@ -733,14 +769,14 @@ class LineNumberTextInput(BoxLayout):
         padding_top = 0
         padding_bottom = 0
         if has_lexer and CodeInput:
-            self.text_input = CodeInput(lexer=PythonLexer(), style=style_name, size_hint=(None, None),
+            self.text_input = NoMenuCodeInput(lexer=PythonLexer(), style=style_name, size_hint=(None, None),
                                         font_size=font_size, background_color=theme['editor_bg'],
                                         foreground_color=theme['editor_text'], cursor_color=theme['editor_cursor'],
                                         selection_color=theme.get('editor_selection', (1, 1, 1, 0.1)), multiline=True,
                                         do_wrap=False, padding=(dp(8), padding_top, dp(8), padding_bottom),
                                         background_normal='', background_active='')
         else:
-            self.text_input = TextInput(size_hint=(None, None), font_size=font_size,
+            self.text_input = NoMenuTextInput(size_hint=(None, None), font_size=font_size,
                                         background_color=theme['editor_bg'], foreground_color=theme['editor_text'],
                                         cursor_color=theme['editor_cursor'],
                                         selection_color=theme.get('editor_selection', (1, 1, 1, 0.1)), multiline=True,
@@ -764,6 +800,7 @@ class LineNumberTextInput(BoxLayout):
         self.text_input.bind(text=self._on_text_change)
         self.text_input.bind(focus=self._on_focus)
         self.text_input.bind(on_touch_down=self._on_touch_down)
+        self.text_input.bind(on_touch_up=self._on_touch_up)
         self.text_input.bind(on_copy=self._on_copy)
         self._current_line_highlight = None
         self.text_input.bind(cursor=self._update_current_line_highlight)
@@ -1222,14 +1259,20 @@ class LineNumberTextInput(BoxLayout):
             Clock.schedule_once(self._show_keyboard, 0.15)
         else:
             self._keyboard_visible = False
+            self._is_selecting = False
 
     def _on_touch_down(self, instance, touch):
         if instance.collide_point(*touch.pos):
             instance.focus = True
+
+            # ДОБАВИТЬ: Начинаем режим выделения
+            self._is_selecting = True
+
             Clock.schedule_once(self._show_keyboard, 0.05)
             Clock.schedule_once(self._show_keyboard, 0.1)
             return False
         else:
+            self._is_selecting = False  # Сбрасываем флаг
             app = App.get_running_app()
             if app and hasattr(app, 'autocomplete'):
                 app.autocomplete.hide()
@@ -1240,7 +1283,11 @@ class LineNumberTextInput(BoxLayout):
         if not instance.focus:
             return False
 
+        # ДОБАВИТЬ: Убеждаемся что мы в режиме выделения
+        self._is_selecting = True
+
         try:
+            # Обновляем позицию курсора
             if hasattr(instance, 'get_cursor_from_xy'):
                 try:
                     new_cursor = instance.get_cursor_from_xy(touch.x, touch.y)
@@ -1249,16 +1296,46 @@ class LineNumberTextInput(BoxLayout):
                 except:
                     pass
 
-            self._auto_scroll_by_cursor(instance)
+            # Вызываем автопрокрутку с учётом клавиатуры
+            self._auto_scroll_by_cursor_with_keyboard(instance)
 
         except Exception as e:
             log_error(f"Touch move error: {e}")
 
         return False
 
-    def _auto_scroll_by_cursor(self, text_input):
-        """Прокручивает редактор, если курсор находится за пределами видимой области"""
+    def _on_touch_up(self, instance, touch):
+        """Завершение выделения"""
+        self._is_selecting = False
+        # Не вызываем super, так как у BoxLayout нет _on_touch_up
+        return False
+
+    def _get_keyboard_height(self):
+        """Возвращает высоту открытой клавиатуры в пикселях"""
+        try:
+            if platform == 'android':
+                from jnius import autoclass
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                activity = PythonActivity.mActivity
+                if activity:
+                    rect = autoclass('android.graphics.Rect')()
+                    activity.getWindow().getDecorView().getWindowVisibleDisplayFrame(rect)
+                    screen_height = activity.getWindow().getDecorView().getHeight()
+                    visible_height = rect.height()
+                    keyboard_height = screen_height - visible_height
+                    if keyboard_height > 100:  # Клавиатура открыта
+                        return keyboard_height
+            return 0
+        except:
+            return 0
+
+    def _auto_scroll_by_cursor_with_keyboard(self, text_input):
+        """Прокручивает редактор с учётом высоты клавиатуры"""
         if not text_input or not text_input.parent:
+            return
+
+        # Проверяем, что мы в режиме выделения
+        if not self._is_selecting:
             return
 
         scroll_view = None
@@ -1274,10 +1351,22 @@ class LineNumberTextInput(BoxLayout):
             return
 
         try:
+            # Получаем высоту клавиатуры
+            keyboard_height = self._get_keyboard_height()
+
+            # Получаем позицию курсора
             cursor_line = text_input.cursor[1]
             line_height = text_input.line_height if hasattr(text_input, 'line_height') else self._font_size * 1.2
 
+            # ВАЖНО: Учитываем клавиатуру при расчёте видимой высоты
             sv_height = scroll_view.height
+
+            # Если клавиатура открыта, уменьшаем видимую область
+            if keyboard_height > 100:
+                visible_height = sv_height - keyboard_height
+            else:
+                visible_height = sv_height
+
             sv_width = scroll_view.width
 
             total_lines = max(1, len(text_input.text.split('\n')))
@@ -1286,26 +1375,30 @@ class LineNumberTextInput(BoxLayout):
             scroll_y = scroll_view.scroll_y
             cursor_y_top = cursor_line * line_height
 
-            visible_top = (1.0 - scroll_y) * max(0, total_height - sv_height)
-            visible_bottom = visible_top + sv_height
+            # Вычисляем видимую область
+            if total_height > sv_height:
+                max_scroll_offset = total_height - sv_height
+                visible_top = (1.0 - scroll_y) * max_scroll_offset
+                visible_bottom = visible_top + visible_height  # ← используем visible_height с учётом клавиатуры
+            else:
+                visible_top = 0
+                visible_bottom = visible_height
 
-            scroll_margin = line_height * 1.5
-            scroll_speed = 0.03
+            # Отступ для активации (меньше, чтобы реагировать раньше)
+            scroll_margin = line_height * 0.8
 
-            # Вертикальная прокрутка
+            # ===== ВЕРТИКАЛЬНАЯ ПРОКРУТКА =====
+            # Если курсор выше видимой области + отступ
             if cursor_y_top < visible_top + scroll_margin:
-                target_scroll = 1.0 - (cursor_y_top - sv_height / 2) / max(1, total_height - sv_height)
-                target_scroll = max(0.0, min(1.0, target_scroll))
-                new_scroll = scroll_y + (target_scroll - scroll_y) * 0.3
-                scroll_view.scroll_y = new_scroll
+                new_scroll_y = scroll_y + 0.06
+                scroll_view.scroll_y = min(1.0, new_scroll_y)
 
+            # Если курсор ниже видимой области - отступ (С УЧЁТОМ КЛАВИАТУРЫ)
             elif cursor_y_top + line_height > visible_bottom - scroll_margin:
-                target_scroll = 1.0 - (cursor_y_top + line_height - sv_height / 2) / max(1, total_height - sv_height)
-                target_scroll = max(0.0, min(1.0, target_scroll))
-                new_scroll = scroll_y + (target_scroll - scroll_y) * 0.3
-                scroll_view.scroll_y = new_scroll
+                new_scroll_y = scroll_y - 0.06
+                scroll_view.scroll_y = max(0.0, new_scroll_y)
 
-            # Горизонтальная прокрутка
+            # ===== ГОРИЗОНТАЛЬНАЯ ПРОКРУТКА =====
             cursor_index = text_input.cursor_index()
             text_before_cursor = text_input.text[:cursor_index]
             current_line_start = text_before_cursor.rfind('\n') + 1
@@ -1319,22 +1412,24 @@ class LineNumberTextInput(BoxLayout):
             line_width = len(current_line) * char_width
 
             scroll_x = scroll_view.scroll_x
-            visible_left = scroll_x * max(0, line_width - sv_width)
-            visible_right = visible_left + sv_width
 
-            h_margin = char_width * 5
+            if line_width > sv_width:
+                max_scroll_x_offset = line_width - sv_width
+                visible_left = scroll_x * max_scroll_x_offset
+                visible_right = visible_left + sv_width
+            else:
+                visible_left = 0
+                visible_right = sv_width
+
+            h_margin = char_width * 3
 
             if cursor_x_pos < visible_left + h_margin:
-                target_scroll_x = max(0.0, (cursor_x_pos - sv_width / 2) / max(1, line_width - sv_width))
-                target_scroll_x = max(0.0, min(1.0, target_scroll_x))
-                new_scroll_x = scroll_x + (target_scroll_x - scroll_x) * 0.4
-                scroll_view.scroll_x = new_scroll_x
+                new_scroll_x = scroll_x - 0.06
+                scroll_view.scroll_x = max(0.0, new_scroll_x)
 
             elif cursor_x_pos + char_width > visible_right - h_margin:
-                target_scroll_x = min(1.0, (cursor_x_pos + char_width - sv_width / 2) / max(1, line_width - sv_width))
-                target_scroll_x = max(0.0, min(1.0, target_scroll_x))
-                new_scroll_x = scroll_x + (target_scroll_x - scroll_x) * 0.4
-                scroll_view.scroll_x = new_scroll_x
+                new_scroll_x = scroll_x + 0.06
+                scroll_view.scroll_x = min(1.0, new_scroll_x)
 
         except Exception as e:
             log_error(f"Auto scroll error: {e}")
