@@ -66,6 +66,320 @@ def _get_fold_ranges(lines):
     return ranges
 
 
+class SelectableTextInput(TextInput):
+    """TextInput с улучшенным выделением.
+
+    ПК: автоскролл отключен, скролл через колесико мыши с зажатой ЛКМ.
+    Android: удержание для начала выделения, ведение для расширения.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.disable_long_touch_menu = True
+        self._ide_selecting = False
+        self._ide_mouse_down = False
+        self._selection_origin = None  # Точка начала выделения
+        self._last_touch_pos = None  # Последняя позиция касания
+        self._is_mobile = platform in ('android', 'ios')
+        self._long_touch_triggered = False  # Для мобильных: сработало ли долгое нажатие
+        self._long_touch_event = None  # Таймер долгого нажатия
+        self._selection_extend_mode = False  # Режим расширения выделения
+
+    # ── Отключаем пузырьковое меню ────────────────────────────────────────
+    def _on_long_touch(self, *args):
+        return True
+
+    def long_touch(self, dt):
+        pass
+
+    def show_long_touch_menu(self, *args):
+        pass
+
+    def _show_selection_menu(self, *args):
+        pass
+
+    def _show_cut_copy_paste(self, *args, **kwargs):
+        pass
+
+    # ── Touch: улучшенное выделение ────────────────────────────────────
+    def on_touch_down(self, touch):
+        if hasattr(touch, 'button') and touch.button in (
+                'scrolldown', 'scrollup', 'scrollleft', 'scrollright'):
+            return False
+
+        # ПК: только левая кнопка
+        if not self._is_mobile:
+            if hasattr(touch, 'button') and touch.button != 'left':
+                return super().on_touch_down(touch)
+
+            self._ide_mouse_down = True
+            self._ide_selecting = False
+            self._last_touch_pos = (touch.x, touch.y)
+
+            result = super().on_touch_down(touch)
+
+            # Запоминаем точку начала выделения
+            self._selection_origin = self.cursor_index()
+            return result
+
+        # Android: долгое нажатие для начала выделения
+        else:
+            # Проверяем, не пытаемся ли мы расширить существующее выделение
+            if self._selection and self._selection_from != self._selection_to:
+                # Проверяем, близко ли касание к краям выделения
+                if self._is_near_selection_edge(touch):
+                    self._selection_extend_mode = True
+                    self._ide_selecting = True
+                    self._ide_mouse_down = True
+                    self._last_touch_pos = (touch.x, touch.y)
+
+                    # Определяем, от какого края расширять
+                    sel_from, sel_to = min(self._selection_from, self._selection_to), max(self._selection_from,
+                                                                                          self._selection_to)
+                    cursor_from = self.get_cursor_from_index(sel_from)
+                    cursor_to = self.get_cursor_from_index(sel_to)
+
+                    touch_cursor = self.get_cursor_from_xy(touch.x, touch.y)
+
+                    # Если ближе к началу - расширяем от начала, иначе от конца
+                    dist_to_from = abs(touch_cursor[1] - cursor_from[1])
+                    dist_to_to = abs(touch_cursor[1] - cursor_to[1])
+
+                    if dist_to_from < dist_to_to:
+                        self._selection_origin = sel_to  # Будем расширять от конца к началу
+                    else:
+                        self._selection_origin = sel_from  # Будем расширять от начала к концу
+
+                    result = super().on_touch_down(touch)
+                    return result
+
+            # Обычное долгое нажатие
+            self._long_touch_triggered = False
+            self._selection_extend_mode = False
+
+            # Запускаем таймер долгого нажатия (500ms)
+            if self._long_touch_event:
+                self._long_touch_event.cancel()
+            self._long_touch_event = Clock.schedule_once(
+                lambda dt: self._start_selection_from_long_touch(touch), 0.5
+            )
+
+            result = super().on_touch_down(touch)
+            return result
+
+    def on_touch_move(self, touch):
+        if hasattr(touch, 'button') and touch.button in (
+                'scrolldown', 'scrollup', 'scrollleft', 'scrollright'):
+            return False
+
+        # ПК: стандартное выделение без автоскролла
+        if not self._is_mobile:
+            if touch.grab_current is self:
+                self._ide_selecting = True
+                self._last_touch_pos = (touch.x, touch.y)
+
+            result = super().on_touch_move(touch)
+
+            # Обновляем выделение
+            if self._ide_selecting and self._selection_origin is not None:
+                try:
+                    cursor = self.get_cursor_from_xy(touch.x, touch.y)
+                    col, row = cursor
+                    lines = self.text.split('\n')
+                    new_idx = sum(len(lines[i]) + 1 for i in range(min(row, len(lines))))
+                    new_idx += min(col, len(lines[row]) if row < len(lines) else 0)
+
+                    self._selection_from = self._selection_origin
+                    self._selection_to = new_idx
+                    self._selection = True
+                    self._selection_finished = False
+                    self._update_graphics_selection()
+                except Exception:
+                    pass
+
+            return result
+
+        # Android: выделение с автоскроллом
+        else:
+            if self._long_touch_triggered or self._selection_extend_mode:
+                if touch.grab_current is self:
+                    self._ide_selecting = True
+                    self._last_touch_pos = (touch.x, touch.y)
+
+                    # Проверяем, нужно ли скроллить
+                    self._check_mobile_autoscroll(touch)
+
+                result = super().on_touch_move(touch)
+
+                # Обновляем выделение
+                if self._ide_selecting and self._selection_origin is not None:
+                    try:
+                        cursor = self.get_cursor_from_xy(touch.x, touch.y)
+                        col, row = cursor
+                        lines = self.text.split('\n')
+                        new_idx = sum(len(lines[i]) + 1 for i in range(min(row, len(lines))))
+                        new_idx += min(col, len(lines[row]) if row < len(lines) else 0)
+
+                        self._selection_from = self._selection_origin
+                        self._selection_to = new_idx
+                        self._selection = True
+                        self._selection_finished = False
+                        self._update_graphics_selection()
+                    except Exception:
+                        pass
+
+                return result
+            else:
+                return super().on_touch_move(touch)
+
+    def on_touch_up(self, touch):
+        if hasattr(touch, 'button') and touch.button in (
+                'scrolldown', 'scrollup', 'scrollleft', 'scrollright'):
+            return False
+
+        # Отменяем таймер долгого нажатия
+        if self._long_touch_event:
+            self._long_touch_event.cancel()
+            self._long_touch_event = None
+
+        if not self._is_mobile:
+            if hasattr(touch, 'button') and touch.button == 'left':
+                self._ide_mouse_down = False
+        else:
+            self._ide_mouse_down = False
+
+        had_sel_from = self._selection_from
+        had_sel_to = self._selection_to
+
+        result = super().on_touch_up(touch)
+
+        # Сохраняем выделение после отпускания
+        if self._ide_selecting and had_sel_from != had_sel_to:
+            a = min(had_sel_from, had_sel_to)
+            b = max(had_sel_from, had_sel_to)
+            if not self._selection or self._selection_from == self._selection_to:
+                self._selection_from = a
+                self._selection_to = b
+                self._selection = True
+                self._selection_finished = True
+                self._selection_touch = None
+                try:
+                    self.selection_text = self.text[a:b]
+                except Exception:
+                    self.selection_text = self.text[a:b]
+                self._update_graphics_selection()
+
+        # На мобильных не сбрасываем режим расширения сразу
+        if not self._is_mobile:
+            self._ide_selecting = False
+            self._selection_origin = None
+
+        self._long_touch_triggered = False
+
+        return result
+
+    def _start_selection_from_long_touch(self, touch):
+        """Обработчик долгого нажатия на мобильных"""
+        self._long_touch_triggered = True
+        self._ide_selecting = True
+        self._ide_mouse_down = True
+        self._last_touch_pos = (touch.x, touch.y)
+
+        # Получаем позицию для начала выделения
+        try:
+            cursor = self.get_cursor_from_xy(touch.x, touch.y)
+            col, row = cursor
+            lines = self.text.split('\n')
+            idx = sum(len(lines[i]) + 1 for i in range(min(row, len(lines))))
+            idx += min(col, len(lines[row]) if row < len(lines) else 0)
+            self._selection_origin = idx
+
+            # Сбрасываем старое выделение
+            self._selection = False
+            self._selection_from = idx
+            self._selection_to = idx
+            self._update_graphics_selection()
+        except Exception:
+            self._selection_origin = self.cursor_index()
+
+    def _is_near_selection_edge(self, touch):
+        """Проверяет, близко ли касание к краю существующего выделения"""
+        if not self._selection or self._selection_from == self._selection_to:
+            return False
+
+        try:
+            cursor = self.get_cursor_from_xy(touch.x, touch.y)
+            col, row = cursor
+            lines = self.text.split('\n')
+            touch_idx = sum(len(lines[i]) + 1 for i in range(min(row, len(lines))))
+            touch_idx += min(col, len(lines[row]) if row < len(lines) else 0)
+
+            sel_from = min(self._selection_from, self._selection_to)
+            sel_to = max(self._selection_from, self._selection_to)
+
+            # Проверяем, в пределах ли 2 строк от краев выделения
+            touch_line = row
+            from_line = self.text[:sel_from].count('\n')
+            to_line = self.text[:sel_to].count('\n')
+
+            return abs(touch_line - from_line) <= 2 or abs(touch_line - to_line) <= 2
+        except:
+            return False
+
+    def _check_mobile_autoscroll(self, touch):
+        """Проверяет и выполняет автоскролл на мобильных"""
+        if not hasattr(self, 'parent') or not isinstance(self.parent, ScrollView):
+            return
+
+        sv = self.parent
+        sv_top = sv.y + sv.height
+        sv_bot = sv.y
+        zone = dp(40)
+        speed = 0.02
+
+        # Вертикальный скролл
+        if touch.y < sv_bot + zone:
+            distance = 1.0 - max(0.0, (touch.y - sv_bot) / zone)
+            sv.scroll_y = max(0.0, sv.scroll_y - speed * distance)
+        elif touch.y > sv_top - zone:
+            distance = 1.0 - max(0.0, (sv_top - touch.y) / zone)
+            sv.scroll_y = min(1.0, sv.scroll_y + speed * distance)
+
+        # Горизонтальный скролл
+        sv_right = sv.x + sv.width
+        sv_left = sv.x
+        if touch.x < sv_left + zone:
+            distance = 1.0 - max(0.0, (touch.x - sv_left) / zone)
+            sv.scroll_x = max(0.0, sv.scroll_x - speed * distance)
+        elif touch.x > sv_right - zone:
+            distance = 1.0 - max(0.0, (sv_right - touch.x) / zone)
+            sv.scroll_x = min(1.0, sv.scroll_x + speed * distance)
+
+
+class NoMenuCodeInput(SelectableTextInput, CodeInput):
+    """CodeInput с улучшенным выделением"""
+
+    def __init__(self, **kwargs):
+        CodeInput.__init__(self, **kwargs)
+        # Инициализируем атрибуты из SelectableTextInput, если они не были установлены
+        if not hasattr(self, '_ide_selecting'):
+            self._ide_selecting = False
+        if not hasattr(self, '_ide_mouse_down'):
+            self._ide_mouse_down = False
+        if not hasattr(self, '_selection_origin'):
+            self._selection_origin = None
+        if not hasattr(self, '_last_touch_pos'):
+            self._last_touch_pos = None
+        if not hasattr(self, '_is_mobile'):
+            self._is_mobile = platform in ('android', 'ios')
+        if not hasattr(self, '_long_touch_triggered'):
+            self._long_touch_triggered = False
+        if not hasattr(self, '_long_touch_event'):
+            self._long_touch_event = None
+        if not hasattr(self, '_selection_extend_mode'):
+            self._selection_extend_mode = False
+
+
 class FoldingManager:
     """Управляет свёрнутыми блоками.
 
@@ -76,8 +390,8 @@ class FoldingManager:
     """
 
     def __init__(self):
-        self._orig_lines = []   # полный оригинал (список строк)
-        self._folds = {}        # {orig_start_line: {'end': orig_end, 'lines': [...]}}
+        self._orig_lines = []  # полный оригинал (список строк)
+        self._folds = {}  # {orig_start_line: {'end': orig_end, 'lines': [...]}}
         self._fold_ranges = []  # [(start, end), ...] — все доступные блоки
 
     def set_lines(self, lines):
@@ -172,57 +486,51 @@ class FoldingManager:
             self._fold_ranges = []
             return
 
-        old_folds = self._folds.copy()
-        old_orig_lines = self._orig_lines.copy()
+        old_folds = dict(self._folds)
+        old_orig_lines = list(self._orig_lines)
 
-        # === Основная идея: восстанавливаем оригинальные строки ===
         new_orig = []
         i = 0
-        while i < len(new_display_lines):
+        n = len(new_display_lines)
+
+        while i < n:
             line = new_display_lines[i]
 
-            if _FOLD_MARKER in line or '▶' in line:  # это свёрнутый блок
-                # Ищем соответствующий старый folded блок
-                found = False
+            if _FOLD_MARKER in line or '▶' in line:
+                # Пытаемся восстановить полный блок
+                restored = False
+                clean_header = line.split('▶')[0].strip() if '▶' in line else line.split(_FOLD_MARKER)[0].strip()
+                clean_header = clean_header.rstrip(' .')
+
                 for start, fold_data in old_folds.items():
+                    if start >= len(old_orig_lines):
+                        continue
                     old_header = old_orig_lines[start].rstrip()
-                    # Пытаемся сопоставить заголовок
-                    if (old_header in line or
-                            line.rstrip().startswith(old_header.rstrip()) or
-                            old_header.startswith(line.split('...')[0].strip())):
-                        # Восстанавливаем весь блок из старого оригинала
+                    if old_header == clean_header or old_header.startswith(clean_header):
                         end = fold_data['end']
                         new_orig.extend(old_orig_lines[start:end + 1])
                         i += 1
-                        found = True
+                        restored = True
                         break
 
-                if not found:
-                    # Не смогли восстановить — вставляем как обычную строку
-                    new_orig.append(line)
+                if not restored:
+                    # Если не нашли — вставляем как есть (заголовок)
+                    new_orig.append(clean_header)
                     i += 1
             else:
                 new_orig.append(line)
                 i += 1
 
-        # Обновляем состояние
         self._orig_lines = new_orig
-        self._folds = {}  # временно сбрасываем
-
-        # Пересчитываем возможные диапазоны сворачивания
+        self._folds = {}
         self._fold_ranges = _get_fold_ranges(self._orig_lines)
 
-        # Восстанавливаем сворачивания там, где заголовки совпадают
-        for start, fold_data in old_folds.items():
+        # Восстанавливаем сворачивания
+        for start, old_fold_data in old_folds.items():
             if start < len(self._orig_lines):
                 old_header = old_orig_lines[start].rstrip()
                 new_header = self._orig_lines[start].rstrip()
-
-                if (old_header == new_header or
-                        old_header.startswith(new_header) or
-                        new_header.startswith(old_header.split(':')[0] if ':' in old_header else old_header)):
-
-                    # Проверяем, что блок всё ещё существует
+                if old_header == new_header or old_header.startswith(new_header):
                     for s, e in self._fold_ranges:
                         if s == start:
                             self._folds[start] = {
@@ -245,8 +553,8 @@ class VirtualLinePanel(Widget):
         self._scroll_y = 1.0
         self._editor_height = 0
         self._redraw_ev = None
-        self._fold_ranges = []      # [(start, end), ...] оригинальные диапазоны
-        self._folded_set = set()    # {orig_line, ...} свёрнутые заголовки
+        self._fold_ranges = []  # [(start, end), ...] оригинальные диапазоны
+        self._folded_set = set()  # {orig_line, ...} свёрнутые заголовки
         self._display_to_orig = {}  # {display_i: orig_i} — для хит-теста
         self._on_fold_toggle = on_fold_toggle  # callback(orig_line)
         self.bind(pos=self._schedule_redraw, size=self._schedule_redraw)
@@ -304,7 +612,7 @@ class VirtualLinePanel(Widget):
             Rectangle(pos=self.pos, size=self.size)
 
             btn_size = min(lh * 0.55, dp(13))
-            btn_margin_right = dp(3)   # отступ кнопки от правого края панели
+            btn_margin_right = dp(3)  # отступ кнопки от правого края панели
             num_pad_right = btn_size + btn_margin_right * 2 + dp(2)  # цифры левее кнопки
 
             for di in range(first_visible, last_visible):
@@ -421,6 +729,15 @@ class LineNumberTextInput(BoxLayout):
         self._scroll_timer = None
         self._last_cursor_pos = None
 
+        self._is_selecting = False
+        self._keyboard_height = 0
+
+        # Привязываем обработчик скролла колесиком для ПК
+        if platform in ('win', 'linux', 'macosx', 'darwin'):
+            Window.bind(on_mousewheel=self._on_window_mousewheel)
+
+        self._is_mobile = platform in ('android', 'ios')
+
     # ------------------------------------------------------------------ folding
 
     def _on_fold_toggle(self, orig_line):
@@ -435,11 +752,9 @@ class LineNumberTextInput(BoxLayout):
             log_error(f"fold toggle error: {e}")
 
     def _apply_folding_to_editor(self, toggled_orig_line=None):
-        """Обновляет текст в text_input согласно текущему состоянию сворачивания.
-        toggled_orig_line — оригинальная строка только что свёрнутого/развёрнутого блока.
-        Курсор фиксируется на строке заголовка этого блока."""
+        """Обновляет текст в text_input согласно текущему состоянию сворачивания."""
         try:
-            # Запоминаем текущую display-строку курсора до изменений
+            # Запоминаем позицию курсора
             try:
                 old_cursor_idx = self.text_input.cursor_index()
                 old_display_line = self.text_input.text[:old_cursor_idx].count('\n')
@@ -447,36 +762,33 @@ class LineNumberTextInput(BoxLayout):
                 old_cursor_idx = 0
                 old_display_line = 0
 
+            # Получаем отображаемый текст (с маркерами)
             display_lines = self._folding.get_display_lines()
             new_text = '\n'.join(display_lines)
 
             self._ignore_text_change = True
             self.text_input.text = new_text
-            self.original_lines = display_lines
+            self.original_lines = display_lines  # ← здесь display!
             self._ignore_text_change = False
 
-            # Определяем display-строку, на которой должен оказаться курсор.
-            # Приоритет: строка только что свёрнутого/развёрнутого блока.
+            # Восстанавливаем курсор
             if toggled_orig_line is not None:
                 target_display_line = self._folding.orig_to_display(toggled_orig_line)
             else:
-                # Сохраняем ту же display-строку, что была (она не сдвигается
-                # при fold выше курсора; при fold ниже — вообще не меняется)
                 target_display_line = old_display_line
 
-            # Переводим номер display-строки в символьный индекс (начало строки)
             try:
                 lines_before = display_lines[:target_display_line]
                 char_pos = sum(len(l) + 1 for l in lines_before)
                 char_pos = min(char_pos, len(new_text))
                 self.text_input.cursor = self.text_input.get_cursor_from_index(char_pos)
-                # Прокручиваем к строке заголовка
                 Clock.schedule_once(lambda dt: self._scroll_to_display_line(target_display_line), 0.05)
             except:
                 pass
 
             self._refresh_virtual_panel()
             Clock.schedule_once(self._draw_indent_guides, 0.15)
+
         except Exception as e:
             log_error(f"_apply_folding_to_editor error: {e}")
 
@@ -618,11 +930,23 @@ class LineNumberTextInput(BoxLayout):
     # ------------------------------------------------------------------ public
 
     def get_text(self):
-        """Возвращает полный текст (с развёрнутыми блоками)."""
-        orig = self._folding.get_orig_lines()
-        if orig:
-            return '\n'.join(orig)
-        return self.text_input.text if hasattr(self, 'text_input') else ""
+        """Возвращает полный текст (с развёрнутыми блоками) — для запуска, сохранения и т.д."""
+        try:
+            orig_lines = self._folding.get_orig_lines()
+            if orig_lines:
+                full_code = '\n'.join(orig_lines)
+                print(f"[get_text] SUCCESS: Returned {len(full_code)} chars from original lines")
+                # Дополнительная проверка
+                if any('▶' in line or _FOLD_MARKER in line for line in orig_lines):
+                    print("[get_text] WARNING: Fold marker still in original lines!")
+                return full_code
+        except Exception as e:
+            log_error(f"get_text error: {e}")
+
+        # Fallback
+        fallback = self.text_input.text if hasattr(self, 'text_input') else ""
+        print(f"[get_text] Fallback used: {len(fallback)} chars")
+        return fallback
 
     def set_text(self, text):
         if hasattr(self, 'text_input'):
@@ -732,49 +1056,26 @@ class LineNumberTextInput(BoxLayout):
             font_size = dp(12)
         padding_top = 0
         padding_bottom = 0
-        if has_lexer and CodeInput:
-            self.text_input = CodeInput(
-                lexer=PythonLexer(),
-                style=style_name,
-                size_hint=(None, None),
-                font_size=font_size,
-                background_color=theme['editor_bg'],
-                foreground_color=theme['editor_text'],
-                cursor_color=theme['editor_cursor'],
-                selection_color=theme.get('editor_selection', (1, 1, 1, 0.1)),
-                multiline=True,
-                do_wrap=False,
-                padding=(dp(8), padding_top, dp(8), padding_bottom),
-                background_normal='',
-                background_active='',
 
-                # === Отключение контекстного меню и ручек выделения ===
-                use_bubble=False,  # главное — отключает всплывающее меню
-                use_handles=False,  # убирает ручки выделения
-                write_tab = False
+        # Создаём правильный тип TextInput
+        if has_lexer and CodeInput:
+            self.text_input = NoMenuCodeInput(
+                lexer=PythonLexer(), style=style_name, size_hint=(None, None),
+                font_size=font_size, background_color=theme['editor_bg'],
+                foreground_color=theme['editor_text'], cursor_color=theme['editor_cursor'],
+                selection_color=theme.get('editor_selection', (1, 1, 1, 0.1)), multiline=True,
+                do_wrap=False, padding=(dp(8), padding_top, dp(8), padding_bottom),
+                background_normal='', background_active=''
             )
         else:
-            self.text_input = TextInput(
-                size_hint=(None, None),
-                font_size=font_size,
-                background_color=theme['editor_bg'],
-                foreground_color=theme['editor_text'],
+            self.text_input = SelectableTextInput(
+                size_hint=(None, None), font_size=font_size,
+                background_color=theme['editor_bg'], foreground_color=theme['editor_text'],
                 cursor_color=theme['editor_cursor'],
-                selection_color=theme.get('editor_selection', (1, 1, 1, 0.1)),
-                multiline=True,
-                do_wrap=False,
-                padding=(dp(8), padding_top, dp(8), padding_bottom),
-                background_normal='',
-                background_active='',
-
-                # === Отключение контекстного меню и ручек выделения ===
-                use_bubble=False,
-                use_handles=False,
-                write_tab = False
+                selection_color=theme.get('editor_selection', (1, 1, 1, 0.1)), multiline=True,
+                do_wrap=False, padding=(dp(8), padding_top, dp(8), padding_bottom),
+                background_normal='', background_active=''
             )
-        # Принудительно отключаем контекстное меню
-        self.text_input.use_bubble = False
-        self.text_input.use_handles = False
 
         self._font_size = font_size
         self._padding_top = padding_top
@@ -785,15 +1086,17 @@ class LineNumberTextInput(BoxLayout):
         self.text_input.width = dp(400)
         scroll_bar_color = theme.get('scroll_bar_color', (0.4, 0.4, 0.4, 0.9))
         scroll_bar_inactive = theme.get('scroll_bar_inactive', (0.25, 0.25, 0.25, 0.6))
-        self.editor_scroll = ScrollView(size_hint=(1, 1), do_scroll_x=True, do_scroll_y=True,
-                                        scroll_type=['bars', 'content'], bar_width=dp(8), bar_color=scroll_bar_color,
-                                        bar_inactive_color=scroll_bar_inactive, effect_cls='ScrollEffect',
-                                        scroll_distance=dp(17), scroll_timeout=dp(33))
-        self.text_input.bind(on_touch_move=self._on_touch_move)
+        self.editor_scroll = ScrollView(
+            size_hint=(1, 1), do_scroll_x=True, do_scroll_y=True,
+            scroll_type=['bars', 'content'], bar_width=dp(8), bar_color=scroll_bar_color,
+            bar_inactive_color=scroll_bar_inactive, effect_cls='ScrollEffect',
+            scroll_distance=dp(17), scroll_timeout=dp(33)
+        )
         self.editor_scroll.add_widget(self.text_input)
         self.text_input.bind(text=self._on_text_change)
         self.text_input.bind(focus=self._on_focus)
         self.text_input.bind(on_touch_down=self._on_touch_down)
+        self.text_input.bind(on_touch_up=self._on_touch_up)
         self.text_input.bind(on_copy=self._on_copy)
         self._current_line_highlight = None
         self.text_input.bind(cursor=self._update_current_line_highlight)
@@ -847,14 +1150,10 @@ class LineNumberTextInput(BoxLayout):
 
     # ------------------------------------------------------------------ text change
 
-    # ------------------------------------------------------------------ copy with folded content
-
     def _get_real_selection_text(self):
         """Возвращает текст выделения с развёрнутым содержимым свёрнутых блоков."""
         try:
             ti = self.text_input
-            print(f"[DEBUG] _get_real_selection_text called")
-
             if not ti.selection_text:
                 return ti.selection_text
 
@@ -862,40 +1161,23 @@ class LineNumberTextInput(BoxLayout):
             if _FOLD_MARKER not in ti.selection_text:
                 return ti.selection_text
 
-            print("[DEBUG] Fold marker found, processing...")
-
-            # Получаем выделенный текст
             selected = ti.selection_text
             selected_lines = selected.split('\n')
-
-            # Получаем все оригинальные строки
             orig_lines = self._folding.get_orig_lines()
             folds = self._folding._folds
-
             result_lines = []
 
-            # Проходим по каждой строке выделения
             for line in selected_lines:
                 if _FOLD_MARKER in line:
-                    # Очищаем строку от маркеров сворачивания
-                    # Убираем всё после ▶ (включая пробелы и точки)
                     if '▶' in line:
-                        # Берём часть до ▶
                         clean_header = line.split('▶')[0].strip()
                     else:
                         clean_header = line.split(_FOLD_MARKER)[0].strip()
-
-                    # Убираем три точки и пробелы в конце
                     clean_header = clean_header.rstrip(' .')
-                    print(f"[DEBUG] Original line: '{line}'")
-                    print(f"[DEBUG] Clean header: '{clean_header}'")
 
-                    # Ищем этот заголовок в оригинальных строках
                     found_block = False
                     for i, orig_line in enumerate(orig_lines):
-                        # Сравниваем очищенные строки
                         if orig_line.rstrip() == clean_header:
-                            print(f"[DEBUG] Found exact match at index {i}")
                             if i in folds:
                                 fold_end = folds[i]['end']
                                 block_lines = orig_lines[i:fold_end + 1]
@@ -904,11 +1186,9 @@ class LineNumberTextInput(BoxLayout):
                                 break
 
                     if not found_block:
-                        # Пробуем найти без учета отступов
                         clean_stripped = clean_header.strip()
                         for i, orig_line in enumerate(orig_lines):
                             if orig_line.strip() == clean_stripped:
-                                print(f"[DEBUG] Found stripped match at index {i}")
                                 if i in folds:
                                     fold_end = folds[i]['end']
                                     block_lines = orig_lines[i:fold_end + 1]
@@ -917,56 +1197,27 @@ class LineNumberTextInput(BoxLayout):
                                     break
 
                     if not found_block:
-                        # Если всё равно не нашли, пробуем найти по началу строки
-                        for i, orig_line in enumerate(orig_lines):
-                            if orig_line.startswith(clean_stripped.split()[0] if clean_stripped else ''):
-                                print(f"[DEBUG] Found partial match at index {i}: '{orig_line}'")
-                                if i in folds:
-                                    fold_end = folds[i]['end']
-                                    block_lines = orig_lines[i:fold_end + 1]
-                                    result_lines.extend(block_lines)
-                                    found_block = True
-                                    break
-
-                    if not found_block:
-                        print(f"[DEBUG] No block found for: '{clean_header}'")
                         result_lines.append(line)
                 else:
                     result_lines.append(line)
 
             if result_lines:
-                result = '\n'.join(result_lines)
-                print(f"[DEBUG] Result length: {len(result)}")
-                print(f"[DEBUG] Result preview: {result[:200]}")
-                return result
-            else:
-                return selected
+                return '\n'.join(result_lines)
+            return selected
 
         except Exception as e:
             log_error(f"_get_real_selection_text error: {e}")
-            import traceback
-            traceback.print_exc()
             return self.text_input.selection_text
 
     def _on_copy(self, instance):
         """Перехватываем Ctrl+C / команду Copy: кладём в буфер развёрнутый текст."""
         try:
-            print("[DEBUG] _on_copy called!")  # ← ДОБАВИТЬ
-            print(f"[DEBUG] Selection text: '{self.text_input.selection_text}'")  # ← ДОБАВИТЬ
-
             real_text = self._get_real_selection_text()
-            print(f"[DEBUG] Real text length: {len(real_text)}")  # ← ДОБАВИТЬ
-            print(f"[DEBUG] Real text first 100 chars: '{real_text[:100]}'")  # ← ДОБАВИТЬ
-
             if real_text:
                 from kivy.core.clipboard import Clipboard
                 Clipboard.copy(real_text)
-                print("[DEBUG] Copied to clipboard!")  # ← ДОБАВИТЬ
-            else:
-                print("[DEBUG] No real text to copy!")  # ← ДОБАВИТЬ
         except Exception as e:
             log_error(f"_on_copy error: {e}")
-            print(f"[DEBUG] Exception in _on_copy: {e}")  # ← ДОБАВИТЬ
 
     def _on_text_change(self, instance, value):
         if self._ignore_text_change:
@@ -986,8 +1237,6 @@ class LineNumberTextInput(BoxLayout):
                 break
 
         if was_fold_line and old_line_count > 0:
-            # Пользователь редактирует свёрнутый блок
-            # Нужно сохранить состояние до редактирования
             print("[DEBUG] Editing a folded line - preserving fold state")
 
         # Синхронизируем FoldingManager с реальным редактированием
@@ -1252,172 +1501,137 @@ class LineNumberTextInput(BoxLayout):
             Clock.schedule_once(self._show_keyboard, 0.15)
         else:
             self._keyboard_visible = False
+            self._is_selecting = False
 
     def _on_touch_down(self, instance, touch):
+        """Колбэк bind — фокус, клавиатура, автодополнение."""
+        if hasattr(touch, 'button') and touch.button in (
+                'scrolldown', 'scrollup', 'scrollleft', 'scrollright'):
+            return False
         if instance.collide_point(*touch.pos):
             instance.focus = True
-            
-            try:
-                # get_cursor_from_xy всегда возвращает (col, row)
-                col, row = instance.get_cursor_from_xy(touch.x, touch.y)
-                # Вычисляем индекс из col, row
-                lines = instance.text.split('\n')
-                clicked_cursor = 0
-                for i in range(row):
-                    if i < len(lines):
-                        clicked_cursor += len(lines[i]) + 1
-                clicked_cursor += col
-                clicked_cursor = min(clicked_cursor, len(instance.text))
-            except:
-                clicked_cursor = instance.cursor_index()
-            
-            # Если уже есть выделение, проверяем — продолжаем или начинаем новое
-            if instance.selection_text:
-                sel_from = instance.selection_from
-                sel_to = instance.selection_to
-                
-                # Определяем, к какому краю ближе касание
-                dist_to_from = abs(clicked_cursor - sel_from)
-                dist_to_to = abs(clicked_cursor - sel_to)
-                
-                if dist_to_from <= dist_to_to:
-                    # Тянем за начало — якорь в конце
-                    self._selection_anchor = sel_to
-                    # select_text требует start < end
-                    start = min(clicked_cursor, self._selection_anchor)
-                    end = max(clicked_cursor, self._selection_anchor)
-                    instance.select_text(start, end)
-                else:
-                    # Тянем за конец — якорь в начале
-                    self._selection_anchor = sel_from
-                    start = min(self._selection_anchor, clicked_cursor)
-                    end = max(self._selection_anchor, clicked_cursor)
-                    instance.select_text(start, end)
-            else:
-                # Нет выделения — начинаем новое
-                self._selection_anchor = clicked_cursor
-            
+            self._is_selecting = True
             Clock.schedule_once(self._show_keyboard, 0.05)
             Clock.schedule_once(self._show_keyboard, 0.1)
-            return False
         else:
+            self._is_selecting = False
             app = App.get_running_app()
             if app and hasattr(app, 'autocomplete'):
                 app.autocomplete.hide()
-            return False
-    
-    
-    def _on_touch_move(self, instance, touch):
-        """Обрабатывает движение пальца при выделении текста"""
-        if not instance.focus:
-            return False
-    
-        try:
-            if hasattr(instance, 'get_cursor_from_xy'):
-                col, row = instance.get_cursor_from_xy(touch.x, touch.y)
-                lines = instance.text.split('\n')
-                new_cursor = 0
-                for i in range(row):
-                    if i < len(lines):
-                        new_cursor += len(lines[i]) + 1
-                new_cursor += col
-                new_cursor = min(new_cursor, len(instance.text))
-                
-                if self._selection_anchor is not None:
-                    # select_text требует start < end
-                    start = min(self._selection_anchor, new_cursor)
-                    end = max(self._selection_anchor, new_cursor)
-                    instance.select_text(start, end)
-                
-                self._auto_scroll_by_cursor(instance)
-    
-        except Exception as e:
-            log_error(f"Touch move error: {e}")
-    
         return False
 
-    def _auto_scroll_by_cursor(self, text_input):
-        """Прокручивает редактор, если курсор находится за пределами видимой области"""
-        if not text_input or not text_input.parent:
-            return
+    def _on_touch_up(self, instance, touch):
+        """Завершение — останавливаем автопрокрутку."""
+        self._is_selecting = False
+        return False
 
-        scroll_view = None
-        parent = text_input.parent
-        while parent:
-            from kivy.uix.scrollview import ScrollView
-            if isinstance(parent, ScrollView):
-                scroll_view = parent
-                break
-            parent = parent.parent
+    def _on_window_mousewheel(self, window, touch, delta):
+        """ПК: скролл колесом мыши + выделение при зажатой ЛКМ."""
+        if not self.text_input or not self.text_input.focus:
+            return False
 
-        if not scroll_view:
-            return
+        ti = self.text_input
+        sv = self.editor_scroll
 
+        # Проверяем, зажата ли левая кнопка мыши
+        mouse_buttons = getattr(Window, 'mouse_buttons', {})
+        left_pressed = (mouse_buttons.get('left', False) or
+                        getattr(ti, '_ide_mouse_down', False))
+
+        if left_pressed and getattr(ti, '_selection_origin', None) is not None:
+            # Режим выделения: скроллим и расширяем выделение
+            lines = ti.text.split('\n')
+            cursor_col, cursor_row = ti.cursor
+            step_l = 3  # строк за один щелчок колеса
+
+            if delta < 0:
+                new_row = min(cursor_row + step_l, len(lines) - 1)
+                sv.scroll_y = max(0.0, sv.scroll_y - 0.05)
+            else:
+                new_row = max(cursor_row - step_l, 0)
+                sv.scroll_y = min(1.0, sv.scroll_y + 0.05)
+
+            new_col = min(cursor_col, len(lines[new_row]) if new_row < len(lines) else 0)
+            new_idx = sum(len(lines[i]) + 1 for i in range(new_row)) + new_col
+
+            origin = ti._selection_origin
+
+            ti._cursor = [new_col, new_row]
+            ti._selection_from = origin
+            ti._selection_to = new_idx
+            ti._selection = True
+            ti._selection_finished = False
+            ti._update_graphics_selection()
+
+            # Обновляем last_touch_pos для колесика (чтобы _selection_origin не сбрасывался)
+            if hasattr(ti, '_last_touch_pos'):
+                # Эмулируем позицию для горизонтального скролла
+                sv_center_x = sv.x + sv.width / 2
+                sv_center_y = sv.y + sv.height / 2
+                ti._last_touch_pos = (sv_center_x, sv_center_y)
+        else:
+            # Обычный скролл без выделения
+            lh = getattr(ti, 'line_height', self._font_size * 1.2)
+            total_lines = max(1, len(ti.text.split('\n')))
+            total_h = total_lines * lh
+            sv_h = sv.height
+            if total_h > sv_h:
+                step = (lh * 3) / (total_h - sv_h)
+                if delta < 0:
+                    sv.scroll_y = max(0.0, sv.scroll_y - step)
+                else:
+                    sv.scroll_y = min(1.0, sv.scroll_y + step)
+
+        # Горизонтальный скролл (Shift + колесо или просто горизонтальное колесо)
+        if hasattr(touch, 'button') and 'scroll' in touch.button:
+            if 'left' in touch.button and sv.scroll_x is not None:
+                sv.scroll_x = max(0.0, sv.scroll_x - 0.05)
+            elif 'right' in touch.button and sv.scroll_x is not None:
+                sv.scroll_x = min(1.0, sv.scroll_x + 0.05)
+
+        return True
+
+    def _scroll_to_cursor(self, text_input):
+        """Прокручивает редактор так, чтобы курсор был виден"""
         try:
-            cursor_line = text_input.cursor[1]
-            line_height = text_input.line_height if hasattr(text_input, 'line_height') else self._font_size * 1.2
+            scroll_view = None
+            parent = text_input.parent
+            while parent:
+                if isinstance(parent, ScrollView):
+                    scroll_view = parent
+                    break
+                parent = parent.parent
 
-            sv_height = scroll_view.height
-            sv_width = scroll_view.width
+            if not scroll_view:
+                return
+
+            cursor_line = text_input.cursor[1]
+            line_height = getattr(text_input, 'line_height', self._font_size * 1.2)
 
             total_lines = max(1, len(text_input.text.split('\n')))
             total_height = total_lines * line_height
+            sv_height = scroll_view.height
 
+            if total_height <= sv_height:
+                return
+
+            cursor_y = cursor_line * line_height
             scroll_y = scroll_view.scroll_y
-            cursor_y_top = cursor_line * line_height
-
-            visible_top = (1.0 - scroll_y) * max(0, total_height - sv_height)
+            max_offset = total_height - sv_height
+            visible_top = (1.0 - scroll_y) * max_offset
             visible_bottom = visible_top + sv_height
 
-            scroll_margin = line_height * 1.5
-            scroll_speed = 0.03
+            margin = line_height * 2
 
-            # Вертикальная прокрутка
-            if cursor_y_top < visible_top + scroll_margin:
-                target_scroll = 1.0 - (cursor_y_top - sv_height / 2) / max(1, total_height - sv_height)
-                target_scroll = max(0.0, min(1.0, target_scroll))
-                new_scroll = scroll_y + (target_scroll - scroll_y) * 0.3
-                scroll_view.scroll_y = new_scroll
-
-            elif cursor_y_top + line_height > visible_bottom - scroll_margin:
-                target_scroll = 1.0 - (cursor_y_top + line_height - sv_height / 2) / max(1, total_height - sv_height)
-                target_scroll = max(0.0, min(1.0, target_scroll))
-                new_scroll = scroll_y + (target_scroll - scroll_y) * 0.3
-                scroll_view.scroll_y = new_scroll
-
-            # Горизонтальная прокрутка
-            cursor_index = text_input.cursor_index()
-            text_before_cursor = text_input.text[:cursor_index]
-            current_line_start = text_before_cursor.rfind('\n') + 1
-            cursor_col = cursor_index - current_line_start
-
-            lines = text_input.text.split('\n')
-            current_line = lines[cursor_line] if cursor_line < len(lines) else ""
-
-            char_width = text_input.font_size * 0.6
-            cursor_x_pos = cursor_col * char_width
-            line_width = len(current_line) * char_width
-
-            scroll_x = scroll_view.scroll_x
-            visible_left = scroll_x * max(0, line_width - sv_width)
-            visible_right = visible_left + sv_width
-
-            h_margin = char_width * 5
-
-            if cursor_x_pos < visible_left + h_margin:
-                target_scroll_x = max(0.0, (cursor_x_pos - sv_width / 2) / max(1, line_width - sv_width))
-                target_scroll_x = max(0.0, min(1.0, target_scroll_x))
-                new_scroll_x = scroll_x + (target_scroll_x - scroll_x) * 0.4
-                scroll_view.scroll_x = new_scroll_x
-
-            elif cursor_x_pos + char_width > visible_right - h_margin:
-                target_scroll_x = min(1.0, (cursor_x_pos + char_width - sv_width / 2) / max(1, line_width - sv_width))
-                target_scroll_x = max(0.0, min(1.0, target_scroll_x))
-                new_scroll_x = scroll_x + (target_scroll_x - scroll_x) * 0.4
-                scroll_view.scroll_x = new_scroll_x
+            if cursor_y < visible_top + margin:
+                new_scroll_y = 1.0 - (max(0, cursor_y - margin) / max_offset)
+                scroll_view.scroll_y = max(0.0, min(1.0, new_scroll_y))
+            elif cursor_y + line_height > visible_bottom - margin:
+                new_scroll_y = 1.0 - (min(max_offset, cursor_y + line_height + margin - sv_height) / max_offset)
+                scroll_view.scroll_y = max(0.0, min(1.0, new_scroll_y))
 
         except Exception as e:
-            log_error(f"Auto scroll error: {e}")
+            log_error(f"_scroll_to_cursor error: {e}")
 
     def _show_keyboard(self, dt=None):
         try:
@@ -1521,56 +1735,6 @@ class LineNumberTextInput(BoxLayout):
         except:
             pass
 
-    # ------------------------------------------------------------------ recreate code input
-
-    def _recreate_code_input(self, theme):
-        try:
-            from pygments.lexers import PythonLexer
-            from kivy.uix.codeinput import CodeInput
-            saved_text = self.text_input.text if self.text_input else ''
-            old_width = self.text_input.width if self.text_input else dp(400)
-            cursor_pos = self.text_input.cursor_index() if self.text_input else 0
-            self.text_input.unbind(text=self._on_text_change)
-            self.text_input.unbind(minimum_height=self.text_input.setter('height'))
-            if hasattr(self.text_input, 'minimum_width'):
-                self.text_input.unbind(minimum_width=self.text_input.setter('width'))
-            self.editor_scroll.remove_widget(self.text_input)
-            style_name = ThemeManager.get_syntax_style()
-            self.current_syntax_style = style_name
-            self.text_input = CodeInput(lexer=PythonLexer(), style=style_name, size_hint=(None, None),
-                                        font_size=self._font_size, background_color=theme['editor_bg'],
-                                        foreground_color=theme['editor_text'], cursor_color=theme['editor_cursor'],
-                                        selection_color=theme.get('editor_selection', (1, 1, 1, 0.1)), multiline=True,
-                                        do_wrap=False, padding=(dp(8), self._padding_top, dp(8), self._padding_bottom),
-                                        background_normal='', background_active='')
-            self.text_input.bind(text=self._on_text_change, minimum_height=self.text_input.setter('height'))
-            if hasattr(self.text_input, 'minimum_width'):
-                self.text_input.bind(minimum_width=self.text_input.setter('width'))
-            self._current_line_highlight = None
-            self.text_input.bind(cursor=self._update_current_line_highlight)
-            self.editor_scroll.add_widget(self.text_input)
-            self.text_input.text = saved_text
-            self.text_input.width = old_width
-            if hasattr(self.text_input, '_trigger_refresh_text'):
-                Clock.schedule_once(lambda dt: self.text_input._trigger_refresh_text(), 0.1)
-
-            def restore_cursor(dt):
-                try:
-                    if cursor_pos <= len(self.text_input.text):
-                        self.text_input.cursor = self.text_input.get_cursor_from_index(cursor_pos)
-                except:
-                    pass
-
-            Clock.schedule_once(restore_cursor, 0.05)
-            if saved_text:
-                self.original_lines = saved_text.split('\n')
-                self._folding.apply_display_edit(self.original_lines)
-                self._refresh_virtual_panel()
-        except ImportError as e:
-            log_error(f"Cannot recreate CodeInput: {e}")
-        except Exception as e:
-            log_error(f"Error in _recreate_code_input: {e}")
-
     # ------------------------------------------------------------------ cleanup
 
     def cleanup(self):
@@ -1582,6 +1746,9 @@ class LineNumberTextInput(BoxLayout):
         Window.unbind(on_keyboard=self._on_window_keyboard)
         Window.unbind(on_key_down=self._on_window_key_down)
 
+        if platform in ('win', 'linux', 'macosx', 'darwin'):
+            Window.unbind(on_mousewheel=self._on_window_mousewheel)
+
     def debug_folding(self):
         """Отладочный метод для проверки сворачивания"""
         print("=== FOLDING DEBUG ===")
@@ -1590,27 +1757,3 @@ class LineNumberTextInput(BoxLayout):
         print(f"Folds: {self._folding._folds}")
         print(f"Fold ranges: {self._folding.get_fold_ranges()}")
         print("===================")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
