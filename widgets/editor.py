@@ -385,7 +385,7 @@ class LineNumberTextInput(BoxLayout):
         self._indent_guides = []
         self._undo_stack = []
         self._redo_stack = []
-        self._undo_max = 200
+        self._undo_max = 50
         self._undo_lock = False
         self._redraw_pending = False
         self._indent_guides_pending = False
@@ -416,6 +416,15 @@ class LineNumberTextInput(BoxLayout):
         self._undo_debounce_ev = None
         self._undo_last_text = ''
 
+        self._highlight_timer = None
+
+        self._last_scroll_time = 0
+
+        self._cached_display_to_orig = {}
+        self._display_map_version = 0
+
+        self._touch_start_time = 0
+
     # ------------------------------------------------------------------ folding
 
     def _on_fold_toggle(self, orig_line):
@@ -440,6 +449,7 @@ class LineNumberTextInput(BoxLayout):
             self._ignore_text_change = True
             self.text_input.text = new_text
             self.original_lines = display_lines
+            self._display_map_version = 0
             self._ignore_text_change = False
 
             if toggled_orig_line is not None:
@@ -793,12 +803,41 @@ class LineNumberTextInput(BoxLayout):
 
     def _bind_scroll_sync(self, *args):
         def sync_scroll(instance, value):
+            now = time.time()
+            # Не чаще 15 раз в секунду
+            if now - self._last_scroll_time < 0.066:
+                return
+            self._last_scroll_time = now
             self._refresh_virtual_panel()
             Clock.unschedule(self._draw_indent_guides)
             Clock.schedule_once(self._draw_indent_guides, 0.1)
 
         self.editor_scroll.bind(scroll_y=sync_scroll)
         self.editor_scroll.bind(size=lambda *a: self._refresh_virtual_panel())
+
+    def _get_display_to_orig(self):
+        """Возвращает кешированный display_to_orig"""
+        # Вычисляем текущую версию на основе состояния
+        orig_lines = self._folding.get_orig_lines()
+        folds = self._folding._folds
+        current_version = (len(orig_lines), len(folds), id(orig_lines))
+
+        # Если версия изменилась — перестраиваем
+        if current_version != self._display_map_version:
+            self._cached_display_to_orig = {}
+            oi = 0
+            di = 0
+            n_orig = len(orig_lines)
+            while oi < n_orig:
+                self._cached_display_to_orig[di] = oi
+                if oi in folds:
+                    oi = folds[oi]['end'] + 1
+                else:
+                    oi += 1
+                di += 1
+            self._display_map_version = current_version
+
+        return self._cached_display_to_orig
 
     def _refresh_virtual_panel(self, *args):
         if not hasattr(self, 'line_panel') or not isinstance(self.line_panel, VirtualLinePanel):
@@ -808,21 +847,6 @@ class LineNumberTextInput(BoxLayout):
         scroll_y = getattr(self.editor_scroll, 'scroll_y', 1.0)
         editor_h = self.editor_scroll.height
 
-        # Rebuild display_to_orig mapping
-        display_to_orig = {}
-        oi = 0
-        di = 0
-        orig_lines = self._folding.get_orig_lines()
-        folds = self._folding._folds
-        n_orig = len(orig_lines)
-        while oi < n_orig:
-            display_to_orig[di] = oi
-            if oi in folds:
-                oi = folds[oi]['end'] + 1
-            else:
-                oi += 1
-            di += 1
-
         self.line_panel.update(
             line_count=len(self.original_lines),
             line_height=lh,
@@ -831,8 +855,8 @@ class LineNumberTextInput(BoxLayout):
             scroll_y=scroll_y,
             editor_height=editor_h,
             fold_ranges=self._folding.get_fold_ranges(),
-            folded_set=set(folds.keys()),
-            display_to_orig=display_to_orig,
+            folded_set=set(self._folding._folds.keys()),
+            display_to_orig = self._get_display_to_orig(),
         )
 
     # ------------------------------------------------------------------ text change
@@ -911,6 +935,7 @@ class LineNumberTextInput(BoxLayout):
 
         new_lines = value.split('\n')
         self.original_lines = new_lines
+        self._display_map_version = 0
         self._folding.apply_display_edit(new_lines)
         new_line_count = len(new_lines)
 
@@ -1264,16 +1289,20 @@ class LineNumberTextInput(BoxLayout):
         self.text_input.bind(cursor=self._on_cursor_for_scroll)
 
     def _on_editor_touch_down(self, instance, touch):
-        """Запоминаем начало касания (потенциальное выделение)"""
+        """Запоминаем начало касания"""
         if instance.collide_point(*touch.pos):
+            self._touch_start_time = time.time()
             self._is_selecting = False
             self._last_touch_pos = touch.pos
         return False
 
     def _on_editor_touch_move(self, instance, touch):
-        """При движении пальца/мыши запускаем автоскролл если нужно"""
+        """При движении запускаем автоскролл только если это не долгий тап"""
+        # Если прошло больше 0.3 сек — это долгий тап, не запускаем автоскролл
+        if time.time() - self._touch_start_time > 0.3:
+            return False
+
         if not instance.collide_point(*touch.pos) or self._last_touch_pos is None:
-            # Палец вышел за пределы редактора — всё равно скроллим
             self._last_touch_pos = touch.pos
             self._is_selecting = True
             self._schedule_auto_scroll()
@@ -1368,8 +1397,7 @@ class LineNumberTextInput(BoxLayout):
     def _do_auto_scroll(self, dt):
         """
         Вызывается 30 раз в секунду пока идёт выделение.
-        Вычисляет скорость скролла исходя из того, насколько далеко
-        курсор/палец от края видимой области.
+        Скролл следует за направлением движения пальца.
         """
         if not self._is_selecting or self._last_touch_pos is None:
             self._stop_auto_scroll()
@@ -1385,47 +1413,45 @@ class LineNumberTextInput(BoxLayout):
             sv_w = sv.width
             sv_h = sv.height
 
-            # Зона "мёртвой зоны" у края — здесь скролл не идёт
+            # Зона активации автоскролла у краёв
             dead = dp(40)
-            # Максимальная скорость скролла (доля от высоты/ширины за тик)
-            max_speed_v = 0.015
-            max_speed_h = 0.012
+            # Максимальная скорость скролла
+            max_speed_v = 0.02
+            max_speed_h = 0.015
 
             scroll_dy = 0.0
             scroll_dx = 0.0
 
             # ---- Вертикаль ----
-            rel_y_from_top = sv_y + sv_h - touch_y  # расстояние от верхнего края
-            rel_y_from_bot = touch_y - sv_y  # расстояние от нижнего края
+            # scroll_y = 1.0 (верх), scroll_y = 0.0 (низ)
 
-            if touch_y > sv_y + sv_h - dead:
-                # Палец у верхнего края — скроллим вверх (scroll_y растёт)
-                factor = min(1.0, (touch_y - (sv_y + sv_h - dead)) / dead)
-                scroll_dy = max_speed_v * factor
-            elif touch_y < sv_y + dead:
-                # Палец у нижнего края — скроллим вниз (scroll_y уменьшается)
+            if touch_y < sv_y + dead:
+                # Палец у ВЕРХНЕГО края — скроллим ВВЕРХ
                 factor = min(1.0, (sv_y + dead - touch_y) / dead)
+                scroll_dy = max_speed_v * factor
+            elif touch_y > sv_y + sv_h - dead:
+                # Палец у НИЖНЕГО края — скроллим ВНИЗ
+                factor = min(1.0, (touch_y - (sv_y + sv_h - dead)) / dead)
                 scroll_dy = -max_speed_v * factor
 
             # ---- Горизонталь ----
             if sv.do_scroll_x:
-                rel_x_from_right = sv_x + sv_w - touch_x
-                rel_x_from_left = touch_x - sv_x
-
-                if touch_x > sv_x + sv_w - dead:
-                    # Палец у правого края — скроллим вправо (scroll_x растёт)
-                    factor = min(1.0, (touch_x - (sv_x + sv_w - dead)) / dead)
-                    scroll_dx = max_speed_h * factor
-                elif touch_x < sv_x + dead:
-                    # Палец у левого края — скроллим влево (scroll_x уменьшается)
+                if touch_x < sv_x + dead:
+                    # Палец у ЛЕВОГО края — скроллим ВЛЕВО
                     factor = min(1.0, (sv_x + dead - touch_x) / dead)
                     scroll_dx = -max_speed_h * factor
+                elif touch_x > sv_x + sv_w - dead:
+                    # Палец у ПРАВОГО края — скроллим ВПРАВО
+                    factor = min(1.0, (touch_x - (sv_x + sv_w - dead)) / dead)
+                    scroll_dx = max_speed_h * factor
 
             # Применяем скролл
             if scroll_dy != 0:
-                sv.scroll_y = max(0.0, min(1.0, sv.scroll_y + scroll_dy))
+                new_y = sv.scroll_y + scroll_dy
+                sv.scroll_y = max(0.0, min(1.0, new_y))
             if scroll_dx != 0:
-                sv.scroll_x = max(0.0, min(1.0, sv.scroll_x + scroll_dx))
+                new_x = sv.scroll_x + scroll_dx
+                sv.scroll_x = max(0.0, min(1.0, new_x))
 
             # Синхронизируем панель номеров строк
             if scroll_dy != 0:
@@ -1478,17 +1504,22 @@ class LineNumberTextInput(BoxLayout):
             return
         if not self.original_lines:
             return
+
         ti = self.text_input
         total_lines = len(self.original_lines)
         lh = ti.line_height if hasattr(ti, 'line_height') else self._font_size * 1.2
         char_width = self._font_size * 0.6
         left_padding = dp(8)
-        while self._indent_guides:
+
+        # Удаляем старые линии
+        for guide in self._indent_guides:
             try:
-                guide = self._indent_guides.pop()
                 ti.canvas.after.remove(guide)
             except:
                 pass
+        self._indent_guides = []
+
+        # Вычисляем видимую область
         scroll_y = 1.0
         parent = ti.parent
         while parent:
@@ -1496,18 +1527,21 @@ class LineNumberTextInput(BoxLayout):
                 scroll_y = parent.scroll_y
                 break
             parent = parent.parent
+
         editor_height = ti.parent.height if ti.parent else 800
         visible_lines_count = int(editor_height / lh) + 1
         first_visible = max(0, int((1.0 - scroll_y) * total_lines))
         first_line = max(0, first_visible - 50)
         last_line = min(total_lines, first_visible + visible_lines_count + 50)
+
         theme = ThemeManager.get_theme()
         guide_color = theme.get('indent_guide_color', (0.35, 0.38, 0.40, 0.30))
+
+        # Создаём отдельные линии для каждой направляющей
         for line_idx in range(first_line, last_line):
             if line_idx >= total_lines:
                 break
             line_text = self.original_lines[line_idx]
-            # Fast indent count: len(line) - len(lstrip()) avoids char-by-char loop
             indent = len(line_text) - len(line_text.lstrip(' '))
             if indent < 4:
                 continue
@@ -1526,6 +1560,19 @@ class LineNumberTextInput(BoxLayout):
     # ------------------------------------------------------------------ current line highlight
 
     def _update_current_line_highlight(self, instance, cursor_pos):
+        if not hasattr(self, 'text_input') or not self.text_input:
+            return
+
+        # Debounce: отменяем предыдущий вызов
+        if self._highlight_timer:
+            self._highlight_timer.cancel()
+
+        # Планируем через 0.05 сек
+        self._highlight_timer = Clock.schedule_once(
+            lambda dt: self._do_update_current_line_highlight(), 0.05
+        )
+
+    def _do_update_current_line_highlight(self):
         if not hasattr(self, 'text_input') or not self.text_input:
             return
         if self._current_line_highlight:
