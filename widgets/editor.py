@@ -30,25 +30,34 @@ def _get_fold_ranges(lines):
     ranges = []
     n = len(lines)
     i = 0
+    _marker = _FOLD_MARKER
     while i < n:
         line = lines[i]
-        stripped = line.rstrip()
-        if not stripped or _FOLD_MARKER in line or '▶' in line:
+        # Fast path: empty lines or already-folded markers
+        if not line or not line.strip():
+            i += 1
+            continue
+        if _marker in line:
             i += 1
             continue
 
-        indent = len(line) - len(line.lstrip())
         lstripped = line.lstrip()
+        stripped = lstripped.rstrip()
+        if not stripped:
+            i += 1
+            continue
 
-        if stripped.endswith(':') and not lstripped.startswith('#'):
+        indent = len(line) - len(lstripped)
+
+        if stripped.endswith(':') and stripped[0] != '#':
             block_end = i
             j = i + 1
             while j < n:
                 jline = lines[j]
-                jstripped = jline.strip()
-                if not jstripped:
+                if not jline or not jline.strip():
                     j += 1
                     continue
+                # Inline indent check — avoid lstrip() call
                 jindent = len(jline) - len(jline.lstrip())
                 if jindent > indent:
                     block_end = j
@@ -57,9 +66,7 @@ def _get_fold_ranges(lines):
                     break
             if block_end > i:
                 ranges.append((i, block_end))
-            i += 1
-        else:
-            i += 1
+        i += 1
     return ranges
 
 
@@ -265,13 +272,20 @@ class VirtualLinePanel(Widget):
 
         from kivy.core.text import Label as CoreLabel
 
+        # Texture cache keyed by (line_number, font_size) to avoid re-creating
+        # CoreLabel objects for unchanged line numbers on every redraw.
+        if not hasattr(self, '_num_tex_cache'):
+            self._num_tex_cache = {}
+        cache = self._num_tex_cache
+        fs = self._font_size
+
+        btn_size = min(lh * 0.55, dp(13))
+        btn_margin_right = dp(3)
+        num_pad_right = btn_size + btn_margin_right * 2 + dp(2)
+
         with self.canvas:
             Color(*bg_color)
             Rectangle(pos=self.pos, size=self.size)
-
-            btn_size = min(lh * 0.55, dp(13))
-            btn_margin_right = dp(3)
-            num_pad_right = btn_size + btn_margin_right * 2 + dp(2)
 
             for di in range(first_visible, last_visible):
                 orig_i = self._display_to_orig.get(di, di)
@@ -282,13 +296,16 @@ class VirtualLinePanel(Widget):
                 is_foldable = orig_i in foldable_orig
                 is_folded = orig_i in self._folded_set
 
-                Color(*text_color)
-                num_text = str(orig_i + 1)
-                lbl = CoreLabel(text=num_text, font_size=self._font_size,
-                                halign='right', valign='middle')
-                lbl.refresh()
-                tex = lbl.texture
+                # --- line number texture (cached) ---
+                cache_key = (orig_i + 1, fs)
+                if cache_key not in cache:
+                    lbl = CoreLabel(text=str(orig_i + 1), font_size=fs,
+                                    halign='right', valign='middle')
+                    lbl.refresh()
+                    cache[cache_key] = lbl.texture
+                tex = cache[cache_key]
                 if tex:
+                    Color(*text_color)
                     tw, th = tex.size
                     tx = self.x + panel_width - num_pad_right - tw
                     ty = y + (lh - th) / 2
@@ -303,15 +320,26 @@ class VirtualLinePanel(Widget):
                                          radius=[dp(2)])
                     Color(*fold_color)
                     arrow = '▶' if is_folded else '▼'
-                    albl = CoreLabel(text=arrow, font_name='SourceBold', font_size=btn_size * 0.85,
-                                     halign='center', valign='middle')
-                    albl.refresh()
-                    atex = albl.texture
+                    # Arrow textures are small; cache them too
+                    arrow_key = (arrow, btn_size)
+                    if arrow_key not in cache:
+                        albl = CoreLabel(text=arrow, font_name='SourceBold',
+                                         font_size=btn_size * 0.85,
+                                         halign='center', valign='middle')
+                        albl.refresh()
+                        cache[arrow_key] = albl.texture
+                    atex = cache[arrow_key]
                     if atex:
                         aw, ah = atex.size
                         ax = btn_x + (btn_size - aw) / 2
                         ay = btn_y + (btn_size - ah) / 2
                         Rectangle(texture=atex, pos=(ax, ay), size=(aw, ah))
+
+        # Limit cache size to avoid unbounded growth (keep last 1000 entries)
+        if len(cache) > 1000:
+            keys = list(cache.keys())
+            for k in keys[:200]:
+                del cache[k]
 
     def on_touch_down(self, touch):
         if not self.collide_point(*touch.pos):
@@ -372,7 +400,6 @@ class LineNumberTextInput(BoxLayout):
         self._ignore_text_change = False
 
         self._create_ui()
-        self._debug_scroll()
         self.apply_theme(ThemeManager.get_theme())
         Window.bind(on_keyboard=self._on_window_keyboard)
         self.text_input.bind(on_key_down=self._on_key_down)
@@ -540,9 +567,10 @@ class LineNumberTextInput(BoxLayout):
                         cursor_pos = 0
                     self.text_input.style = new_style
                     self.text_input.text = ''
-                    chunk_size = 5000
-                    for i in range(0, len(current_text), chunk_size):
-                        self.text_input.text += current_text[i:i + chunk_size]
+                    self.text_input.text = current_text
+                    # Invalidate line-number texture cache after style change
+                    if hasattr(self, 'line_panel') and hasattr(self.line_panel, '_num_tex_cache'):
+                        self.line_panel._num_tex_cache.clear()
 
                     def restore_cursor(dt):
                         try:
@@ -780,6 +808,7 @@ class LineNumberTextInput(BoxLayout):
         scroll_y = getattr(self.editor_scroll, 'scroll_y', 1.0)
         editor_h = self.editor_scroll.height
 
+        # Rebuild display_to_orig mapping
         display_to_orig = {}
         oi = 0
         di = 0
@@ -802,7 +831,7 @@ class LineNumberTextInput(BoxLayout):
             scroll_y=scroll_y,
             editor_height=editor_h,
             fold_ranges=self._folding.get_fold_ranges(),
-            folded_set=set(self._folding._folds.keys()),
+            folded_set=set(folds.keys()),
             display_to_orig=display_to_orig,
         )
 
@@ -905,7 +934,9 @@ class LineNumberTextInput(BoxLayout):
                 self._redraw_pending = True
                 Clock.schedule_once(self._delayed_update_panel, 0.05)
         else:
-            self._refresh_virtual_panel()
+            # Only schedule a refresh if not already pending from _delayed_update_panel
+            if not self._redraw_pending:
+                self._refresh_virtual_panel()
 
         if self._text_width_ev:
             self._text_width_ev.cancel()
@@ -946,17 +977,80 @@ class LineNumberTextInput(BoxLayout):
         self._redo_stack.clear()
 
     def _ensure_trailing(self, dt):
+        """Вызывает добавление пустых строк"""
         self._ensure_trailing_empty_lines()
 
     def _ensure_trailing_empty_lines(self):
+        """Умное добавление пустых строк в конце для прокрутки над клавиатурой"""
         if self._ensuring_trailing:
             return
         if getattr(self, '_tab_indenting', False):
             return
-        TARGET = 45
+
+        # Умный TARGET: меньше строк если клавиатура не видна
+        if self._keyboard_visible:
+            TARGET = 20  # достаточно для прокрутки над клавиатурой
+        else:
+            TARGET = 5  # минимальный запас когда клавиатуры нет
+
         if not self.original_lines:
             return
 
+        # Находим последнюю непустую строку
+        last_non_empty = -1
+        for i in range(len(self.original_lines) - 1, -1, -1):
+            if self.original_lines[i].strip() != '':
+                last_non_empty = i
+                break
+
+        if last_non_empty == -1:
+            return
+
+        # Сколько пустых строк в конце
+        trailing = len(self.original_lines) - last_non_empty - 1
+
+        # Если уже достаточно, выходим
+        if trailing >= TARGET:
+            return
+
+        self._ensuring_trailing = True
+        try:
+            # Сохраняем позицию курсора
+            cursor_index = self.text_input.cursor_index()
+            lines_to_add = TARGET - trailing
+
+            # Добавляем строки
+            self.text_input.unbind(text=self._on_text_change)
+            self.text_input.text = self.text_input.text + '\n' * lines_to_add
+            self.text_input.bind(text=self._on_text_change)
+
+            # Обновляем внутреннее состояние
+            self.original_lines = self.text_input.text.split('\n')
+
+            # Восстанавливаем курсор (если он был в конце)
+            try:
+                if cursor_index <= len(self.text_input.text):
+                    self.text_input.cursor = self.text_input.get_cursor_from_index(cursor_index)
+            except:
+                pass
+
+        except Exception as e:
+            log_error(f"_ensure_trailing_empty_lines error: {e}")
+        finally:
+            self._ensuring_trailing = False
+
+    def _trim_trailing_lines(self, dt=None):
+        """Обрезает лишние пустые строки когда клавиатура скрыта"""
+        if self._ensuring_trailing:
+            return
+        if getattr(self, '_tab_indenting', False):
+            return
+        if not self.original_lines:
+            return
+
+        MAX_TRAILING_WHEN_HIDDEN = 3
+
+        # Находим последнюю непустую строку
         last_non_empty = -1
         for i in range(len(self.original_lines) - 1, -1, -1):
             if self.original_lines[i].strip() != '':
@@ -967,27 +1061,31 @@ class LineNumberTextInput(BoxLayout):
             return
 
         trailing = len(self.original_lines) - last_non_empty - 1
-        if trailing >= TARGET:
+        if trailing <= MAX_TRAILING_WHEN_HIDDEN:
             return
+
+        to_remove = trailing - MAX_TRAILING_WHEN_HIDDEN
 
         self._ensuring_trailing = True
         try:
             cursor_index = self.text_input.cursor_index()
-            lines_to_add = TARGET - trailing
-            current_text = self.text_input.text
+            lines = self.original_lines[:last_non_empty + MAX_TRAILING_WHEN_HIDDEN + 1]
+            new_text = '\n'.join(lines)
 
             self.text_input.unbind(text=self._on_text_change)
-            self.text_input.text = current_text + '\n' * lines_to_add
+            self.text_input.text = new_text
             self.text_input.bind(text=self._on_text_change)
 
-            self.original_lines = self.text_input.text.split('\n')
+            self.original_lines = new_text.split('\n')
 
-            # Восстанавливаем курсор без Clock — сразу и без побочных эффектов
+            # Восстанавливаем курсор
             try:
-                safe_cursor = min(cursor_index, len(self.text_input.text))
-                self.text_input.cursor = self.text_input.get_cursor_from_index(safe_cursor)
+                if cursor_index <= len(new_text):
+                    self.text_input.cursor = self.text_input.get_cursor_from_index(cursor_index)
             except:
                 pass
+        except Exception as e:
+            log_error(f"_trim_trailing_lines error: {e}")
         finally:
             self._ensuring_trailing = False
 
@@ -1014,16 +1112,17 @@ class LineNumberTextInput(BoxLayout):
         if not self.original_lines:
             return
         n = len(self.original_lines)
-        cached = getattr(self, '_cached_max_line_length', 0)
         cached_n = getattr(self, '_cached_max_line_n', -1)
         if cached_n != n:
-            cached = max((len(line) for line in self.original_lines), default=0)
-            self._cached_max_line_length = cached
+            # Line count changed — find new longest line
+            max_len = max((len(line) for line in self.original_lines), default=0)
+            self._cached_max_line_length = max_len
             self._cached_max_line_n = n
-        max_line_length = cached
+        else:
+            max_len = getattr(self, '_cached_max_line_length', 0)
         char_width = self.text_input.font_size * 0.6
         min_width = dp(400)
-        calculated_width = max(min_width, max_line_length * char_width + dp(33))
+        calculated_width = max(min_width, max_len * char_width + dp(33))
         new_width = min(calculated_width, dp(3333))
         if abs(self.text_input.width - new_width) > 1:
             self.text_input.width = new_width
@@ -1342,10 +1441,14 @@ class LineNumberTextInput(BoxLayout):
     def _on_focus(self, instance, focused):
         if focused:
             self._keyboard_visible = True
-            Clock.schedule_once(self._show_keyboard, 0.05)
-            Clock.schedule_once(self._show_keyboard, 0.15)
+            Clock.schedule_once(lambda dt: self._show_keyboard(), 0.05)
+            Clock.schedule_once(lambda dt: self._show_keyboard(), 0.15)
+            # Добавляем пустые строки при появлении фокуса (клавиатуры)
+            Clock.schedule_once(self._ensure_trailing, 0.2)
         else:
             self._keyboard_visible = False
+            # Обрезаем лишние строки когда клавиатура скрыта
+            Clock.schedule_once(self._trim_trailing_lines, 0.1)
 
     def _show_keyboard(self, dt=None):
         try:
@@ -1404,21 +1507,17 @@ class LineNumberTextInput(BoxLayout):
             if line_idx >= total_lines:
                 break
             line_text = self.original_lines[line_idx]
-            indent = 0
-            for ch in line_text:
-                if ch == ' ':
-                    indent += 1
-                else:
-                    break
+            # Fast indent count: len(line) - len(lstrip()) avoids char-by-char loop
+            indent = len(line_text) - len(line_text.lstrip(' '))
             if indent < 4:
                 continue
             num_guides = indent // 4
             line_y = ti.y + ti.height - (line_idx + 1) * lh
+            pad = lh * 0.2
+            y_start = line_y + pad
+            y_end = line_y + lh - pad
             for g in range(1, num_guides + 1):
                 x_pos = ti.x + left_padding + (g * 4) * char_width
-                pad = lh * 0.2
-                y_start = line_y + pad
-                y_end = line_y + lh - pad
                 with ti.canvas.after:
                     Color(*guide_color)
                     line = Line(points=[x_pos, y_start, x_pos, y_end], width=dp(0.3))
@@ -1464,16 +1563,7 @@ class LineNumberTextInput(BoxLayout):
         Window.unbind(on_key_down=self._on_window_key_down)
         self._stop_auto_scroll()
 
-    def _debug_scroll(self):
-        import traceback
 
-        def on_scroll_y(instance, value):
-            if value < 0.5:
-                print(f"\n>>> scroll_y = {value:.4f}")
-                traceback.print_stack(limit=10)
-
-        # Вызываем после того как editor_scroll создан
-        Clock.schedule_once(lambda dt: self.editor_scroll.bind(scroll_y=on_scroll_y), 0.5)
 
     def debug_folding(self):
         print("=== FOLDING DEBUG ===")
