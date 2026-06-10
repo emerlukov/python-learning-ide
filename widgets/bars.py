@@ -672,8 +672,22 @@ class MySymbolScrollBar(BoxLayout):
             if app and hasattr(app, 'tab_manager'):
                 editor = app.tab_manager.get_active_editor()
 
+            if not editor:
+                ti.insert_text('    ')
+                return
+
+            # ОТМЕНЯЕМ ВСЕ ЗАПЛАНИРОВАННЫЕ ВЫЗОВЫ _ensure_trailing
+            Clock.unschedule(editor._ensure_trailing)
+
+            # Устанавливаем флаги для блокировки
+            editor._tab_indenting = True
+            editor._ensuring_trailing = True
+
             if not (hasattr(ti, 'selection_text') and ti.selection_text):
                 ti.insert_text('    ')
+                # Снимаем флаги
+                editor._tab_indenting = False
+                editor._ensuring_trailing = False
                 return
 
             start_idx, end_idx = ti.selection_from, ti.selection_to
@@ -685,10 +699,11 @@ class MySymbolScrollBar(BoxLayout):
 
             if start_line == end_line:
                 ti.insert_text('    ')
+                editor._tab_indenting = False
+                editor._ensuring_trailing = False
                 return
 
-            if editor:
-                editor._save_undo_state(immediate=True)
+            editor._save_undo_state(immediate=True)
 
             lines = text.split('\n')
             for i in range(start_line, end_line + 1):
@@ -698,56 +713,43 @@ class MySymbolScrollBar(BoxLayout):
             new_start = start_idx + 4
             new_end = end_idx + 4 * (end_line - start_line + 1)
 
-            saved_scroll_y = editor.editor_scroll.scroll_y if editor else None
-            saved_scroll_x = editor.editor_scroll.scroll_x if editor else None
+            editor._freeze_scroll()
 
-            if editor:
-                editor._tab_indenting = True
-                editor._ensuring_trailing = True
-
-            ti.unbind(text=editor._on_text_change) if editor else None
+            ti.unbind(text=editor._on_text_change)
             ti.text = new_text
-            ti.bind(text=editor._on_text_change) if editor else None
+            ti.bind(text=editor._on_text_change)
 
-            if editor:
-                editor.original_lines = new_text.split('\n')
-                editor._folding.apply_display_edit(editor.original_lines)
-                editor._refresh_virtual_panel()
-                editor.editor_scroll.scroll_y = saved_scroll_y
-                editor.editor_scroll.scroll_x = saved_scroll_x
+            editor.original_lines = new_text.split('\n')
+            editor._folding.apply_display_edit(editor.original_lines)
+            editor._refresh_virtual_panel()
 
-            def restore_step1(dt):
+            def restore(dt):
                 try:
-                    if editor:
-                        editor.editor_scroll.scroll_y = saved_scroll_y
-                        editor.editor_scroll.scroll_x = saved_scroll_x
                     ti.focus = True
                     ti.select_text(new_start, new_end)
+                    Clock.schedule_once(lambda _: editor._unfreeze_scroll(), 0)
                 except Exception as e:
-                    log_error(f"restore_step1: {e}")
-
-            def restore_step2(dt):
-                try:
-                    if editor:
-                        editor.editor_scroll.scroll_y = saved_scroll_y
-                        editor.editor_scroll.scroll_x = saved_scroll_x
-                    ti.select_text(new_start, new_end)
-                except Exception as e:
-                    log_error(f"restore_step2: {e}")
+                    editor._unfreeze_scroll()
+                    log_error(f"restore: {e}")
                 finally:
-                    if editor:
-                        editor._tab_indenting = False
-                        editor._ensuring_trailing = False
+                    # Снимаем флаги
+                    editor._tab_indenting = False
+                    editor._ensuring_trailing = False
+                    # Запланируем _ensure_trailing только один раз после всех операций
+                    #Clock.schedule_once(editor._ensure_trailing, 0.3)
 
-            Clock.schedule_once(restore_step1, 0.0)
-            Clock.schedule_once(restore_step2, 0.1)
+            Clock.schedule_once(restore, 0)
 
         except Exception as e:
             log_error(f"Tab button error: {e}")
             if editor:
+                editor._unfreeze_scroll()
                 editor._tab_indenting = False
                 editor._ensuring_trailing = False
-            ti.insert_text('    ')
+            try:
+                ti.insert_text('    ')
+            except:
+                pass
 
     def _get_active_text_input(self):
         # Приоритет 1: текущий input_widget (для диалогов)
