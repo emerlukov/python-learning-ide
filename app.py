@@ -1200,6 +1200,61 @@ class PythonLearningApp(MDApp):
         browser.show(self.file_handlers.on_file_saved, save_filename=suggested_name)
         self._current_file_popup = browser
 
+    def _save_tab_content_by_id(self, file_path, content, tab_id):
+        """Сохраняет содержимое вкладки по известному пути файла"""
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+
+            filename = os.path.basename(file_path)
+
+            # Находим вкладку по ID и отмечаем как сохранённую
+            if hasattr(self, 'tab_manager') and self.tab_manager:
+                for i, tab in enumerate(self.tab_manager.tabs):
+                    if tab.get('id') == tab_id:
+                        tab['file'] = file_path
+                        tab['original_content'] = content
+                        self.tab_manager.mark_tab_saved(i)
+                        break
+
+            self._current_file = file_path
+            self._update_title_from_current_tab()
+        except Exception as e:
+            self.show_result_popup(f"Error saving: {e}")
+
+    def _save_tab_as_by_id(self, content, tab_id):
+        """Открывает диалог 'Сохранить как' для вкладки без привязанного файла"""
+        from file_manager import FileBrowserPopup
+
+        def on_saved(file_path, saved_content):
+            """Callback после выбора пути сохранения"""
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+
+                filename = os.path.basename(file_path)
+
+                if hasattr(self, 'tab_manager') and self.tab_manager:
+                    for i, tab in enumerate(self.tab_manager.tabs):
+                        if tab.get('id') == tab_id:
+                            tab['file'] = file_path
+                            tab['title'] = filename
+                            tab['original_content'] = content
+                            self.tab_manager.mark_tab_saved(i)
+                            break
+
+                self._current_file = file_path
+                self._update_title_from_current_tab()
+            except Exception as e:
+                self.show_result_popup(f"Error saving: {e}")
+
+        browser = FileBrowserPopup(
+            self, self.file_manager,
+            title=self.tr.get('save', 'Save file'), mode="save"
+        )
+        browser.show(on_saved, save_filename="script.py")
+        self._current_file_popup = browser
+
     # ====================== ПОИСК И ЗАМЕНА ======================
 
     def show_search_only_dialog(self, instance=None):
