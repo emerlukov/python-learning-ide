@@ -21,6 +21,7 @@ class CodeExecutor:
         self._timeout_timer = None
         self.TIMEOUT_SECONDS = 30
         self._stop_requested = False
+        self._trace_counter = 0
 
     def _clean_code(self, code):
         """Удаляет маркеры сворачивания из кода"""
@@ -41,9 +42,15 @@ class CodeExecutor:
         return '\n'.join(cleaned)
 
     def _trace_stop(self, frame, event, arg):
-        """Трассировщик для остановки выполнения"""
-        if self._stop_requested:
-            raise SystemExit("Execution stopped by timeout")
+        """Оптимизированный трассировщик — проверка каждые 100 вызовов"""
+        # Счётчик вызовов
+        self._trace_counter = getattr(self, '_trace_counter', 0) + 1
+
+        # Проверяем только каждый 100-й вызов (вместо каждого)
+        if self._trace_counter >= 100:
+            self._trace_counter = 0
+            if self._stop_requested:
+                raise SystemExit("Execution stopped by timeout")
         return self._trace_stop
 
     def run(self, code, input_handler, result_callback):
@@ -89,6 +96,8 @@ class CodeExecutor:
             # Устанавливаем трассировщик
             old_trace = sys.gettrace()
             sys.settrace(self._trace_stop)
+            # Сбрасываем счётчик при каждом запуске
+            self._trace_counter = 0
 
             self._timeout_timer.start()
 
