@@ -390,6 +390,9 @@ class LineNumberTextInput(BoxLayout):
         self._redraw_pending = False
         self._indent_guides_pending = False
 
+        self._tab_indenting = False
+        self._ensuring_trailing = False
+
         self._panel_update_scheduled = False
         self._cached_line_count = 0
         self._cached_max_line_length = 0
@@ -425,6 +428,30 @@ class LineNumberTextInput(BoxLayout):
 
         self._touch_start_time = 0
 
+        self._cached_max_line_n = -1
+
+    # ------------------------------------------------------------------ scroll freeze
+
+    def _freeze_scroll(self):
+        """Полностью блокирует скролл редактора на время операции."""
+        sv = getattr(self, 'editor_scroll', None)
+        if sv is None:
+            return
+        self._frozen_scroll_y = sv.scroll_y
+        self._frozen_scroll_x = sv.scroll_x
+        sv.do_scroll_y = False
+        sv.do_scroll_x = False
+
+    def _unfreeze_scroll(self, dt=None):
+        """Разблокирует скролл и восстанавливает позицию."""
+        sv = getattr(self, 'editor_scroll', None)
+        if sv is None:
+            return
+        sv.scroll_y = self._frozen_scroll_y
+        sv.scroll_x = self._frozen_scroll_x
+        sv.do_scroll_y = True
+        sv.do_scroll_x = True
+
     # ------------------------------------------------------------------ folding
 
     def _on_fold_toggle(self, orig_line):
@@ -436,13 +463,36 @@ class LineNumberTextInput(BoxLayout):
 
     def _apply_folding_to_editor(self, toggled_orig_line=None):
         try:
+            sv = getattr(self, 'editor_scroll', None)
+            lh = getattr(self.text_input, 'line_height', self._font_size * 1.2)
+
+            # Запоминаем, на каком пикселе экрана находится строка-заголовок ДО fold.
+            # Это позволяет после изменения числа строк вычислить новый scroll_y
+            # такой, чтобы заголовок остался визуально на том же месте.
+            if toggled_orig_line is not None and sv is not None:
+                old_display_header = self._folding.orig_to_display(toggled_orig_line)
+                old_total_lines = len(self._folding.get_display_lines())
+                old_total_h = old_total_lines * lh
+                editor_h = sv.height
+                old_max_offset = max(0, old_total_h - editor_h)
+                old_scroll_offset = (1.0 - sv.scroll_y) * old_max_offset
+                # пиксельное расстояние от верха viewport до верха строки-заголовка
+                header_px_from_top = old_display_header * lh - old_scroll_offset
+            else:
+                # Нет конкретной строки — просто фризим
+                header_px_from_top = None
+
+            # Замораживаем скролл на время изменения текста
+            self._freeze_scroll()
+
+            # Сохраняем позицию курсора
             try:
                 old_cursor_idx = self.text_input.cursor_index()
                 old_display_line = self.text_input.text[:old_cursor_idx].count('\n')
             except:
-                old_cursor_idx = 0
                 old_display_line = 0
 
+            # Применяем изменения текста
             display_lines = self._folding.get_display_lines()
             new_text = '\n'.join(display_lines)
 
@@ -452,23 +502,45 @@ class LineNumberTextInput(BoxLayout):
             self._display_map_version = 0
             self._ignore_text_change = False
 
+            # Восстанавливаем позицию курсора
             if toggled_orig_line is not None:
                 target_display_line = self._folding.orig_to_display(toggled_orig_line)
             else:
-                target_display_line = old_display_line
+                target_display_line = min(old_display_line, len(display_lines) - 1)
+                target_display_line = max(0, target_display_line)
 
             try:
                 lines_before = display_lines[:target_display_line]
                 char_pos = sum(len(l) + 1 for l in lines_before)
                 char_pos = min(char_pos, len(new_text))
                 self.text_input.cursor = self.text_input.get_cursor_from_index(char_pos)
-                Clock.schedule_once(lambda dt: self._scroll_to_display_line(target_display_line), 0.05)
             except:
                 pass
 
+            # Вычисляем новый scroll_y чтобы заголовок остался на том же месте экрана
+            if header_px_from_top is not None and sv is not None:
+                new_total_lines = len(display_lines)
+                new_total_h = new_total_lines * lh
+                editor_h = sv.height
+                new_max_offset = max(0, new_total_h - editor_h)
+                if new_max_offset > 0:
+                    new_header_display = self._folding.orig_to_display(toggled_orig_line)
+                    # offset такой, чтобы заголовок был на той же пиксельной позиции
+                    desired_offset = new_header_display * lh - header_px_from_top
+                    desired_offset = max(0.0, min(float(new_max_offset), desired_offset))
+                    self._frozen_scroll_y = 1.0 - desired_offset / new_max_offset
+                else:
+                    self._frozen_scroll_y = 1.0
+                self._frozen_scroll_x = sv.scroll_x
+
             self._refresh_virtual_panel()
+
+            # Размораживаем на следующем кадре — Kivy к этому моменту пересчитал layout
+            Clock.schedule_once(self._unfreeze_scroll, 0)
             Clock.schedule_once(self._draw_indent_guides, 0.15)
+
         except Exception as e:
+            self._unfreeze_scroll()
             log_error(f"_apply_folding_to_editor error: {e}")
 
     def _scroll_to_display_line(self, display_line):
@@ -803,17 +875,50 @@ class LineNumberTextInput(BoxLayout):
 
     def _bind_scroll_sync(self, *args):
         def sync_scroll(instance, value):
+            # Панель строк обновляем ВСЕГДА (без throttle)
+            self._refresh_virtual_panel()
+
+            # Throttle только для направляющих (они тяжелые)
             now = time.time()
-            # Не чаще 15 раз в секунду
             if now - self._last_scroll_time < 0.066:
                 return
             self._last_scroll_time = now
-            self._refresh_virtual_panel()
             Clock.unschedule(self._draw_indent_guides)
             Clock.schedule_once(self._draw_indent_guides, 0.1)
 
         self.editor_scroll.bind(scroll_y=sync_scroll)
-        self.editor_scroll.bind(size=lambda *a: self._refresh_virtual_panel())
+        self.editor_scroll.bind(size=self._on_editor_scroll_resize)
+
+    def _on_editor_scroll_resize(self, instance, new_size):
+        """При изменении размера viewport (например, при скрытии клавиатуры)
+        пересчитываем scroll_y так, чтобы верхняя видимая строка осталась на месте."""
+        self._refresh_virtual_panel()
+
+        # Если скролл заморожен — не трогаем, freeze/unfreeze сам разберётся
+        if not getattr(instance, 'do_scroll_y', True):
+            return
+
+        try:
+            lh = getattr(self.text_input, 'line_height', self._font_size * 1.2)
+            total_lines = len(self.original_lines)
+            total_h = total_lines * lh
+            new_editor_h = new_size[1]
+            new_max_offset = max(0, total_h - new_editor_h)
+            if new_max_offset <= 0:
+                return
+
+            # Вычисляем какая строка сейчас наверху viewport
+            old_editor_h = getattr(self, '_last_editor_h', new_editor_h)
+            old_max_offset = max(0, total_h - old_editor_h)
+            current_offset = (1.0 - instance.scroll_y) * old_max_offset
+
+            # Выставляем scroll_y чтобы та же строка осталась сверху
+            new_scroll_y = 1.0 - current_offset / new_max_offset
+            instance.scroll_y = max(0.0, min(1.0, new_scroll_y))
+        except Exception as e:
+            log_error(f"_on_editor_scroll_resize error: {e}")
+        finally:
+            self._last_editor_h = new_size[1]
 
     def _get_display_to_orig(self):
         """Возвращает кешированный display_to_orig"""
@@ -971,8 +1076,11 @@ class LineNumberTextInput(BoxLayout):
             self._indent_guides_pending = True
             Clock.schedule_once(self._draw_indent_guides, 0.15)
 
-        Clock.unschedule(self._ensure_trailing)
-        Clock.schedule_once(self._ensure_trailing, 0)
+        # НЕ добавляем пустые строки во время табуляции и сворачивания
+        if not self._tab_indenting and not self._ensuring_trailing:
+            # Отменяем предыдущий и планируем новый с задержкой
+            Clock.unschedule(self._ensure_trailing)
+            Clock.schedule_once(self._ensure_trailing, 0.3)
 
     def _save_undo_state(self, immediate=False):
         if self._undo_lock:
@@ -1003,6 +1111,9 @@ class LineNumberTextInput(BoxLayout):
 
     def _ensure_trailing(self, dt):
         """Вызывает добавление пустых строк"""
+        # Не запускаем если табуляция активна
+        if self._tab_indenting or self._ensuring_trailing:
+            return
         self._ensure_trailing_empty_lines()
 
     def _ensure_trailing_empty_lines(self):
@@ -1089,11 +1200,23 @@ class LineNumberTextInput(BoxLayout):
         if trailing <= MAX_TRAILING_WHEN_HIDDEN:
             return
 
-        to_remove = trailing - MAX_TRAILING_WHEN_HIDDEN
-
         self._ensuring_trailing = True
+
+        # Сохраняем текущую позицию курсора
+        cursor_index = self.text_input.cursor_index()
+
+        # Сохраняем, какая строка сейчас вверху экрана (по пикселям)
+        sv = self.editor_scroll
+        lh = getattr(self.text_input, 'line_height', self._font_size * 1.2)
+        total_lines_before = len(self.original_lines)
+        total_h_before = total_lines_before * lh
+        editor_h = sv.height
+        max_offset_before = max(0, total_h_before - editor_h)
+        current_offset = (1.0 - sv.scroll_y) * max_offset_before
+        top_line_index = int(current_offset / lh) if lh > 0 else 0
+
+        # Обрезаем строки
         try:
-            cursor_index = self.text_input.cursor_index()
             lines = self.original_lines[:last_non_empty + MAX_TRAILING_WHEN_HIDDEN + 1]
             new_text = '\n'.join(lines)
 
@@ -1109,10 +1232,32 @@ class LineNumberTextInput(BoxLayout):
                     self.text_input.cursor = self.text_input.get_cursor_from_index(cursor_index)
             except:
                 pass
+
+            # Пересчитываем scroll_y чтобы сохранить ту же строку вверху
+            total_lines_after = len(self.original_lines)
+            total_h_after = total_lines_after * lh
+            max_offset_after = max(0, total_h_after - editor_h)
+
+            # Позиция той же строки в новых координатах
+            top_line_index = min(top_line_index, total_lines_after - 1)
+            new_offset = top_line_index * lh
+
+            if max_offset_after > 0:
+                new_scroll_y = 1.0 - new_offset / max_offset_after
+                new_scroll_y = max(0.0, min(1.0, new_scroll_y))
+                sv.scroll_y = new_scroll_y
+            else:
+                sv.scroll_y = 1.0
+
         except Exception as e:
             log_error(f"_trim_trailing_lines error: {e}")
         finally:
             self._ensuring_trailing = False
+            # Принудительно обновляем панель строк
+            self._refresh_virtual_panel()
+            # И ещё раз через кадр для синхронизации
+            Clock.schedule_once(lambda dt: self._refresh_virtual_panel(), 0.05)
+            Clock.schedule_once(lambda dt: self._refresh_virtual_panel(), 0.1)
 
     def _delayed_update_panel(self, dt):
         if self._panel_update_scheduled:
@@ -1209,7 +1354,7 @@ class LineNumberTextInput(BoxLayout):
         return False
 
     def _on_key_down(self, instance, key, scancode, codepoint, modifier):
-        if key == 9:
+        if key == 9:  # Tab
             try:
                 if hasattr(instance, 'selection_text') and instance.selection_text:
                     start_idx, end_idx = instance.selection_from, instance.selection_to
@@ -1218,8 +1363,13 @@ class LineNumberTextInput(BoxLayout):
                     text = instance.text
                     start_line = text[:start_idx].count('\n')
                     end_line = text[:end_idx].count('\n')
+
+                    # Если выделение в одной строке — вставляем пробелы без прыжка
                     if start_line == end_line:
+                        self._freeze_scroll()
                         instance.insert_text('    ')
+                        # разморозка через кадр — после того как insert_text отработал
+                        Clock.schedule_once(self._unfreeze_scroll, 0)
                         return True
 
                     self._save_undo_state(immediate=True)
@@ -1232,10 +1382,9 @@ class LineNumberTextInput(BoxLayout):
                     new_start = start_idx + 4
                     new_end = end_idx + 4 * (end_line - start_line + 1)
 
-                    saved_scroll_y = self.editor_scroll.scroll_y
-                    saved_scroll_x = self.editor_scroll.scroll_x
                     self._tab_indenting = True
                     self._ensuring_trailing = True
+                    self._freeze_scroll()
 
                     instance.unbind(text=self._on_text_change)
                     instance.text = new_text
@@ -1244,38 +1393,33 @@ class LineNumberTextInput(BoxLayout):
                     self.original_lines = new_text.split('\n')
                     self._folding.apply_display_edit(self.original_lines)
                     self._refresh_virtual_panel()
-                    self.editor_scroll.scroll_y = saved_scroll_y
-                    self.editor_scroll.scroll_x = saved_scroll_x
 
-                    def restore_step1(dt):
+                    def restore(dt):
                         try:
-                            self.editor_scroll.scroll_y = saved_scroll_y
-                            self.editor_scroll.scroll_x = saved_scroll_x
                             instance.focus = True
                             instance.select_text(new_start, new_end)
+                            # select_text вызывает авто-скролл Kivy к позиции выделения,
+                            # поэтому размораживаем ещё через кадр — уже после select_text
+                            Clock.schedule_once(self._unfreeze_scroll, 0)
                         except Exception as e:
-                            log_error(f"restore_step1: {e}")
-
-                    def restore_step2(dt):
-                        try:
-                            self.editor_scroll.scroll_y = saved_scroll_y
-                            self.editor_scroll.scroll_x = saved_scroll_x
-                            instance.select_text(new_start, new_end)
-                        except Exception as e:
-                            log_error(f"restore_step2: {e}")
+                            self._unfreeze_scroll()
+                            log_error(f"restore selection error: {e}")
                         finally:
                             self._tab_indenting = False
                             self._ensuring_trailing = False
 
-                    Clock.schedule_once(restore_step1, 0.0)
-                    Clock.schedule_once(restore_step2, 0.1)
+                    Clock.schedule_once(restore, 0)
                     return True
 
+                # Нет выделения — одиночный таб
+                self._freeze_scroll()
                 instance.insert_text('    ')
+                Clock.schedule_once(self._unfreeze_scroll, 0)
                 return True
             except Exception as e:
                 self._ensuring_trailing = False
                 self._tab_indenting = False
+                self._unfreeze_scroll()
                 log_error(f"Tab handler error: {e}")
                 return False
         return False
@@ -1467,14 +1611,19 @@ class LineNumberTextInput(BoxLayout):
     def _on_focus(self, instance, focused):
         if focused:
             self._keyboard_visible = True
+            self._freeze_scroll()
             Clock.schedule_once(lambda dt: self._show_keyboard(), 0.05)
             Clock.schedule_once(lambda dt: self._show_keyboard(), 0.15)
-            # Добавляем пустые строки при появлении фокуса (клавиатуры)
-            Clock.schedule_once(self._ensure_trailing, 0.2)
+            # Добавляем пустые строки при появлении фокуса (клавиатуры),
+            # размораживаем скролл уже после этого
+            def _ensure_and_unfreeze(dt):
+                self._ensure_trailing_empty_lines()
+                self._unfreeze_scroll()
+            Clock.schedule_once(_ensure_and_unfreeze, 0.3)
         else:
             self._keyboard_visible = False
             # Обрезаем лишние строки когда клавиатура скрыта
-            Clock.schedule_once(self._trim_trailing_lines, 0.1)
+            #Clock.schedule_once(self._trim_trailing_lines, 0.1)
 
     def _show_keyboard(self, dt=None):
         try:
@@ -1487,6 +1636,11 @@ class LineNumberTextInput(BoxLayout):
                         PythonActivity = autoclass('org.kivy.android.PythonActivity')
                         activity = PythonActivity.mActivity
                         if activity:
+                            # ADJUST_NOTHING — запрещаем системе двигать/ресайзить
+                            # окно при появлении клавиатуры. Без этого Android
+                            # делает adjustPan и поднимает всё приложение вверх.
+                            # SOFT_INPUT_ADJUST_NOTHING = 0x00000030
+                            activity.getWindow().setSoftInputMode(0x00000030)
                             InputMethodManager = autoclass('android.view.inputmethod.InputMethodManager')
                             Context = autoclass('android.content.Context')
                             imm = activity.getSystemService(Context.INPUT_METHOD_SERVICE)
@@ -1499,6 +1653,7 @@ class LineNumberTextInput(BoxLayout):
     # ------------------------------------------------------------------ indent guides
 
     def _draw_indent_guides(self, *args):
+        return
         self._indent_guides_pending = False
         if not hasattr(self, 'text_input') or not self.text_input:
             return
@@ -1610,7 +1765,13 @@ class LineNumberTextInput(BoxLayout):
         Window.unbind(on_key_down=self._on_window_key_down)
         self._stop_auto_scroll()
 
-
+    def _sync_scroll_position(self, dt=None):
+        """Принудительная синхронизация скролла после операций"""
+        if hasattr(self, 'editor_scroll') and hasattr(self, '_target_scroll_y'):
+            self.editor_scroll.scroll_y = self._target_scroll_y
+            if hasattr(self, '_target_scroll_x'):
+                self.editor_scroll.scroll_x = self._target_scroll_x
+            self._refresh_virtual_panel()
 
     def debug_folding(self):
         print("=== FOLDING DEBUG ===")
