@@ -8,10 +8,10 @@ from kivy.uix.popup import Popup
 from kivy.clock import Clock
 from kivy.metrics import dp
 from kivy.utils import platform
+from kivy.core.window import Window
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.graphics import Color, Rectangle
 import time
-from kivy.core.window import Window
 
 from kivymd.uix.label import MDIcon
 from kivymd.uix.button import MDRectangleFlatButton, MDIconButton
@@ -493,9 +493,6 @@ class FileBrowserPopup:
             self.filename_input.line_color_normal = PURPLE
             self.filename_input.text_color = PURPLE
             self.filename_input.hint_text_color = (0.6, 0.6, 0.6, 1)
-
-            self.filename_input.bind(focus=self._on_input_focus)
-
             content.add_widget(self.filename_input)
 
         btn_layout = MDBoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
@@ -537,16 +534,27 @@ class FileBrowserPopup:
         if hasattr(self.app, 'wrap_widget_buttons'):
             self.app.wrap_widget_buttons(content)
 
+        # Поднимаем попап при открытии клавиатуры (только в режиме сохранения)
+        if self.mode == "save":
+            Window.bind(keyboard_height=self._on_keyboard_height)
+
         self._refresh_list()
 
-    def _on_input_focus(self, instance, value):
-        if value:
-            Clock.schedule_once(lambda dt: self._lift_popup(), 0.2)
-
-    def _lift_popup(self):
-        if self.popup and self.popup._window:
-            # Поднимаем попап на 40% высоты экрана вверх
-            self.popup.y += Window.height * 0.4
+    def _on_keyboard_height(self, window, keyboard_height):
+        """Сдвигаем попап вверх когда поднимается клавиатура"""
+        if not self.popup:
+            return
+        if keyboard_height > 0:
+            # Клавиатура открылась — сдвигаем попап вверх на высоту клавиатуры
+            # но не выше верхней границы экрана
+            shift = keyboard_height
+            new_y = shift / 2  # центрируем в оставшемся пространстве
+            max_y = Window.height - self.popup.height
+            self.popup.y = min(new_y, max_y)
+        else:
+            # Клавиатура закрылась — возвращаем попап по центру
+            self.popup.pos_hint = {'center_x': 0.5, 'center_y': 0.5}
+            self.popup.center = Window.center
 
     def _update_bg(self, instance, value):
         if hasattr(self, '_bg_rect'):
@@ -1167,6 +1175,8 @@ class FileBrowserPopup:
 
     def _dismiss(self):
         """Закрывает попап с очисткой всех ресурсов"""
+        # Отписываемся от события клавиатуры
+        Window.unbind(keyboard_height=self._on_keyboard_height)
         # Очищаем подсветку
         if hasattr(self, 'file_container') and self.file_container:
             for child in self.file_container.children[:]:
