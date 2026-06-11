@@ -1,4 +1,4 @@
-# file_manager.py
+# file_manager.py - ИСПРАВЛЕННАЯ ВЕРСИЯ
 
 import os
 from kivy.app import App
@@ -414,7 +414,7 @@ class FileBrowserPopup:
         if self.mode == "save":
             self.filename_input = MDTextField(
                 text=self.save_filename,
-                hint_text="   " + tr('file_name', 'File name'),
+                hint_text="    " + tr('file_name', 'File name'),
                 size_hint_y=None,
                 height=dp(45),
                 mode="rectangle"
