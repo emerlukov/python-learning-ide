@@ -411,6 +411,19 @@ class FileBrowserPopup:
         )
         content.add_widget(self.path_label)
 
+        if self.mode == "save":
+            self.filename_input = MDTextField(
+                text=self.save_filename,
+                hint_text=tr('file_name', 'File name'),
+                size_hint_y=None,
+                height=dp(45),
+                mode="rectangle"
+            )
+            self.filename_input.line_color_normal = PURPLE
+            self.filename_input.text_color = PURPLE
+            self.filename_input.hint_text_color = (0.6, 0.6, 0.6, 1)
+            content.add_widget(self.filename_input)
+
         # Панель сортировки
         sort_bar = MDBoxLayout(orientation='horizontal', size_hint_y=None, height=dp(35), spacing=dp(5),
                                padding=[dp(5), dp(2)])
@@ -482,19 +495,6 @@ class FileBrowserPopup:
         up_btn.bind(on_release=lambda x: self._go_up())
         content.add_widget(up_btn)
 
-        if self.mode == "save":
-            self.filename_input = MDTextField(
-                text=self.save_filename,
-                hint_text=tr('file_name', 'File name...'),
-                size_hint_y=None,
-                height=dp(45),
-                mode="rectangle"
-            )
-            self.filename_input.line_color_normal = PURPLE
-            self.filename_input.text_color = PURPLE
-            self.filename_input.hint_text_color = (0.6, 0.6, 0.6, 1)
-            content.add_widget(self.filename_input)
-
         btn_layout = MDBoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
 
         cancel_btn = MDRectangleFlatButton(
@@ -534,9 +534,6 @@ class FileBrowserPopup:
         if hasattr(self.app, 'wrap_widget_buttons'):
             self.app.wrap_widget_buttons(content)
 
-        # Поднимаем попап при открытии клавиатуры (только в режиме сохранения)
-        if self.mode == "save":
-            Window.bind(keyboard_height=self._on_keyboard_height)
 
         self._refresh_list()
 
