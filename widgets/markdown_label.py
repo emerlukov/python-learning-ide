@@ -25,7 +25,7 @@ class MarkdownLabel(BoxLayout):
         super().__init__(**kwargs)
         self.orientation = 'vertical'
         self.spacing = dp(4)
-        self.padding = [dp(2), dp(8), dp(2), dp(8)]
+        self.padding = [dp(2), dp(8), dp(10), dp(8)]  # правый отступ dp(10)
         self.font_size = font_size
 
         # Размер по содержимому
@@ -156,11 +156,11 @@ class MarkdownLabel(BoxLayout):
             height=font_size + dp(12),
             halign='left',
             valign='middle',
-            text_size=(self.width - dp(20), None),
+            text_size=(self.width - dp(30), None),
             bold=True
         )
         label.bind(
-            width=lambda inst, val: setattr(inst, 'text_size', (val - dp(20), None)),
+            width=lambda inst, val: setattr(inst, 'text_size', (val - dp(30), None)),
             texture_size=lambda inst, sz: setattr(inst, 'height', max(sz[1] + dp(12), font_size + dp(12)))
         )
         self.add_widget(label)
@@ -179,10 +179,10 @@ class MarkdownLabel(BoxLayout):
             halign='left',
             valign='top',
             markup=has_markup,
-            text_size=(self.width - dp(20), None)
+            text_size=(self.width - dp(30), None)
         )
         label.bind(
-            width=lambda inst, val: setattr(inst, 'text_size', (val - dp(20), None)),
+            width=lambda inst, val: setattr(inst, 'text_size', (val - dp(30), None)),
             texture_size=lambda inst, sz: setattr(inst, 'height', sz[1] + dp(10))
         )
         self.add_widget(label)
@@ -200,10 +200,10 @@ class MarkdownLabel(BoxLayout):
             halign='left',
             valign='top',
             markup=has_markup,
-            text_size=(self.width - dp(30), None)
+            text_size=(self.width - dp(40), None)
         )
         label.bind(
-            width=lambda inst, val: setattr(inst, 'text_size', (val - dp(30), None)),
+            width=lambda inst, val: setattr(inst, 'text_size', (val - dp(40), None)),
             texture_size=lambda inst, sz: setattr(inst, 'height', sz[1] + dp(10))
         )
         self.add_widget(label)
@@ -344,20 +344,86 @@ class MarkdownLabel(BoxLayout):
         return text
 
     def on_touch_down(self, touch):
-        """Пропускаем touch дальше если он не попадает в нашу область"""
+        """Пропускаем touch дальше если он не попадает в нашу область.
+        Снимаем выделение с TextInput при тапе вне."""
         if not self.collide_point(*touch.pos):
+            # Тап вне — снимаем фокус со всех TextInput внутри
+            self._defocus_all_inputs()
             return False
-        return super().on_touch_down(touch)
+
+        # Запоминаем начальную позицию для определения свайпа
+        touch.ud['md_start_x'] = touch.x
+        touch.ud['md_start_y'] = touch.y
+        touch.ud['md_widget'] = self
+        touch.ud['md_hold_decided'] = False
+        touch.ud['md_is_hold'] = False
+
+        # Назначаем задержку — если палец не двинулся, считаем это удержанием
+        self._hold_trigger = Clock.schedule_once(
+            lambda dt: self._on_hold(touch), 0.25
+        )
+        # НЕ передаём вниз сразу — ждём решения в on_touch_move / _on_hold
+        touch.grab(self)
+        return True
+
+    def _on_hold(self, touch):
+        """Вызывается через 0.25с — считаем удержанием, разрешаем скролл внутри"""
+        touch.ud['md_is_hold'] = True
+        touch.ud['md_hold_decided'] = True
+        # Теперь передаём событие вложенным виджетам (ScrollView, TextInput)
+        touch.ungrab(self)
+        super().on_touch_down(touch)
 
     def on_touch_move(self, touch):
-        if not self.collide_point(*touch.pos):
+        if not self.collide_point(*touch.pos) and touch.grab_current is not self:
             return False
-        return super().on_touch_move(touch)
+
+        if touch.grab_current is self:
+            dx = abs(touch.x - touch.ud.get('md_start_x', touch.x))
+            dy = abs(touch.y - touch.ud.get('md_start_y', touch.y))
+
+            if not touch.ud.get('md_hold_decided', False):
+                if dx > dp(8) or dy > dp(8):
+                    # Быстрый свайп — отменяем удержание, отдаём внешнему скролу
+                    if hasattr(self, '_hold_trigger') and self._hold_trigger:
+                        self._hold_trigger.cancel()
+                        self._hold_trigger = None
+                    touch.ud['md_hold_decided'] = True
+                    touch.ud['md_is_hold'] = False
+                    touch.ungrab(self)
+                    # Возвращаем False — пусть родительский ScrollView обработает
+                    return False
+            elif touch.ud.get('md_is_hold', False):
+                return super().on_touch_move(touch)
+
+        return False
 
     def on_touch_up(self, touch):
+        if touch.grab_current is self:
+            # Отменяем таймер удержания если ещё не сработал
+            if hasattr(self, '_hold_trigger') and self._hold_trigger:
+                self._hold_trigger.cancel()
+                self._hold_trigger = None
+            touch.ungrab(self)
+
+            if not touch.ud.get('md_hold_decided', False) or not touch.ud.get('md_is_hold', False):
+                # Короткий тап — снимаем выделение
+                self._defocus_all_inputs()
+                return True
+
         if not self.collide_point(*touch.pos):
             return False
         return super().on_touch_up(touch)
+
+    def _defocus_all_inputs(self):
+        """Снимает фокус и выделение со всех TextInput внутри"""
+        def _unfocus(widget):
+            if isinstance(widget, TextInput):
+                widget.focus = False
+                widget.cancel_selection()
+            for child in widget.children:
+                _unfocus(child)
+        _unfocus(self)
 
     def apply_theme(self):
         self._update_background()
