@@ -26,12 +26,15 @@ from utils.vibration_manager import VibrationManager
 class PassthroughScrollView(ScrollView):
     """
     ScrollView который не поглощает touch-события вне своей области.
-    Решает проблему блокировки вкладок и кнопки закрытия когда ScrollView
-    расположен под ними в z-order.
+    При тапе внутри — снимает выделение с TextInput если тап не на них.
     """
     def on_touch_down(self, touch):
         if not self.collide_point(*touch.pos):
             return False
+        # Если тап не попал ни в один TextInput — снимаем выделение со всех
+        hit_input = self._find_text_input_at(touch.pos)
+        if not hit_input:
+            self._defocus_all_inputs()
         return super().on_touch_down(touch)
 
     def on_touch_move(self, touch):
@@ -44,22 +47,128 @@ class PassthroughScrollView(ScrollView):
             return False
         return super().on_touch_up(touch)
 
+    def _find_text_input_at(self, pos):
+        def _search(widget):
+            if isinstance(widget, TextInput) and widget.collide_point(*pos):
+                return widget
+            for child in widget.children:
+                result = _search(child)
+                if result:
+                    return result
+            return None
+        return _search(self)
+
+    def _defocus_all_inputs(self):
+        def _unfocus(widget):
+            if isinstance(widget, TextInput):
+                widget.focus = False
+                widget.cancel_selection()
+            for child in widget.children:
+                _unfocus(child)
+        _unfocus(self)
+
+
+class HoldToScrollView(ScrollView):
+    """
+    ScrollView для вложенных блоков кода/шаблонов.
+    - Быстрый свайп → отдаёт события родительскому скролу (листает вкладку).
+    - Удержание (0.25с) → скролит собственное содержимое.
+    - Тап вне → снимает выделение TextInput внутри.
+    """
+    HOLD_DELAY = 0.25   # секунд до активации внутреннего скрола
+    SWIPE_THRESHOLD = dp(8)  # пикселей движения до отмены удержания
+
+    def on_touch_down(self, touch):
+        if not self.collide_point(*touch.pos):
+            # Снимаем выделение при тапе вне
+            self._defocus_all_inputs()
+            return False
+
+        touch.ud['htscroll_start_x'] = touch.x
+        touch.ud['htscroll_start_y'] = touch.y
+        touch.ud['htscroll_decided'] = False
+        touch.ud['htscroll_is_hold'] = False
+
+        self._hold_trigger = Clock.schedule_once(
+            lambda dt: self._activate_inner_scroll(touch), self.HOLD_DELAY
+        )
+        touch.grab(self)
+        return True
+
+    def _activate_inner_scroll(self, touch):
+        touch.ud['htscroll_is_hold'] = True
+        touch.ud['htscroll_decided'] = True
+        touch.ungrab(self)
+        super().on_touch_down(touch)
+
+    def on_touch_move(self, touch):
+        if touch.grab_current is self:
+            dx = abs(touch.x - touch.ud.get('htscroll_start_x', touch.x))
+            dy = abs(touch.y - touch.ud.get('htscroll_start_y', touch.y))
+
+            if not touch.ud.get('htscroll_decided', False):
+                if dx > self.SWIPE_THRESHOLD or dy > self.SWIPE_THRESHOLD:
+                    # Свайп — отменяем, отдаём родителю
+                    if hasattr(self, '_hold_trigger') and self._hold_trigger:
+                        self._hold_trigger.cancel()
+                        self._hold_trigger = None
+                    touch.ud['htscroll_decided'] = True
+                    touch.ud['htscroll_is_hold'] = False
+                    touch.ungrab(self)
+                    return False
+            elif touch.ud.get('htscroll_is_hold', False):
+                return super().on_touch_move(touch)
+            return False
+
+        if not self.collide_point(*touch.pos):
+            return False
+        return super().on_touch_move(touch)
+
+    def on_touch_up(self, touch):
+        if touch.grab_current is self:
+            if hasattr(self, '_hold_trigger') and self._hold_trigger:
+                self._hold_trigger.cancel()
+                self._hold_trigger = None
+            touch.ungrab(self)
+            if not touch.ud.get('htscroll_is_hold', False):
+                self._defocus_all_inputs()
+            return True
+
+        if not self.collide_point(*touch.pos):
+            return False
+        return super().on_touch_up(touch)
+
+    def _defocus_all_inputs(self):
+        """Снимает фокус и выделение со всех TextInput внутри"""
+        def _unfocus(widget):
+            if isinstance(widget, TextInput):
+                widget.focus = False
+                widget.cancel_selection()
+            for child in widget.children:
+                _unfocus(child)
+        _unfocus(self)
+
 
 class LessonView(BoxLayout):
     """Диалог просмотра урока с табами"""
+
+    # Базовые значения — восстанавливаются при скрытии клавиатуры
+    _BASE_CENTER_Y = 0.5
+    _BASE_SIZE_HINT_Y = 0.88
 
     def __init__(self, app, lesson, lesson_manager, course_id=None, **kwargs):
         super().__init__(**kwargs)
         self.app = app
         self.lesson = lesson
         self.lesson_manager = lesson_manager
-        self.course_id = course_id or lesson.get('course_id')  # получаем course_id
+        self.course_id = course_id or lesson.get('course_id')
         self.orientation = 'vertical'
         self.padding = dp(5)
         self.spacing = dp(5)
 
         # Состояние
         self.user_code = ""
+        self._keyboard_height = 0
 
         # Фон
         theme = ThemeManager.get_theme()
@@ -71,6 +180,9 @@ class LessonView(BoxLayout):
         self._create_ui()
 
         Clock.schedule_once(lambda dt: self._wrap_buttons(), 0.1)
+
+        # Подписываемся на высоту клавиатуры (Android / iOS)
+        Window.bind(on_keyboard_height=self._on_keyboard_height)
 
     def _update_bg(self, instance, value):
         """Обновляет фон при изменении размера/позиции"""
@@ -496,7 +608,7 @@ class LessonView(BoxLayout):
             parent.add_widget(title)
 
             # ScrollView для шаблона с авто-высотой
-            code_scroll = PassthroughScrollView(
+            code_scroll = HoldToScrollView(
                 size_hint_y=None,
                 height=dp(250),
                 do_scroll_x=False,
@@ -782,14 +894,39 @@ class LessonView(BoxLayout):
         from ui.lesson_view import LessonView
 
         new_view = LessonView(self.app, lesson, self.lesson_manager, course_id=self.course_id)
-        new_view.size_hint = (0.92, 0.88)
-        new_view.pos_hint = {'center_x': 0.5, 'center_y': 0.5}
+        new_view.size_hint = (0.92, LessonView._BASE_SIZE_HINT_Y)
+        new_view.pos_hint = {'center_x': 0.5, 'center_y': LessonView._BASE_CENTER_Y}
 
         if hasattr(self.app, 'root_layout'):
             self.app.root_layout.add_widget(new_view)
 
+    def _on_keyboard_height(self, window, kb_height):
+        """Поднимает/опускает окно урока при появлении клавиатуры."""
+        self._keyboard_height = kb_height
+
+        if kb_height > 0:
+            kb_fraction = kb_height / Window.height
+
+            # Новая высота: убираем долю клавиатуры + зазор
+            new_size_hint_y = self._BASE_SIZE_HINT_Y * (1.0 - kb_fraction) - 0.02
+            new_size_hint_y = max(new_size_hint_y, 0.35)
+
+            # Сдвигаем центр вверх, чтобы нижний край виджета был выше клавиатуры
+            bottom_edge = kb_fraction + 0.01
+            new_center_y = bottom_edge + new_size_hint_y / 2.0
+            new_center_y = min(new_center_y, 0.98 - new_size_hint_y / 2.0)
+
+            self.size_hint_y = new_size_hint_y
+            self.pos_hint = {'center_x': 0.5, 'center_y': new_center_y}
+        else:
+            # Клавиатура скрыта — возвращаем исходные значения
+            self.size_hint_y = self._BASE_SIZE_HINT_Y
+            self.pos_hint = {'center_x': 0.5, 'center_y': self._BASE_CENTER_Y}
+
     def _close(self, instance):
         """Закрывает диалог урока"""
+        # Отписываемся от клавиатуры перед удалением
+        Window.unbind(on_keyboard_height=self._on_keyboard_height)
         if self.parent:
             self.parent.remove_widget(self)
 
