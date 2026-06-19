@@ -190,6 +190,14 @@ class MarkdownLabel(BoxLayout):
             elif stripped in ('---', '___', '***') or (len(stripped) >= 3 and
                     all(c == stripped[0] for c in stripped) and stripped[0] in '-_*'):
                 self._add_divider()
+            elif stripped.startswith('|') and stripped.endswith('|'):
+                # Собираем все строки таблицы
+                table_lines = []
+                while i < len(lines) and lines[i].strip().startswith('|'):
+                    table_lines.append(lines[i].strip())
+                    i += 1
+                self._add_table(table_lines)
+                continue  # i уже сдвинут
             else:
                 self._add_paragraph(line)
 
@@ -328,6 +336,190 @@ class MarkdownLabel(BoxLayout):
             code_input.width = _compute_w()
 
         self.bind(width=_update_code_width)
+
+    def _add_table(self, table_lines):
+        """
+        Рендерит Markdown-таблицу. Ширина каждого столбца подстраивается
+        под самую длинную строку в этом столбце (включая заголовок).
+        Таблица оборачивается в горизонтальный CodeScrollView.
+        """
+        theme = ThemeManager.get_theme()
+
+        # Парсим строки таблицы
+        def parse_row(line):
+            # Убираем крайние | и делим по |
+            cells = [c.strip() for c in line.strip().strip('|').split('|')]
+            return cells
+
+        rows = []
+        separator_idx = None
+        for idx, line in enumerate(table_lines):
+            stripped = line.strip()
+            # Строка-разделитель: | --- | :---: | ---: |
+            if re.match(r'^\|[\s\-:|]+\|$', stripped):
+                separator_idx = idx
+                continue
+            rows.append(parse_row(stripped))
+
+        if not rows:
+            return
+
+        header = rows[0] if separator_idx is not None and len(rows) > 0 else None
+        data_rows = rows[1:] if header is not None else rows
+
+        # Определяем число столбцов
+        num_cols = max(len(r) for r in rows)
+
+        # Вычисляем максимальную длину текста в каждом столбце
+        CHAR_WIDTH = dp(7.5)   # ширина одного символа JetBrainsMono 12dp
+        CELL_PAD   = dp(16)    # горизонтальный padding ячейки (8 с каждой стороны)
+        MIN_COL_W  = dp(40)
+
+        col_widths = [MIN_COL_W] * num_cols
+
+        all_rows = ([header] if header else []) + data_rows
+        for row in all_rows:
+            for c_idx, cell in enumerate(row):
+                if c_idx >= num_cols:
+                    break
+                text_clean = self._strip_inline_markdown(cell)
+                needed = len(text_clean) * CHAR_WIDTH + CELL_PAD
+                if needed > col_widths[c_idx]:
+                    col_widths[c_idx] = needed
+
+        ROW_H      = dp(30)
+        HEADER_H   = dp(34)
+        BORDER_W   = dp(1)
+
+        total_w = sum(col_widths) + BORDER_W * (num_cols + 1)
+        total_rows = (1 if header else 0) + len(data_rows)
+        total_h = HEADER_H + ROW_H * len(data_rows) + BORDER_W * (total_rows + 1)
+
+        # Горизонтальный скролл для таблицы
+        scroll = CodeScrollView(
+            size_hint=(1, None),
+            height=total_h,
+            do_scroll_x=True,
+            do_scroll_y=False,
+            bar_width=dp(3),
+            bar_color=(0.5, 0.5, 0.5, 0.7),
+            bar_inactive_color=(0.3, 0.3, 0.3, 0.4),
+        )
+
+        container = BoxLayout(
+            orientation='vertical',
+            size_hint=(None, None),
+            width=total_w,
+            height=total_h,
+            spacing=0,
+        )
+
+        bg_header  = theme.get('lesson_input_bg',   (0.22, 0.26, 0.35, 1))
+        bg_row     = theme.get('editor_bg',          (0.188, 0.204, 0.251, 1))
+        bg_alt     = theme.get('tab_bg',             (0.20, 0.22, 0.28, 1))
+        border_clr = theme.get('stats_text',         (0.35, 0.38, 0.42, 1))
+        text_clr   = theme.get('text_color',         (0.85, 0.88, 0.90, 1))
+        header_clr = theme.get('accent',             (0.95, 0.95, 1.00, 1))
+
+        def make_cell(text, width, height, bg_color, text_color, bold=False):
+            cell = BoxLayout(size_hint=(None, None), width=width, height=height)
+            with cell.canvas.before:
+                Color(*bg_color)
+                rect = Rectangle(pos=cell.pos, size=cell.size)
+            def _upd(inst, _):
+                rect.pos  = inst.pos
+                rect.size = inst.size
+            cell.bind(pos=_upd, size=_upd)
+
+            text_clean = self._strip_inline_markdown(text)
+            lbl = Label(
+                text=text_clean,
+                font_size=dp(12),
+                font_name='JetBrainsMono',
+                color=text_color,
+                size_hint=(1, 1),
+                halign='left',
+                valign='middle',
+                bold=bold,
+                padding=(dp(8), 0),
+            )
+            lbl.bind(size=lambda inst, _: setattr(inst, 'text_size', inst.size))
+            cell.add_widget(lbl)
+            return cell
+
+        def make_row(cells_text, row_height, bg_color, text_color, bold=False):
+            row = BoxLayout(
+                orientation='horizontal',
+                size_hint=(None, None),
+                width=total_w,
+                height=row_height,
+                spacing=0,
+            )
+
+            # Левый бордюр — отдельный виджет, как и правые
+            left_border = Label(
+                size_hint=(None, None),
+                width=BORDER_W,
+                height=row_height,
+            )
+            with left_border.canvas.before:
+                Color(*border_clr)
+                lb = Rectangle(pos=left_border.pos, size=left_border.size)
+            left_border.bind(pos=lambda inst, _, _lb=lb: setattr(_lb, 'pos', inst.pos))
+            row.add_widget(left_border)
+
+            for c_idx in range(num_cols):
+                cell_text = cells_text[c_idx] if c_idx < len(cells_text) else ''
+                cw = col_widths[c_idx]
+
+                cell_box = BoxLayout(
+                    orientation='horizontal',
+                    size_hint=(None, None),
+                    width=cw + BORDER_W,
+                    height=row_height,
+                    spacing=0,
+                    padding=[0, 0, 0, 0],
+                )
+                cell = make_cell(cell_text, cw, row_height, bg_color, text_color, bold)
+                cell_box.add_widget(cell)
+
+                # Правый бордюр каждой ячейки
+                border = Label(
+                    size_hint=(None, None),
+                    width=BORDER_W,
+                    height=row_height,
+                )
+                with border.canvas.before:
+                    Color(*border_clr)
+                    rb = Rectangle(pos=border.pos, size=border.size)
+                border.bind(pos=lambda inst, _, _rb=rb: setattr(_rb, 'pos', inst.pos))
+                cell_box.add_widget(border)
+                row.add_widget(cell_box)
+            return row
+
+        # Верхний бордюр
+        def add_hline(parent, width):
+            line = Label(size_hint=(None, None), width=width, height=BORDER_W)
+            with line.canvas.before:
+                Color(*border_clr)
+                r = Rectangle(pos=line.pos, size=line.size)
+            line.bind(pos=lambda inst, _, _r=r: setattr(_r, 'pos', inst.pos))
+            parent.add_widget(line)
+
+        add_hline(container, total_w)
+
+        if header:
+            container.add_widget(make_row(header, HEADER_H, bg_header, header_clr, bold=True))
+            add_hline(container, total_w)
+
+        for r_idx, row_data in enumerate(data_rows):
+            bg = bg_row if r_idx % 2 == 0 else bg_alt
+            container.add_widget(make_row(row_data, ROW_H, bg, text_clr))
+            add_hline(container, total_w)
+
+        scroll.add_widget(container)
+        self.add_widget(scroll)
+        self._add_spacer(dp(6))
 
     def _add_divider(self):
         theme = ThemeManager.get_theme()
