@@ -578,14 +578,11 @@ class LessonView(BoxLayout):
             scroll.bg_rect = Rectangle(pos=scroll.pos, size=scroll.size)
         scroll.bind(pos=self._update_scroll_bg, size=self._update_scroll_bg)
 
-        # ===== ТЕКСТ ЗАДАНИЯ С ПОДДЕРЖКОЙ MARKDOWN (АВТО-ВЫСОТА) =====
-        max_height = Window.height * 0.40  # 40% экрана для задания
-
+        # ===== ТЕКСТ ЗАДАНИЯ =====
         task_markdown = MarkdownLabel(
             text=task_text,
             font_size=dp(12)
         )
-        # Убираем auto_height и max_height
         task_markdown._update_background()
         content.add_widget(task_markdown)
 
@@ -612,7 +609,7 @@ class LessonView(BoxLayout):
         )
         content.add_widget(templates_title)
 
-        # ===== ШАБЛОНЫ =====
+        # ===== ШАБЛОНЫ (без возможности выделения) =====
         def add_copy_block(parent, title_text, code_text):
             if not code_text or not code_text.strip():
                 return
@@ -628,7 +625,6 @@ class LessonView(BoxLayout):
             )
             parent.add_widget(title)
 
-            # ScrollView для шаблона с авто-высотой
             code_scroll = TemplateScrollView(
                 size_hint_y=None,
                 height=dp(250),
@@ -646,11 +642,39 @@ class LessonView(BoxLayout):
                 foreground_color=theme.get('lesson_input_text', (0.95, 0.95, 0.95, 1)),
                 size_hint_y=None,
                 height=max(dp(250), len(code_text.split('\n')) * dp(20) + dp(20)),
-                padding=(dp(8), dp(8))
+                padding=(dp(8), dp(8)),
+                # Параметры, которые точно существуют в Kivy 2.3.1
+                cursor_blink=False,
+                selection_color=(0, 0, 0, 0),
+                cursor_color=(0, 0, 0, 0),
+                use_handles=False,          # важно для Android
+                use_bubble=False,
+                multiline=True,
+                do_wrap=False,
             )
+
+            # Жёсткое отключение любого выделения
+            def _disable_selection(*args):
+                if code_input.focus:
+                    code_input.focus = False
+                code_input.cancel_selection()
+                # Убираем handles на Android
+                try:
+                    for h in ('_handle_left', '_handle_right', '_handle_middle'):
+                        handle = getattr(code_input, h, None)
+                        if handle:
+                            handle.opacity = 0
+                except Exception:
+                    pass
+
+            code_input.bind(focus=_disable_selection)
+            # Дополнительно при любом тапе
+            code_input.bind(on_touch_down=lambda *a: _disable_selection())
+
             code_scroll.add_widget(code_input)
             parent.add_widget(code_scroll)
 
+            # Кнопка копирования
             copy_btn = Button(
                 text=self.app.tr.get('copy_to_clipboard', 'Copy to clipboard'),
                 font_name='SourceBold',
