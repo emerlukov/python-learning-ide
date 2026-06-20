@@ -17,30 +17,25 @@ from ide_core.themes import ThemeManager
 
 
 def _force_defocus(widget):
-    """
-    Рекурсивно снимает фокус и выделение со всех TextInput.
-    На Android дополнительно скрывает клавиатуру и убирает handle-маркеры.
-    """
     if isinstance(widget, TextInput):
         if widget.focus:
             widget.focus = False
         widget.cancel_selection()
-        # На Android явно убираем handle через внутренний _handle
         try:
             for handle_name in ('_handle_left', '_handle_right', '_handle_middle'):
-                if hasattr(widget, handle_name):
-                    handle = getattr(widget, handle_name)
-                    if handle:
-                        handle.opacity = 0
-                        # Дополнительно пытаемся отключить
-                        if hasattr(handle, 'parent') and handle.parent:
-                            handle.parent.remove_widget(handle)
+                h = getattr(widget, handle_name, None)
+                if h:
+                    h.opacity = 0
+                    if hasattr(h, 'parent') and h.parent:
+                        h.parent.remove_widget(h)
         except Exception:
             pass
-        # Дополнительно для Android context menu
+        # Очистка bubble меню
         try:
             if hasattr(widget, '_cut_copy_paste'):
                 widget._cut_copy_paste = None
+            if hasattr(widget, '_popup'):
+                widget._popup = None
         except Exception:
             pass
     for child in getattr(widget, 'children', []):
@@ -316,12 +311,10 @@ class MarkdownLabel(BoxLayout):
             code = '\n'.join(lines)
 
         lines_count = len(lines)
-        max_line_length = max((len(l) for l in lines), default=0)
 
         line_height = dp(18)
-        code_height = int(max(dp(16) + lines_count * line_height, dp(60)))
+        code_height = int(max(dp(40) + lines_count * line_height, dp(80)))
 
-        # Используем наш CodeScrollView
         code_scroll = CodeScrollView(
             size_hint=(1, None),
             height=code_height,
@@ -332,14 +325,12 @@ class MarkdownLabel(BoxLayout):
             bar_inactive_color=(0.3, 0.3, 0.3, 0.5),
         )
 
-        # Точное вычисление ширины по самой длинной строке + padding
+        # Точная ширина по самой длинной строке
         content_width = self._get_max_line_width(lines, font_size=dp(12))
-        # Минимальная ширина + padding TextInput
-        min_width = content_width + dp(20)  # +20px как запрошено + отступы
+        min_width = content_width + dp(32)  # комфортный отступ
 
         def _compute_w():
-            # Авто по контенту, но не меньше ширины родителя (чтобы не было слишком узко)
-            return max(self.width - dp(4), min_width)
+            return max(self.width - dp(8), min_width)
 
         code_input = TextInput(
             text=code,
@@ -353,21 +344,53 @@ class MarkdownLabel(BoxLayout):
             size_hint=(None, None),
             width=_compute_w(),
             height=code_height,
-            padding=(dp(8), dp(8)),  # left/right padding
+            padding=(dp(12), dp(10)),
             do_wrap=False,
-            use_handles=True,  # оставляем для выделения
+
+            # Основные настройки — без капелек, но с меню
+            use_handles=False,      # ← главное: без капелек
+            use_bubble=True,        # контекстное меню (Copy, Select All)
+            cursor_blink=False,
+            selection_color=(0.3, 0.6, 1.0, 0.35),
+            cursor_color=(0, 0, 0, 0),
         )
 
         code_scroll.add_widget(code_input)
         self.add_widget(code_scroll)
-        self._add_spacer(dp(4))
+        self._add_spacer(dp(6))
 
         def _update_code_width(instance, value):
             code_input.width = _compute_w()
 
         self.bind(width=_update_code_width)
 
-        # Дополнительно: при удалении виджета чистим selection
+        # === Улучшенное поведение меню и очистка ===
+        def _show_menu(*args):
+            try:
+                if code_input.selection_text:
+                    if hasattr(code_input, '_show_cut_copy_paste'):
+                        code_input._show_cut_copy_paste()
+                    elif hasattr(code_input, 'show_cut_copy_paste'):
+                        code_input.show_cut_copy_paste()
+            except Exception:
+                pass
+
+        def _clean_handles(*args):
+            try:
+                for name in ('_handle_left', '_handle_right', '_handle_middle'):
+                    handle = getattr(code_input, name, None)
+                    if handle:
+                        handle.opacity = 0
+            except Exception:
+                pass
+
+        # Привязки событий
+        code_input.bind(selection_from=_show_menu)
+        code_input.bind(selection_to=_show_menu)
+        code_input.bind(on_double_tap=lambda *a: Clock.schedule_once(_show_menu, 0.1))
+        code_input.bind(focus=_clean_handles)
+
+        # Очистка при удалении виджета
         def _on_parent_change(inst, parent):
             if parent is None:
                 _force_defocus(code_input)
