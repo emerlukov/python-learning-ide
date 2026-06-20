@@ -10,6 +10,7 @@ from kivy.metrics import dp
 from kivy.graphics import Color, Rectangle
 from kivy.core.window import Window
 from kivy.clock import Clock
+from kivy.core.text import Label as CoreLabel
 import re
 
 from ide_core.themes import ThemeManager
@@ -23,19 +24,26 @@ def _force_defocus(widget):
     if isinstance(widget, TextInput):
         if widget.focus:
             widget.focus = False
-        # cancel_selection сбрасывает selection_from/to и убирает маркеры
         widget.cancel_selection()
         # На Android явно убираем handle через внутренний _handle
         try:
-            if hasattr(widget, '_handle_left'):
-                widget._handle_left.opacity = 0
-            if hasattr(widget, '_handle_right'):
-                widget._handle_right.opacity = 0
-            if hasattr(widget, '_handle_middle'):
-                widget._handle_middle.opacity = 0
+            for handle_name in ('_handle_left', '_handle_right', '_handle_middle'):
+                if hasattr(widget, handle_name):
+                    handle = getattr(widget, handle_name)
+                    if handle:
+                        handle.opacity = 0
+                        # Дополнительно пытаемся отключить
+                        if hasattr(handle, 'parent') and handle.parent:
+                            handle.parent.remove_widget(handle)
         except Exception:
             pass
-    for child in widget.children:
+        # Дополнительно для Android context menu
+        try:
+            if hasattr(widget, '_cut_copy_paste'):
+                widget._cut_copy_paste = None
+        except Exception:
+            pass
+    for child in getattr(widget, 'children', []):
         _force_defocus(child)
 
 
@@ -278,6 +286,23 @@ class MarkdownLabel(BoxLayout):
         row.height = dp(24)
         self.add_widget(row)
 
+    @staticmethod
+    def _get_max_line_width(lines, font_size=dp(12), font_name='JetBrainsMono'):
+        """Точное вычисление ширины самой длинной строки с учетом шрифта."""
+        if not lines:
+            return dp(100)
+        core_label = CoreLabel(font_name=font_name, font_size=font_size, text='')
+        max_w = 0
+        for line in lines:
+            if not line.strip():
+                continue
+            core_label.text = line
+            core_label.refresh()
+            w = core_label.content_width
+            if w > max_w:
+                max_w = w
+        return max_w + dp(4)  # небольшой запас
+
     def _add_code_block(self, code):
         theme = ThemeManager.get_theme()
 
@@ -296,7 +321,7 @@ class MarkdownLabel(BoxLayout):
         line_height = dp(18)
         code_height = int(max(dp(16) + lines_count * line_height, dp(60)))
 
-        # Используем наш CodeScrollView вместо обычного ScrollView
+        # Используем наш CodeScrollView
         code_scroll = CodeScrollView(
             size_hint=(1, None),
             height=code_height,
@@ -307,10 +332,14 @@ class MarkdownLabel(BoxLayout):
             bar_inactive_color=(0.3, 0.3, 0.3, 0.5),
         )
 
-        # Ширина контента: не меньше ширины виджета и не меньше длины строк
+        # Точное вычисление ширины по самой длинной строке + padding
+        content_width = self._get_max_line_width(lines, font_size=dp(12))
+        # Минимальная ширина + padding TextInput
+        min_width = content_width + dp(20)  # +20px как запрошено + отступы
+
         def _compute_w():
-            return max(self.width - dp(4),
-                       max_line_length * dp(7) + dp(24))
+            # Авто по контенту, но не меньше ширины родителя (чтобы не было слишком узко)
+            return max(self.width - dp(4), min_width)
 
         code_input = TextInput(
             text=code,
@@ -324,8 +353,9 @@ class MarkdownLabel(BoxLayout):
             size_hint=(None, None),
             width=_compute_w(),
             height=code_height,
-            padding=(dp(8), dp(8)),
+            padding=(dp(8), dp(8)),  # left/right padding
             do_wrap=False,
+            use_handles=True,  # оставляем для выделения
         )
 
         code_scroll.add_widget(code_input)
@@ -336,6 +366,12 @@ class MarkdownLabel(BoxLayout):
             code_input.width = _compute_w()
 
         self.bind(width=_update_code_width)
+
+        # Дополнительно: при удалении виджета чистим selection
+        def _on_parent_change(inst, parent):
+            if parent is None:
+                _force_defocus(code_input)
+        code_input.bind(parent=_on_parent_change)
 
     def _add_table(self, table_lines):
         """
@@ -574,3 +610,9 @@ class MarkdownLabel(BoxLayout):
 
     def apply_theme(self):
         self._update_background()
+
+    def on_parent(self, instance, parent):
+        """Дополнительная очистка при удалении из дерева (закрытие окна урока)."""
+        if parent is None:
+            _force_defocus(self)
+            Clock.schedule_once(lambda dt: _force_defocus(self), 0.1)
