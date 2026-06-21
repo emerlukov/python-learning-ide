@@ -337,7 +337,7 @@ class MarkdownLabel(BoxLayout):
             readonly=True,
             font_size=dp(12),
             font_name='JetBrainsMono',
-            background_color=theme.get('lesson_input_bg', (0.25, 0.30, 0.40, 1)),
+            background_color=theme.get('tab_bg', (0.843, 0.816, 1.0, 1)),
             foreground_color=theme.get('lesson_input_text', (0.95, 0.95, 0.95, 1)),
             background_normal='',
             background_active='',
@@ -478,7 +478,7 @@ class MarkdownLabel(BoxLayout):
         bg_alt     = theme.get('tab_bg',             (0.20, 0.22, 0.28, 1))
         border_clr = theme.get('stats_text',         (0.35, 0.38, 0.42, 1))
         text_clr   = theme.get('text_color',         (0.85, 0.88, 0.90, 1))
-        header_clr = theme.get('accent',             (0.95, 0.95, 1.00, 1))
+        header_clr = theme.get('lesson_input_text',  (0, 0, 0, 1))
 
         def make_cell(text, width, height, bg_color, text_color, bold=False):
             cell = BoxLayout(size_hint=(None, None), width=width, height=height)
