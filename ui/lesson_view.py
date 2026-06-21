@@ -23,7 +23,6 @@ from widgets import InteractiveCodeWidget
 from utils.vibration_manager import VibrationManager
 
 
-
 def _force_defocus_tree(widget):
     """
     Рекурсивно снимает фокус и маркеры выделения со всех TextInput.
@@ -81,6 +80,7 @@ class PassthroughScrollView(ScrollView):
                 if r:
                     return r
             return None
+
         return _search(self)
 
 
@@ -101,7 +101,7 @@ class TemplateScrollView(ScrollView):
             return False
         touch.ud['tsv_ox'] = touch.x
         touch.ud['tsv_oy'] = touch.y
-        touch.ud['tsv_dir'] = None    # None / 'v' / 'h'
+        touch.ud['tsv_dir'] = None  # None / 'v' / 'h'
         touch.ud['tsv_inner_started'] = False
         touch.grab(self)
         return True
@@ -129,14 +129,14 @@ class TemplateScrollView(ScrollView):
             sw = self.content_width - self.width
             if sw > 0:
                 self.scroll_x = max(0.0, min(1.0,
-                    self.scroll_x - dx / sw))
+                                             self.scroll_x - dx / sw))
                 touch.ud['tsv_ox'] = touch.x
                 touch.ud['tsv_oy'] = touch.y
         elif self.do_scroll_y and self.content_height > self.height:
             sh = self.content_height - self.height
             if sh > 0:
                 self.scroll_y = max(0.0, min(1.0,
-                    self.scroll_y + dy / sh))
+                                             self.scroll_y + dy / sh))
                 touch.ud['tsv_ox'] = touch.x
                 touch.ud['tsv_oy'] = touch.y
         return True
@@ -165,7 +165,6 @@ class TemplateScrollView(ScrollView):
         if self.children:
             return self.children[0].height
         return self.height
-
 
 
 class LessonView(BoxLayout):
@@ -285,33 +284,68 @@ class LessonView(BoxLayout):
         self.add_widget(self.tab_panel)
 
         # ========== НИЖНЯЯ ПАНЕЛЬ С КНОПКАМИ ==========
-        buttons_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(45), spacing=dp(10))
+        buttons_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(45), spacing=dp(5))
 
-        # Кнопка запуска кода
+        # Кнопка запуска кода (уменьшаем)
         self.run_btn = Button(
             text=tr.get('run', 'Run'),
             font_name='SourceBold',
             background_color=theme.get('run_btn_bg', (0.85, 0.88, 0.90, 1)),
             background_normal='', background_down='',
             color=theme.get('run_btn_text', (0.18, 0.18, 0.19, 1)),
-            font_size=dp(20)
+            font_size=dp(16),
+            size_hint_x=0.2  # Уменьшаем
         )
         self.run_btn.bind(on_release=self._run_code)
+
+        # ===== НАВИГАЦИОННЫЕ КНОПКИ =====
+        # Кнопка "Назад" (←)
+        self.prev_btn = Button(
+            text='←',
+            font_name='DejaVuSans',
+            size_hint_x=0.1,
+            background_color=theme.get('widget_bg', (0.141, 0.145, 0.149, 1)),
+            background_normal='', background_down='',
+            color=theme['text_color'],
+            font_size=dp(18),
+            bold=True,
+            disabled=True
+        )
+        self.prev_btn.bind(on_release=self._go_to_previous_lesson)
+
+        # Кнопка "Вперёд" (→)
+        self.next_btn = Button(
+            text='→',
+            font_name='DejaVuSans',
+            size_hint_x=0.1,
+            background_color=theme.get('widget_bg', (0.141, 0.145, 0.149, 1)),
+            background_normal='', background_down='',
+            color=theme['text_color'],
+            font_size=dp(18),
+            bold=True,
+            disabled=True
+        )
+        self.next_btn.bind(on_release=self._go_to_next_lesson)
 
         # Кнопка отметки о прохождении (используем course_id)
         is_completed = self.lesson_manager.is_lesson_completed(lesson_id, self.course_id)
         self.complete_btn = Button(
-            text="✓ " + (tr.get('completed', 'Completed') if is_completed else tr.get('mark_completed', 'Mark Completed')),
+            text="✓ " + (
+                tr.get('completed', 'Completed') if is_completed else tr.get('mark_completed', 'Mark Completed')),
             font_name='SourceBold',
-            background_color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)) if is_completed else theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1)),
+            background_color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)) if is_completed else theme.get(
+                'btn_success_bg', (0.2, 0.5, 0.2, 1)),
             background_normal='', background_down='',
             color=theme['text_color'] if is_completed else (1, 1, 1, 1),
             font_size=dp(12),
-            disabled=is_completed
+            disabled=is_completed,
+            size_hint_x=0.3
         )
         self.complete_btn.bind(on_release=self._mark_completed)
 
         buttons_layout.add_widget(self.run_btn)
+        buttons_layout.add_widget(self.prev_btn)  # ← стрелка
+        buttons_layout.add_widget(self.next_btn)  # → стрелка
         buttons_layout.add_widget(self.complete_btn)
         self.add_widget(buttons_layout)
 
@@ -322,6 +356,108 @@ class LessonView(BoxLayout):
                 pass
             elif hasattr(self.practice_editor, 'text'):
                 self.practice_editor.text = saved_code
+
+        # Обновляем состояние навигационных кнопок
+        self._update_navigation_buttons()
+
+    def _update_navigation_buttons(self):
+        """Обновляет состояние кнопок навигации"""
+        current_lesson = self.lesson
+        current_id = current_lesson.get('id', 0)
+        current_order = current_lesson.get('order', 0)
+
+        # Получаем все уроки курса
+        course = self.lesson_manager.get_course(self.course_id)
+        if not course:
+            self.prev_btn.disabled = True
+            self.next_btn.disabled = True
+            return
+
+        lessons = course.get('lessons', [])
+        sorted_lessons = sorted(lessons, key=lambda x: x.get('order', 0))
+
+        # Получаем ID пройденных уроков
+        completed_ids = self.lesson_manager.get_completed_lesson_ids(self.course_id)
+
+        # Находим индекс текущего урока
+        current_index = -1
+        for i, l in enumerate(sorted_lessons):
+            if l.get('id') == current_id:
+                current_index = i
+                break
+
+        if current_index == -1:
+            self.prev_btn.disabled = True
+            self.next_btn.disabled = True
+            return
+
+        # Проверяем, пройден ли текущий урок
+        is_current_completed = current_id in completed_ids
+
+        # ==== КНОПКА "НАЗАД" (←) ====
+        # Ищем ближайший пройденный урок до текущего
+        prev_completed = None
+        for i in range(current_index - 1, -1, -1):
+            if sorted_lessons[i].get('id') in completed_ids:
+                prev_completed = sorted_lessons[i]
+                break
+
+        # Кнопка "назад" активна, если есть пройденный урок перед текущим
+        self.prev_btn.disabled = (prev_completed is None)
+        self.prev_btn.lesson_to_switch = prev_completed
+
+        # ==== КНОПКА "ВПЕРЁД" (→) ====
+        # Ищем следующий урок (неважно, пройден он или нет)
+        next_lesson = None
+        if current_index < len(sorted_lessons) - 1:
+            next_lesson = sorted_lessons[current_index + 1]
+
+        # Кнопка "вперёд" активна, если:
+        # 1) Есть следующий урок
+        # 2) Текущий урок ПРОЙДЕН (только с пройденного можно перейти дальше)
+        self.next_btn.disabled = (next_lesson is None or not is_current_completed)
+        self.next_btn.lesson_to_switch = next_lesson
+
+    def _go_to_previous_lesson(self, instance):
+        """Переходит к предыдущему ПРОЙДЕННОМУ уроку"""
+        VibrationManager.vibrate(0.02)
+
+        # Получаем урок из атрибута кнопки
+        target_lesson = getattr(instance, 'lesson_to_switch', None)
+        if target_lesson:
+            self._switch_to_lesson(target_lesson)
+
+    def _go_to_next_lesson(self, instance):
+        """Переходит к следующему уроку (может быть не пройденным)"""
+        VibrationManager.vibrate(0.02)
+
+        # Получаем урок из атрибута кнопки
+        target_lesson = getattr(instance, 'lesson_to_switch', None)
+        if target_lesson:
+            self._switch_to_lesson(target_lesson)
+
+    def _switch_to_lesson(self, lesson):
+        """Переключает текущий вид на другой урок"""
+        # Сохраняем текущий код
+        self._update_code_from_editor()
+
+        # Создаём новый вид с другим уроком
+        from ui.lesson_view import LessonView
+
+        new_view = LessonView(
+            self.app,
+            lesson,
+            self.lesson_manager,
+            course_id=self.course_id
+        )
+        new_view.size_hint = self.size_hint
+        new_view.pos_hint = self.pos_hint
+
+        # Заменяем текущий вид
+        parent = self.parent
+        if parent:
+            parent.remove_widget(self)
+            parent.add_widget(new_view)
 
     def _apply_tab_theme(self):
         """Применяет цвета из темы к вкладкам"""
@@ -647,7 +783,7 @@ class LessonView(BoxLayout):
                 cursor_blink=False,
                 selection_color=(0, 0, 0, 0),
                 cursor_color=(0, 0, 0, 0),
-                use_handles=False,          # важно для Android
+                use_handles=False,  # важно для Android
                 use_bubble=False,
                 multiline=True,
                 do_wrap=False,
@@ -962,8 +1098,8 @@ class LessonView(BoxLayout):
 
         if visible_h < self._win_height * 0.85:
             # Клавиатура поднялась — занимаем доступную высоту и центрируемся в ней
-            kb_h = self._win_height - visible_h          # пикселей занято клавиатурой
-            kb_fraction = kb_h / parent_h                # доля от root_layout
+            kb_h = self._win_height - visible_h  # пикселей занято клавиатурой
+            kb_fraction = kb_h / parent_h  # доля от root_layout
 
             new_size_hint_y = (visible_h / parent_h) - 0.02
             new_size_hint_y = max(new_size_hint_y, 0.35)
