@@ -56,8 +56,8 @@ class InteractiveCodeWidget(BoxLayout):
         for line in lines:
             if '§' in line:
                 parts = line.split('§')
-                print(f"Line: {line}")
-                print(f"Parts: {parts}")
+                #print(f"Line: {line}")
+                #print(f"Parts: {parts}")
                 w = sum(len(p) * cw + 0 for p in parts if p)
                 w += dp(30) * (len(parts) - 1)
             else:
@@ -208,9 +208,9 @@ class InteractiveCodeWidget(BoxLayout):
 
     def _create_line_with_input(self, line, theme, lh, cw, v_pad):
         parts = line.split('§')
-        print(f"\n=== PROCESSING LINE ===")
-        print(f"Original: '{line}'")
-        print(f"Parts: {parts}")
+        #print(f"\n=== PROCESSING LINE ===")
+        #print(f"Original: '{line}'")
+        #print(f"Parts: {parts}")
 
         row = BoxLayout(
             orientation='horizontal',
@@ -268,7 +268,7 @@ class InteractiveCodeWidget(BoxLayout):
             width=dp(30),
             height=lh,
             padding=[dp(4), 0, dp(4), 0],
-            background_color=theme.get('lesson_input_bg', (0.25, 0.30, 0.40, 1)),
+            background_color=theme.get('tab_bg', (0.25, 0.30, 0.40, 1)),
             foreground_color=theme.get('lesson_input_text', (0.95, 0.95, 0.95, 1)),
             cursor_color=theme.get('input_cursor', (1, 1, 1, 1)),
             background_normal='',
@@ -317,9 +317,9 @@ class InteractiveCodeWidget(BoxLayout):
         lines = self.template.split('\n')
         field_index = 0
         result_lines = []
-        print(f"=== get_user_code DEBUG ===")
-        print(f"Template lines: {len(lines)}")
-        print(f"Input fields count: {len(self.input_fields)}")
+        #print(f"=== get_user_code DEBUG ===")
+        #print(f"Template lines: {len(lines)}")
+        #print(f"Input fields count: {len(self.input_fields)}")
 
         for line in lines:
             if '§' in line:
@@ -335,8 +335,8 @@ class InteractiveCodeWidget(BoxLayout):
                 result_lines.append(line)
 
             result = '\n'.join(result_lines)
-            print(f"Result: '{result}'")
-            print(f"=========================")
+            #print(f"Result: '{result}'")
+            #print(f"=========================")
         return '\n'.join(result_lines)
 
     def set_values(self, values):
