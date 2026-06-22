@@ -311,6 +311,7 @@ class LessonView(BoxLayout):
             bold=True,
             disabled=True
         )
+        self.prev_btn.no_vibration_wrap = True
         self.prev_btn.bind(on_release=self._go_to_previous_lesson)
 
         # Кнопка "Вперёд" (→)
@@ -325,6 +326,7 @@ class LessonView(BoxLayout):
             bold=True,
             disabled=True
         )
+        self.next_btn.no_vibration_wrap = True
         self.next_btn.bind(on_release=self._go_to_next_lesson)
 
         # Кнопка отметки о прохождении (используем course_id)
@@ -420,7 +422,6 @@ class LessonView(BoxLayout):
 
     def _go_to_previous_lesson(self, instance):
         """Переходит к предыдущему ПРОЙДЕННОМУ уроку"""
-        VibrationManager.vibrate(0.02)
 
         # Получаем урок из атрибута кнопки
         target_lesson = getattr(instance, 'lesson_to_switch', None)
@@ -429,7 +430,6 @@ class LessonView(BoxLayout):
 
     def _go_to_next_lesson(self, instance):
         """Переходит к следующему уроку (может быть не пройденным)"""
-        VibrationManager.vibrate(0.02)
 
         # Получаем урок из атрибута кнопки
         target_lesson = getattr(instance, 'lesson_to_switch', None)
@@ -438,6 +438,9 @@ class LessonView(BoxLayout):
 
     def _switch_to_lesson(self, lesson):
         """Переключает текущий вид на другой урок"""
+
+        VibrationManager.vibrate(0.02)
+
         # Сохраняем текущий код
         self._update_code_from_editor()
 
