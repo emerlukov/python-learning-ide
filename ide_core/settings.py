@@ -89,3 +89,16 @@ class SettingsManager:
         settings = cls.load()
         settings['editor_font'] = font_key
         return cls.save(settings)
+
+    @classmethod
+    def get_vibration_enabled(cls):
+        """Возвращает состояние вибрации (по умолчанию True)"""
+        settings = cls.load()
+        return settings.get('vibration_enabled', True)
+
+    @classmethod
+    def save_vibration_enabled(cls, enabled):
+        """Сохраняет состояние вибрации"""
+        settings = cls.load()
+        settings['vibration_enabled'] = enabled
+        return cls.save(settings)
