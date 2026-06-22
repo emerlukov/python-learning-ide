@@ -15,12 +15,9 @@ from functools import wraps
 HAS_VIBRATOR = False
 try:
     from plyer import vibrator
-
-    # Проверяем, работает ли вибратор на этой платформе
     if platform == 'android' or platform == 'ios':
         HAS_VIBRATOR = True
     else:
-        # На Windows вибрация не поддерживается
         HAS_VIBRATOR = False
 except ImportError:
     HAS_VIBRATOR = False
@@ -32,7 +29,6 @@ ANDROID_AVAILABLE = False
 if platform == 'android':
     try:
         from jnius import autoclass
-
         ANDROID_VIBRATOR = autoclass('android.os.Vibrator')
         Context = autoclass('android.content.Context')
         ANDROID_AVAILABLE = True
@@ -56,8 +52,27 @@ class VibrationManager:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
+            cls._load_from_settings()  # Загружаем состояние из настроек
             cls._init_vibrator()
         return cls._instance
+
+    @classmethod
+    def _load_from_settings(cls):
+        """Загружает состояние вибрации из настроек"""
+        try:
+            from ide_core import SettingsManager
+            cls._enabled = SettingsManager.get_vibration_enabled()
+        except:
+            cls._enabled = True
+
+    @classmethod
+    def _save_to_settings(cls):
+        """Сохраняет состояние вибрации в настройки"""
+        try:
+            from ide_core import SettingsManager
+            SettingsManager.save_vibration_enabled(cls._enabled)
+        except:
+            pass
 
     @classmethod
     def _init_vibrator(cls):
@@ -90,24 +105,21 @@ class VibrationManager:
             duration = cls._duration
 
         try:
-            # Способ 1: через plyer
             if HAS_VIBRATOR:
                 vibrator.vibrate(duration)
                 return
-
-            # Способ 2: через Android напрямую
             if platform == 'android' and cls._vibrator_instance:
                 milliseconds = int(duration * 1000)
                 cls._vibrator_instance.vibrate(milliseconds)
                 return
         except Exception as e:
-            # Тихо игнорируем ошибки вибрации
             pass
 
     @classmethod
     def set_enabled(cls, enabled):
-        """Включает/выключает вибрацию"""
+        """Включает/выключает вибрацию и сохраняет в настройки"""
         cls._enabled = enabled
+        cls._save_to_settings()
 
     @classmethod
     def is_enabled(cls):
@@ -120,18 +132,22 @@ class VibrationManager:
         cls._duration = duration
 
     @classmethod
-    def wrap_button(cls, button, vibrate_on_press=False):
-        """
-        Обёртывает кнопку для автоматической вибрации.
+    def toggle(cls):
+        """Переключает состояние вибрации и сохраняет"""
+        cls._enabled = not cls._enabled
+        cls._save_to_settings()
+        return cls._enabled
 
-        Args:
-            button: Кнопка для обёртки
-            vibrate_on_press: Если True, вибрация на on_press, иначе на on_release
-        """
+    @classmethod
+    def wrap_button(cls, button, vibrate_on_press=False):
+        """Обёртывает кнопку для автоматической вибрации."""
         if not button or button in cls._wrapped_buttons:
             return button
 
-        # Сохраняем оригинальные обработчики
+        # Проверяем флаг no_vibration_wrap
+        if getattr(button, 'no_vibration_wrap', False):
+            return button
+
         original_on_release = getattr(button, 'on_release', None)
         original_on_press = getattr(button, 'on_press', None)
 
@@ -168,34 +184,22 @@ class VibrationManager:
 
 
 def vibrate(func):
-    """
-    Декоратор для добавления вибрации к любому методу.
-
-    Использование:
-        @vibrate
-        def on_button_click(self, instance):
-            pass
-    """
-
+    """Декоратор для добавления вибрации к любому методу."""
     @wraps(func)
     def wrapper(*args, **kwargs):
         VibrationManager.vibrate()
         return func(*args, **kwargs)
-
     return wrapper
 
 
 def vibrate_on_press(func):
-    """
-    Декоратор для вибрации при нажатии (вместо отпускания)
-    """
-
+    """Декоратор для вибрации при нажатии (вместо отпускания)"""
     @wraps(func)
     def wrapper(*args, **kwargs):
         VibrationManager.vibrate()
         return func(*args, **kwargs)
-
     return wrapper
+
 
 def wrap_all_buttons(widget, recursive=True):
     """
@@ -212,7 +216,6 @@ def wrap_all_buttons(widget, recursive=True):
                                        MDFloatingActionButton, MDRaisedButton)
         from kivy.uix.behaviors import ButtonBehavior
 
-        # Все возможные типы кнопок
         button_types = (
             Button,
             MDRectangleFlatButton,
@@ -223,8 +226,7 @@ def wrap_all_buttons(widget, recursive=True):
             MDRaisedButton,
         )
 
-        # Также оборачиваем любой виджет с ButtonBehavior
-        # Пропускаем кнопки с флагом no_vibration_wrap — они управляют вибрацией вручную
+        # Пропускаем кнопки с флагом no_vibration_wrap
         if getattr(widget, 'no_vibration_wrap', False):
             pass
         elif isinstance(widget, ButtonBehavior):
@@ -236,21 +238,11 @@ def wrap_all_buttons(widget, recursive=True):
             for child in widget.children:
                 wrap_all_buttons(child, recursive)
     except Exception as e:
-        pass  # Игнорируем ошибки при обёртке
+        pass
 
 
 def auto_wrap_on_build(app_instance):
-    """
-    Автоматически обёртывает все кнопки после построения интерфейса.
-    Вызывать в методе build() приложения.
-
-    Использование:
-        class MyApp(App):
-            def build(self):
-                # ... создание UI ...
-                auto_wrap_on_build(self)
-                return root_widget
-    """
+    """Автоматически обёртывает все кнопки после построения интерфейса."""
     if app_instance and hasattr(app_instance, 'root'):
         Clock.schedule_once(lambda dt: wrap_all_buttons(app_instance.root), 0.5)
         Clock.schedule_once(lambda dt: wrap_all_buttons(app_instance.root), 1.0)
