@@ -194,13 +194,12 @@ class PythonLearningApp(MDApp):
     def set_vibration_enabled(self, enabled):
         """Включает/выключает вибрацию глобально"""
         VibrationManager.set_enabled(enabled)
-        # Сохраняем настройку
-        SettingsManager.save_setting('vibration_enabled', enabled)
+
 
     def set_vibration_duration(self, duration):
         """Устанавливает длительность вибрации"""
         VibrationManager.set_duration(duration)
-        SettingsManager.save_setting('vibration_duration', duration)
+
 
     def _create_main_widget(self):
         """Создаёт главный виджет приложения"""
