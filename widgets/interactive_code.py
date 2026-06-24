@@ -1,6 +1,13 @@
 # widgets/interactive_code.py
 """
 Interactive code widget with fill-in-the-blank fields
+
+ОПТИМИЗАЦИИ (v2):
+  1. _build_ui строит строки порциями (CHUNK_SIZE) через Clock.schedule_once —
+     UI не зависает при длинных шаблонах.
+  2. Убраны десятки Clock.schedule_once на каждый label (_adjust_label_width).
+     Ширина метки рассчитывается один раз после всего рендера.
+  3. _finalize_row_width объединён в один проход после построения всех строк.
 """
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
@@ -11,6 +18,8 @@ from kivy.metrics import dp
 from kivy.clock import Clock
 
 from ide_core.themes import ThemeManager
+
+CHUNK_SIZE = 6  # строк за один кадр
 
 
 class InteractiveCodeWidget(BoxLayout):
@@ -56,25 +65,20 @@ class InteractiveCodeWidget(BoxLayout):
         for line in lines:
             if '§' in line:
                 parts = line.split('§')
-                #print(f"Line: {line}")
-                #print(f"Parts: {parts}")
-                w = sum(len(p) * cw + 0 for p in parts if p)
+                w = sum(len(p) * cw for p in parts if p)
                 w += dp(30) * (len(parts) - 1)
             else:
-                w = len(line) * cw + dp(80)  # Увеличил с dp(40) до dp(80)
-
-                # Увеличил лимиты
+                w = len(line) * cw + dp(80)
                 if len(line) > 35 or 'random.randint' in line or 'int(input' in line or 'while True' in line:
-                    w = max(w, dp(800))  # Было dp(580)
+                    w = max(w, dp(800))
                 elif line.startswith('#') or line.startswith('    '):
-                    w = max(w, dp(600))  # Было dp(480)
+                    w = max(w, dp(600))
                 else:
-                    w = max(w, dp(500))  # ДОБАВЛЕНО: минимальная ширина для обычных строк
+                    w = max(w, dp(500))
             max_content_w = max(max_content_w, w)
 
         self._content_w = max_content_w + PAD_H * 2
 
-        # ScrollView — только бары, touch обрабатываем сами
         self.scroll = ScrollView(
             size_hint=(1, 1),
             do_scroll_x=True,
@@ -91,11 +95,30 @@ class InteractiveCodeWidget(BoxLayout):
             spacing=dp(2),
             padding=[PAD_H, dp(8), PAD_H, dp(8)],
         )
-        self.main_container.bind(
-            minimum_height=self.main_container.setter('height'),
-        )
+        self.main_container.bind(minimum_height=self.main_container.setter('height'))
 
-        for line in lines:
+        self.scroll.add_widget(self.main_container)
+        self.add_widget(self.scroll)
+
+        # Запускаем порционное построение строк
+        self._pending_lines = list(enumerate(lines))
+        self._build_theme = theme
+        self._build_lh = lh
+        self._build_cw = cw
+        self._build_v_pad = v_pad
+        self._build_event = Clock.schedule_once(self._build_chunk, 0)
+
+    def _build_chunk(self, dt):
+        """Строит CHUNK_SIZE строк за один кадр."""
+        theme = self._build_theme
+        lh = self._build_lh
+        cw = self._build_cw
+        v_pad = self._build_v_pad
+
+        chunk = self._pending_lines[:CHUNK_SIZE]
+        self._pending_lines = self._pending_lines[CHUNK_SIZE:]
+
+        for _idx, line in chunk:
             if '§' in line:
                 row = self._create_line_with_input(line, theme, lh, cw, v_pad)
             else:
@@ -103,19 +126,38 @@ class InteractiveCodeWidget(BoxLayout):
             self.main_container.add_widget(row)
             self._rows.append(row)
 
-        self.scroll.add_widget(self.main_container)
-        self.add_widget(self.scroll)
+        if self._pending_lines:
+            # Ещё есть строки — планируем следующий чанк
+            self._build_event = Clock.schedule_once(self._build_chunk, 0)
+        else:
+            # Всё построено — финальная инициализация размеров
+            Clock.schedule_once(self._finalize_sizes, 0)
+            # Освобождаем временные данные
+            del self._pending_lines, self._build_theme
+            del self._build_lh, self._build_cw, self._build_v_pad
 
-        Clock.schedule_once(self._init_sizes, 0)
-
-    def _init_sizes(self, dt):
+    def _finalize_sizes(self, dt):
+        """Один финальный проход: выравниваем ширины меток и контейнера."""
         sw = self.scroll.width or self.width
-        self.main_container.width = max(self._content_w, sw)
+        container_w = max(self._content_w, sw)
+
+        for row in self._rows:
+            if isinstance(row, Label):
+                # Уточняем по реальному texture, если готов
+                if hasattr(row, 'texture') and row.texture:
+                    row.width = max(row.width, row.texture_size[0] + dp(8))
+            elif isinstance(row, BoxLayout):
+                # Пересчитываем ширину строк с полями ввода
+                total = sum(c.width for c in row.children) + dp(10)
+                row.width = total
+                container_w = max(container_w, total + dp(20))
+
+        self.main_container.width = container_w
         self.scroll.scroll_x = 0
         self.scroll.scroll_y = 1
 
     # ------------------------------------------------------------------ #
-    #  Touch — правильный скролл пальцем                                  #
+    #  Touch — скролл пальцем                                             #
     # ------------------------------------------------------------------ #
 
     def on_touch_down(self, touch):
@@ -152,18 +194,18 @@ class InteractiveCodeWidget(BoxLayout):
             return True
 
         sv = self.scroll
-        cw = self.main_container.width
-        ch = self.main_container.height
-        sw = sv.width
-        sh = sv.height
+        cont_w = self.main_container.width
+        cont_h = self.main_container.height
+        sv_w = sv.width
+        sv_h = sv.height
 
-        if locked == 'h' and cw > sw:
-            max_scroll = cw - sw
+        if locked == 'h' and cont_w > sv_w:
+            max_scroll = cont_w - sv_w
             new_sx = touch.ud['icw_sx'] + dx / max_scroll
             sv.scroll_x = max(0.0, min(1.0, new_sx))
 
-        elif locked == 'v' and ch > sh:
-            max_scroll = ch - sh
+        elif locked == 'v' and cont_h > sv_h:
+            max_scroll = cont_h - sv_h
             new_sy = touch.ud['icw_sy'] + dy / max_scroll
             sv.scroll_y = max(0.0, min(1.0, new_sy))
 
@@ -180,7 +222,6 @@ class InteractiveCodeWidget(BoxLayout):
     # ------------------------------------------------------------------ #
 
     def _create_line_text(self, text, theme, lh, cw):
-        # Более точный расчёт ширины
         base_w = len(text) * cw + dp(40)
         if text.startswith('#') or len(text) > 50:
             base_w = max(base_w, dp(1500))
@@ -198,19 +239,10 @@ class InteractiveCodeWidget(BoxLayout):
             height=lh,
             text_size=(base_w, lh),
         )
-        # Отложенное уточнение ширины по реальному texture
-        Clock.schedule_once(lambda dt: self._adjust_label_width(label), 0.05)
         return label
-
-    def _adjust_label_width(self, label):
-        if hasattr(label, 'texture') and label.texture:
-            label.width = max(label.width, label.texture_size[0] + dp(8))
 
     def _create_line_with_input(self, line, theme, lh, cw, v_pad):
         parts = line.split('§')
-        #print(f"\n=== PROCESSING LINE ===")
-        #print(f"Original: '{line}'")
-        #print(f"Parts: {parts}")
 
         row = BoxLayout(
             orientation='horizontal',
@@ -220,9 +252,9 @@ class InteractiveCodeWidget(BoxLayout):
             padding=0,
         )
 
+        row_w = 0
         for i, part in enumerate(parts):
             if part:
-                # Щедрее считаем ширину
                 part_w = len(part) * cw + dp(15)
                 label = Label(
                     text=part,
@@ -237,28 +269,18 @@ class InteractiveCodeWidget(BoxLayout):
                     text_size=(part_w, lh),
                 )
                 row.add_widget(label)
-                # Отложенная корректировка
-                Clock.schedule_once(lambda dt, lbl=label: self._adjust_label_width(lbl), 0.1)
+                row_w += part_w
 
             if i < len(parts) - 1:
                 field = self._make_field(theme, lh, v_pad, row)
                 row.add_widget(field)
                 self.input_fields.append(field)
+                row_w += dp(30)
 
-        # Финальный расчёт ширины строки
-        Clock.schedule_once(lambda dt: self._finalize_row_width(row), 0.1)
+        row.width = row_w + dp(10)
         return row
 
-    def _finalize_row_width(self, row):
-        """Принудительно пересчитываем ширину после рендера детей"""
-        total = sum(c.width for c in row.children) + dp(10)
-        row.width = total
-        # Обновляем максимальную ширину контейнера
-        if hasattr(self, 'main_container') and total > self.main_container.width:
-            self.main_container.width = total + dp(20)
-
     def _make_field(self, theme, lh, v_pad, parent_row):
-        """Создаёт поле ввода с видимым фоном"""
         field = TextInput(
             text='',
             multiline=False,
@@ -276,21 +298,17 @@ class InteractiveCodeWidget(BoxLayout):
             keyboard_suggestions=False,
         )
 
-        # Сохраняем ссылки для обновления
         field._parent_row = parent_row
         field._char_width = self._char_width
 
         def on_text(inst, val):
-            # Ширина поля = ширина текста + отступы
             new_w = max(dp(30), len(val) * inst._char_width + dp(20))
             new_w = min(new_w, dp(400))
             if abs(new_w - inst.width) < dp(1):
                 return
             inst.width = new_w
-            # Пересчитываем ширину строки
             row_w = sum(c.width for c in inst._parent_row.children)
             inst._parent_row.width = row_w
-            # Обновляем ширину контейнера
             needed = row_w + dp(16)
             if needed > self.main_container.width:
                 sy = self.scroll.scroll_y
@@ -306,20 +324,16 @@ class InteractiveCodeWidget(BoxLayout):
                 VibrationManager.vibrate(0.015)
 
         field.bind(focus=on_focus)
-
         return field
 
     # ------------------------------------------------------------------ #
-    #  Публичный API
+    #  Публичный API                                                       #
     # ------------------------------------------------------------------ #
 
     def get_user_code(self):
         lines = self.template.split('\n')
         field_index = 0
         result_lines = []
-        #print(f"=== get_user_code DEBUG ===")
-        #print(f"Template lines: {len(lines)}")
-        #print(f"Input fields count: {len(self.input_fields)}")
 
         for line in lines:
             if '§' in line:
@@ -334,9 +348,6 @@ class InteractiveCodeWidget(BoxLayout):
             else:
                 result_lines.append(line)
 
-            result = '\n'.join(result_lines)
-            #print(f"Result: '{result}'")
-            #print(f"=========================")
         return '\n'.join(result_lines)
 
     def set_values(self, values):
