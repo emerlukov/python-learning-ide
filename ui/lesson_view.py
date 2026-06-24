@@ -1,6 +1,13 @@
 # ui/lesson_view.py
 """
 Lesson view dialog with theory, practice, task and hint tabs
+
+ОПТИМИЗАЦИИ (v2):
+  1. Ленивая загрузка вкладок — контент строится только при первом открытии вкладки.
+  2. Переключение уроков через placeholder + Clock.schedule_once — UI не блокируется.
+  3. Дебаунс сохранения кода — запись на диск не на каждый символ, а с задержкой 1.5 с.
+  4. _force_defocus_tree ограничена глубиной и работает через итеративный стек.
+  5. _wrap_buttons отложен до 0.5 с (вместо 0.1 с).
 """
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
@@ -23,26 +30,38 @@ from widgets import InteractiveCodeWidget
 from utils.vibration_manager import VibrationManager
 
 
-def _force_defocus_tree(widget):
-    """
-    Рекурсивно снимает фокус и маркеры выделения со всех TextInput.
-    Работает на Android Kivy 2.3.1.
-    """
-    if isinstance(widget, TextInput):
-        if widget.focus:
-            widget.focus = False
-        widget.cancel_selection()
-        # Убираем Android-маркеры ("капельки") напрямую
-        try:
-            for handle_name in ('_handle_left', '_handle_right', '_handle_middle'):
-                h = getattr(widget, handle_name, None)
-                if h is not None:
-                    h.opacity = 0
-        except Exception:
-            pass
-    for child in widget.children:
-        _force_defocus_tree(child)
+# ---------------------------------------------------------------------------
+# Вспомогательные функции
+# ---------------------------------------------------------------------------
 
+def _force_defocus_tree(widget, max_depth=6):
+    """
+    Итеративно снимает фокус и маркеры выделения со всех TextInput.
+    Ограничена глубиной max_depth чтобы не тормозить на глубоких деревьях.
+    """
+    stack = [(widget, 0)]
+    while stack:
+        w, depth = stack.pop()
+        if depth > max_depth:
+            continue
+        if isinstance(w, TextInput):
+            if w.focus:
+                w.focus = False
+            w.cancel_selection()
+            try:
+                for handle_name in ('_handle_left', '_handle_right', '_handle_middle'):
+                    h = getattr(w, handle_name, None)
+                    if h is not None:
+                        h.opacity = 0
+            except Exception:
+                pass
+        for child in w.children:
+            stack.append((child, depth + 1))
+
+
+# ---------------------------------------------------------------------------
+# ScrollView-классы (без изменений логики)
+# ---------------------------------------------------------------------------
 
 class PassthroughScrollView(ScrollView):
     """
@@ -55,7 +74,6 @@ class PassthroughScrollView(ScrollView):
     def on_touch_down(self, touch):
         if not self.collide_point(*touch.pos):
             return False
-        # Снимаем выделение если тап не прямо на TextInput
         hit = self._hit_text_input(touch.pos)
         if not hit:
             _force_defocus_tree(self)
@@ -72,26 +90,20 @@ class PassthroughScrollView(ScrollView):
         return super().on_touch_up(touch)
 
     def _hit_text_input(self, pos):
-        def _search(w):
+        # Итеративный поиск вместо рекурсивного
+        stack = list(self.children)
+        while stack:
+            w = stack.pop()
             if isinstance(w, TextInput) and w.collide_point(*pos):
                 return w
-            for c in w.children:
-                r = _search(c)
-                if r:
-                    return r
-            return None
-
-        return _search(self)
+            stack.extend(w.children)
+        return None
 
 
 class TemplateScrollView(ScrollView):
     """
-    Вертикальный ScrollView для блоков шаблонов в задании.
-    Стратегия: определяем направление свайпа по первым dp(8) пикселям.
-    - Вертикальный свайп → отдаём родительскому PassthroughScrollView.
-    - Горизонтальный свайп → скролим внутри (если нужно).
-    - Тап (без движения) → передаём содержимому (TextInput может получить фокус).
-    - Тап вне → снимаем выделение.
+    ScrollView для блоков шаблонов в задании.
+    Определяем направление свайпа по первым dp(8) пикселям.
     """
     THRESHOLD = dp(8)
 
@@ -101,7 +113,7 @@ class TemplateScrollView(ScrollView):
             return False
         touch.ud['tsv_ox'] = touch.x
         touch.ud['tsv_oy'] = touch.y
-        touch.ud['tsv_dir'] = None  # None / 'v' / 'h'
+        touch.ud['tsv_dir'] = None
         touch.ud['tsv_inner_started'] = False
         touch.grab(self)
         return True
@@ -117,26 +129,22 @@ class TemplateScrollView(ScrollView):
         if direction is None:
             if abs(dx) > self.THRESHOLD or abs(dy) > self.THRESHOLD:
                 touch.ud['tsv_dir'] = 'v' if abs(dy) >= abs(dx) else 'h'
-            return True  # держим touch пока не определили
+            return True
 
         if direction == 'v':
-            # Вертикаль — отпускаем, уходит к PassthroughScrollView
             touch.ungrab(self)
             return False
 
-        # Горизонталь — скролим сами если есть контент
         if self.do_scroll_x and self.content_width > self.width:
             sw = self.content_width - self.width
             if sw > 0:
-                self.scroll_x = max(0.0, min(1.0,
-                                             self.scroll_x - dx / sw))
+                self.scroll_x = max(0.0, min(1.0, self.scroll_x - dx / sw))
                 touch.ud['tsv_ox'] = touch.x
                 touch.ud['tsv_oy'] = touch.y
         elif self.do_scroll_y and self.content_height > self.height:
             sh = self.content_height - self.height
             if sh > 0:
-                self.scroll_y = max(0.0, min(1.0,
-                                             self.scroll_y + dy / sh))
+                self.scroll_y = max(0.0, min(1.0, self.scroll_y + dy / sh))
                 touch.ud['tsv_ox'] = touch.x
                 touch.ud['tsv_oy'] = touch.y
         return True
@@ -146,7 +154,6 @@ class TemplateScrollView(ScrollView):
             touch.ungrab(self)
             direction = touch.ud.get('tsv_dir')
             if direction is None:
-                # Короткий тап — передаём содержимому (TextInput и т.д.)
                 super().on_touch_down(touch)
                 super().on_touch_up(touch)
             return True
@@ -167,10 +174,13 @@ class TemplateScrollView(ScrollView):
         return self.height
 
 
+# ---------------------------------------------------------------------------
+# Основной класс
+# ---------------------------------------------------------------------------
+
 class LessonView(BoxLayout):
     """Диалог просмотра урока с табами"""
 
-    # Базовые значения — восстанавливаются при скрытии клавиатуры
     _BASE_CENTER_Y = 0.5
     _BASE_SIZE_HINT_Y = 0.88
 
@@ -188,6 +198,12 @@ class LessonView(BoxLayout):
         self.user_code = ""
         self._keyboard_height = 0
 
+        # --- ОПТИМИЗАЦИЯ: дебаунс сохранения ---
+        self._save_event = None
+
+        # --- ОПТИМИЗАЦИЯ: отслеживаем, какие вкладки уже построены ---
+        self._tabs_built = set()
+
         # Фон
         theme = ThemeManager.get_theme()
         with self.canvas.before:
@@ -197,21 +213,27 @@ class LessonView(BoxLayout):
 
         self._create_ui()
 
-        Clock.schedule_once(lambda dt: self._wrap_buttons(), 0.1)
+        # Откладываем wrap_buttons — не мешает первому рендеру
+        Clock.schedule_once(lambda dt: self._wrap_buttons(), 0.5)
 
-        # Подписываемся на высоту клавиатуры (Android / iOS)
-        # Android: отслеживаем изменение размера окна (клавиатура меняет Window.height)
         self._win_height = Window.height
         Window.bind(on_resize=self._on_window_resize)
 
+    # ------------------------------------------------------------------
+    # Фон
+    # ------------------------------------------------------------------
+
     def _update_bg(self, instance, value):
-        """Обновляет фон при изменении размера/позиции"""
         if hasattr(self, 'bg_rect'):
             self.bg_rect.pos = instance.pos
             self.bg_rect.size = instance.size
 
+    # ------------------------------------------------------------------
+    # Построение UI (скелет — только заголовок, табы-заглушки, кнопки)
+    # ------------------------------------------------------------------
+
     def _create_ui(self):
-        """Создаёт интерфейс урока"""
+        """Создаёт скелет интерфейса урока. Контент вкладок строится лениво."""
         theme = ThemeManager.get_theme()
         tr = self.app.tr
         lang = self.app.current_language
@@ -259,34 +281,23 @@ class LessonView(BoxLayout):
             tab_height=dp(35),
         )
 
-        # Таб: Теория
+        # Создаём только заголовки вкладок — контент добавим лениво
         self.theory_tab = TabbedPanelItem(text=tr.get('theory', 'Theory'))
-        self._create_theory_tab()
-        self.tab_panel.add_widget(self.theory_tab)
-
-        # Таб: Задание
         self.task_tab = TabbedPanelItem(text=tr.get('task', 'Task'))
-        self._create_task_tab()
-        self.tab_panel.add_widget(self.task_tab)
-
-        # Таб: Практика
         self.practice_tab = TabbedPanelItem(text=tr.get('practice', 'Practice'))
-        self._create_practice_tab()
-        self.tab_panel.add_widget(self.practice_tab)
-
-        # Таб: Подсказка
         self.hint_tab = TabbedPanelItem(text=tr.get('hint', 'Hint'))
-        self._create_hint_tab()
+
+        self.tab_panel.add_widget(self.theory_tab)
+        self.tab_panel.add_widget(self.task_tab)
+        self.tab_panel.add_widget(self.practice_tab)
         self.tab_panel.add_widget(self.hint_tab)
 
         self._apply_tab_theme()
-
         self.add_widget(self.tab_panel)
 
         # ========== НИЖНЯЯ ПАНЕЛЬ С КНОПКАМИ ==========
         buttons_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(45), spacing=dp(5))
 
-        # Кнопка запуска кода (уменьшаем)
         self.run_btn = Button(
             text=tr.get('run', 'Run'),
             font_name='SourceBold',
@@ -294,12 +305,10 @@ class LessonView(BoxLayout):
             background_normal='', background_down='',
             color=theme.get('run_btn_text', (0.18, 0.18, 0.19, 1)),
             font_size=dp(16),
-            size_hint_x=0.2  # Уменьшаем
+            size_hint_x=0.2
         )
         self.run_btn.bind(on_release=self._run_code)
 
-        # ===== НАВИГАЦИОННЫЕ КНОПКИ =====
-        # Кнопка "Назад" (←)
         self.prev_btn = Button(
             text='←',
             font_name='DejaVuSans',
@@ -314,7 +323,6 @@ class LessonView(BoxLayout):
         self.prev_btn.no_vibration_wrap = True
         self.prev_btn.bind(on_release=self._go_to_previous_lesson)
 
-        # Кнопка "Вперёд" (→)
         self.next_btn = Button(
             text='→',
             font_name='DejaVuSans',
@@ -329,7 +337,6 @@ class LessonView(BoxLayout):
         self.next_btn.no_vibration_wrap = True
         self.next_btn.bind(on_release=self._go_to_next_lesson)
 
-        # Кнопка отметки о прохождении (используем course_id)
         is_completed = self.lesson_manager.is_lesson_completed(lesson_id, self.course_id)
         self.complete_btn = Button(
             text="✓ " + (
@@ -346,29 +353,72 @@ class LessonView(BoxLayout):
         self.complete_btn.bind(on_release=self._mark_completed)
 
         buttons_layout.add_widget(self.run_btn)
-        buttons_layout.add_widget(self.prev_btn)  # ← стрелка
-        buttons_layout.add_widget(self.next_btn)  # → стрелка
+        buttons_layout.add_widget(self.prev_btn)
+        buttons_layout.add_widget(self.next_btn)
         buttons_layout.add_widget(self.complete_btn)
         self.add_widget(buttons_layout)
 
-        # Загружаем сохранённый код
-        saved_code = self.lesson_manager.get_saved_code(lesson_id)
-        if saved_code and hasattr(self, 'practice_editor'):
-            if hasattr(self.practice_editor, 'set_values'):
-                pass
-            elif hasattr(self.practice_editor, 'text'):
-                self.practice_editor.text = saved_code
-
-        # Обновляем состояние навигационных кнопок
         self._update_navigation_buttons()
+
+        # Строим первую вкладку сразу (она видима), остальные — лениво
+        self._build_tab('theory')
+
+        # Устанавливаем активную вкладку
+        Clock.schedule_once(lambda dt: self._set_default_tab(), 0)
+
+    def _set_default_tab(self):
+        """Устанавливает активную вкладку после рендера"""
+        self.tab_panel.switch_to(self.theory_tab)
+
+    # ------------------------------------------------------------------
+    # Ленивое построение вкладок
+    # ------------------------------------------------------------------
+
+    def _build_tab(self, tab_key):
+        """Строит содержимое вкладки, если ещё не построено."""
+        if tab_key in self._tabs_built:
+            return
+        self._tabs_built.add(tab_key)
+
+        builders = {
+            'theory':   self._create_theory_tab,
+            'task':     self._create_task_tab,
+            'practice': self._create_practice_tab,
+            'hint':     self._create_hint_tab,
+        }
+        builder = builders.get(tab_key)
+        if builder:
+            builder()
+
+    def _on_tab_changed(self, instance, value):
+        """Вызывается при смене вкладки — строит контент лениво."""
+        VibrationManager.vibrate(0.015)
+        self._update_active_tab_color()
+
+        theme = ThemeManager.get_theme()
+        separator_color = theme.get('separator_color', (0.5, 0.5, 0.5, 0.3))
+        Clock.schedule_once(lambda dt: self._draw_tab_separators(separator_color), 0.05)
+
+        # Определяем ключ выбранной вкладки
+        tab_map = {
+            id(self.theory_tab):   'theory',
+            id(self.task_tab):     'task',
+            id(self.practice_tab): 'practice',
+            id(self.hint_tab):     'hint',
+        }
+        key = tab_map.get(id(value))
+        if key and key not in self._tabs_built:
+            # Строим в следующем кадре — UI успевает перерисоваться
+            Clock.schedule_once(lambda dt: self._build_tab(key), 0)
+
+    # ------------------------------------------------------------------
+    # Навигация между уроками
+    # ------------------------------------------------------------------
 
     def _update_navigation_buttons(self):
         """Обновляет состояние кнопок навигации"""
-        current_lesson = self.lesson
-        current_id = current_lesson.get('id', 0)
-        current_order = current_lesson.get('order', 0)
+        current_id = self.lesson.get('id', 0)
 
-        # Получаем все уроки курса
         course = self.lesson_manager.get_course(self.course_id)
         if not course:
             self.prev_btn.disabled = True
@@ -377,93 +427,105 @@ class LessonView(BoxLayout):
 
         lessons = course.get('lessons', [])
         sorted_lessons = sorted(lessons, key=lambda x: x.get('order', 0))
-
-        # Получаем ID пройденных уроков
         completed_ids = self.lesson_manager.get_completed_lesson_ids(self.course_id)
 
-        # Находим индекс текущего урока
-        current_index = -1
-        for i, l in enumerate(sorted_lessons):
-            if l.get('id') == current_id:
-                current_index = i
-                break
+        current_index = next(
+            (i for i, l in enumerate(sorted_lessons) if l.get('id') == current_id), -1
+        )
 
         if current_index == -1:
             self.prev_btn.disabled = True
             self.next_btn.disabled = True
             return
 
-        # Проверяем, пройден ли текущий урок
         is_current_completed = current_id in completed_ids
 
-        # ==== КНОПКА "НАЗАД" (←) ====
-        # Ищем ближайший пройденный урок до текущего
-        prev_completed = None
-        for i in range(current_index - 1, -1, -1):
-            if sorted_lessons[i].get('id') in completed_ids:
-                prev_completed = sorted_lessons[i]
-                break
-
-        # Кнопка "назад" активна, если есть пройденный урок перед текущим
+        # Кнопка "назад" — ближайший пройденный перед текущим
+        prev_completed = next(
+            (sorted_lessons[i] for i in range(current_index - 1, -1, -1)
+             if sorted_lessons[i].get('id') in completed_ids),
+            None
+        )
         self.prev_btn.disabled = (prev_completed is None)
         self.prev_btn.lesson_to_switch = prev_completed
 
-        # ==== КНОПКА "ВПЕРЁД" (→) ====
-        # Ищем следующий урок (неважно, пройден он или нет)
-        next_lesson = None
-        if current_index < len(sorted_lessons) - 1:
-            next_lesson = sorted_lessons[current_index + 1]
-
-        # Кнопка "вперёд" активна, если:
-        # 1) Есть следующий урок
-        # 2) Текущий урок ПРОЙДЕН (только с пройденного можно перейти дальше)
+        # Кнопка "вперёд" — следующий урок (если текущий пройден)
+        next_lesson = sorted_lessons[current_index + 1] if current_index < len(sorted_lessons) - 1 else None
         self.next_btn.disabled = (next_lesson is None or not is_current_completed)
         self.next_btn.lesson_to_switch = next_lesson
 
     def _go_to_previous_lesson(self, instance):
-        """Переходит к предыдущему ПРОЙДЕННОМУ уроку"""
-
-        # Получаем урок из атрибута кнопки
-        target_lesson = getattr(instance, 'lesson_to_switch', None)
-        if target_lesson:
-            self._switch_to_lesson(target_lesson)
+        target = getattr(instance, 'lesson_to_switch', None)
+        if target:
+            self._switch_to_lesson(target)
 
     def _go_to_next_lesson(self, instance):
-        """Переходит к следующему уроку (может быть не пройденным)"""
-
-        # Получаем урок из атрибута кнопки
-        target_lesson = getattr(instance, 'lesson_to_switch', None)
-        if target_lesson:
-            self._switch_to_lesson(target_lesson)
+        target = getattr(instance, 'lesson_to_switch', None)
+        if target:
+            self._switch_to_lesson(target)
 
     def _switch_to_lesson(self, lesson):
-        """Переключает текущий вид на другой урок"""
-
+        """
+        ОПТИМИЗАЦИЯ: переключает урок через placeholder, чтобы не блокировать UI.
+        Старый LessonView удаляется сразу, новый строится в следующем кадре.
+        """
         VibrationManager.vibrate(0.02)
-
-        # Сохраняем текущий код
         self._update_code_from_editor()
 
-        # Создаём новый вид с другим уроком
-        from ui.lesson_view import LessonView
-
-        new_view = LessonView(
-            self.app,
-            lesson,
-            self.lesson_manager,
-            course_id=self.course_id
-        )
-        new_view.size_hint = self.size_hint
-        new_view.pos_hint = self.pos_hint
-
-        # Заменяем текущий вид
         parent = self.parent
-        if parent:
-            parent.remove_widget(self)
+        if not parent:
+            return
+
+        # Сохраняем параметры расположения до удаления
+        saved_size_hint = self.size_hint
+        saved_pos_hint = dict(self.pos_hint)
+
+        # Показываем placeholder с фоном из темы немедленно
+        theme = ThemeManager.get_theme()
+        placeholder = BoxLayout(orientation='vertical')
+        placeholder.size_hint = saved_size_hint
+        placeholder.pos_hint = saved_pos_hint
+        with placeholder.canvas.before:
+            Color(*theme.get('popup_bg', (0.188, 0.204, 0.251, 1)))
+            _ph_rect = Rectangle(pos=placeholder.pos, size=placeholder.size)
+
+        def _update_ph_rect(inst, val):
+            _ph_rect.pos = inst.pos
+            _ph_rect.size = inst.size
+
+        placeholder.bind(pos=_update_ph_rect, size=_update_ph_rect)
+        placeholder.add_widget(Label(
+            text=self.app.tr.get('loading...', 'Loading...'),
+            color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+            font_name='SourceBold',
+            font_size=dp(16)
+        ))
+
+        # Отписываемся от событий окна до удаления
+        Window.unbind(on_resize=self._on_window_resize)
+
+        parent.remove_widget(self)
+        parent.add_widget(placeholder)
+
+        def _do_create(dt):
+            from ui.lesson_view import LessonView
+            new_view = LessonView(
+                self.app, lesson, self.lesson_manager, course_id=self.course_id
+            )
+            new_view.size_hint = saved_size_hint
+            new_view.pos_hint = saved_pos_hint
+            if placeholder.parent:
+                placeholder.parent.remove_widget(placeholder)
             parent.add_widget(new_view)
 
+        Clock.schedule_once(_do_create, 0)
+
+    # ------------------------------------------------------------------
+    # Тема вкладок
+    # ------------------------------------------------------------------
+
     def _apply_tab_theme(self):
-        """Применяет цвета из темы к вкладкам"""
+        """Применяет цвета из темы к вкладкам и подписывается на смену вкладки"""
         theme = ThemeManager.get_theme()
 
         tab_bg = theme.get('tab_inactive_bg', theme.get('widget_bg', (0.141, 0.145, 0.149, 1)))
@@ -472,20 +534,17 @@ class LessonView(BoxLayout):
         tab_panel_bg = theme.get('tab_bar_bg', theme.get('action_bar_bg', (0.18, 0.18, 0.19, 1)))
 
         spacing = dp(4)
-
         self.tab_panel.tab_width = dp(100)
         self.tab_panel.tab_height = dp(35)
 
         if hasattr(self.tab_panel, '_tab_header'):
-            header = self.tab_panel._tab_header
-            header.spacing = spacing
+            self.tab_panel._tab_header.spacing = spacing
 
         for i, tab in enumerate(self.tab_panel.tab_list):
             tab.background_normal = ''
             tab.background_down = ''
             tab.color = tab_text
             tab.background_color = tab_bg
-
             if i < len(self.tab_panel.tab_list) - 1:
                 tab.padding = [dp(5), dp(2), dp(9), dp(2)]
             else:
@@ -516,18 +575,15 @@ class LessonView(BoxLayout):
         self.tab_panel.bind(current_tab=self._on_tab_changed)
 
     def _draw_tab_separators(self, separator_color):
-        """Рисует разделители между вкладками после их размещения"""
         tab_list = self.tab_panel.tab_list
         if not tab_list:
             return
-
         for i, tab in enumerate(tab_list):
             if hasattr(tab, '_separator_line'):
                 try:
                     tab.canvas.before.remove(tab._separator_line)
-                except:
+                except Exception:
                     pass
-
             if i < len(tab_list) - 1:
                 with tab.canvas.before:
                     Color(*separator_color)
@@ -537,25 +593,21 @@ class LessonView(BoxLayout):
                     ], width=dp(1))
 
     def _update_tab_bg(self, instance, value):
-        """Обновляет фон панели вкладок"""
         if hasattr(self, 'tab_panel_bg_rect'):
             self.tab_panel_bg_rect.pos = instance.pos
             self.tab_panel_bg_rect.size = instance.size
 
     def _update_content_bg(self, instance, value):
-        """Обновляет фон контента вкладок"""
         if hasattr(instance, 'bg_rect'):
             instance.bg_rect.pos = instance.pos
             instance.bg_rect.size = instance.size
 
     def _update_scroll_bg(self, instance, value):
-        """Обновляет фон ScrollView"""
         if hasattr(instance, 'bg_rect'):
             instance.bg_rect.pos = instance.pos
             instance.bg_rect.size = instance.size
 
     def _update_active_tab_color(self):
-        """Обновляет цвет активной вкладки"""
         theme = ThemeManager.get_theme()
         tab_active_bg = theme.get('tab_active_bg', theme.get('editor_bg', (0.188, 0.204, 0.251, 1)))
         tab_bg = theme.get('tab_inactive_bg', theme.get('widget_bg', (0.141, 0.145, 0.149, 1)))
@@ -571,25 +623,17 @@ class LessonView(BoxLayout):
                 tab.color = tab_text
 
     def _update_header_bg(self, instance, value):
-        """Обновляет фон заголовка панели вкладок"""
         if hasattr(instance, 'bg_rect'):
             instance.bg_rect.pos = instance.pos
             instance.bg_rect.size = instance.size
 
-    def _on_tab_changed(self, instance, value):
-        """Вызывается при смене вкладки"""
-        VibrationManager.vibrate(0.015)
-        self._update_active_tab_color()
-        theme = ThemeManager.get_theme()
-        separator_color = theme.get('separator_color', (0.5, 0.5, 0.5, 0.3))
-        Clock.schedule_once(lambda dt: self._draw_tab_separators(separator_color), 0.05)
+    # ------------------------------------------------------------------
+    # Построители вкладок
+    # ------------------------------------------------------------------
 
     def _create_theory_tab(self):
         """Создаёт содержимое вкладки Теория"""
         from widgets.markdown_label import MarkdownLabel
-        from kivy.uix.scrollview import ScrollView
-        from kivy.uix.boxlayout import BoxLayout
-        from kivy.graphics import Color, Rectangle
 
         theme = ThemeManager.get_theme()
         lang = self.app.current_language
@@ -599,8 +643,8 @@ class LessonView(BoxLayout):
         content = BoxLayout(
             orientation='vertical',
             size_hint_y=None,
-            spacing=dp(3),  # ← уменьшил
-            padding=[dp(3), dp(3), dp(3), dp(3)]  # ← уменьшил
+            spacing=dp(3),
+            padding=[dp(3), dp(3), dp(3), dp(3)]
         )
         content.bind(minimum_height=content.setter('height'))
 
@@ -614,15 +658,10 @@ class LessonView(BoxLayout):
             scroll.bg_rect = Rectangle(pos=scroll.pos, size=scroll.size)
         scroll.bind(pos=self._update_scroll_bg, size=self._update_scroll_bg)
 
-        # Текст теории — теперь BoxLayout, автоматически подстраивает высоту
-        theory_markdown = MarkdownLabel(
-            text=theory_text,
-            font_size=dp(12)
-        )
+        theory_markdown = MarkdownLabel(text=theory_text, font_size=dp(12))
         theory_markdown._update_background()
         content.add_widget(theory_markdown)
 
-        # Небольшой отступ внизу
         spacer = Label(size_hint_y=None, height=dp(10))
         content.add_widget(spacer)
 
@@ -630,7 +669,7 @@ class LessonView(BoxLayout):
         self.theory_tab.add_widget(scroll)
 
     def _create_practice_tab(self):
-        """Создаёт содержимое вкладки Практика с интерактивными полями"""
+        """Создаёт содержимое вкладки Практика"""
         theme = ThemeManager.get_theme()
         lang = self.app.current_language
         lesson = self.lesson
@@ -660,8 +699,9 @@ class LessonView(BoxLayout):
                 cursor_color=theme.get('editor_cursor', (1, 1, 1, 1)),
                 tab_width=4
             )
+            lesson_id = lesson.get('id', 0)
             starter_code = self.lesson_manager.get_lesson_starter_code(lesson, lang)
-            saved_code = self.lesson_manager.get_saved_code(lesson.get('id', 0))
+            saved_code = self.lesson_manager.get_saved_code(lesson_id)
             if saved_code:
                 self.practice_editor.text = saved_code
                 self.user_code = saved_code
@@ -671,18 +711,18 @@ class LessonView(BoxLayout):
 
             self.practice_tab.add_widget(self.practice_editor)
 
-    def _update_code_from_editor(self):
-        """Принудительно обновляет код из редактора"""
-        if hasattr(self.practice_editor, 'get_user_code'):
-            self.user_code = self.practice_editor.get_user_code()
-            self.lesson_manager.save_lesson_code(self.lesson.get('id', 0), self.user_code)
+        # Привязываем слушатель изменений.
+        # InteractiveCodeWidget не имеет свойства 'text' — биндим только CodeInput.
+        # Для InteractiveCodeWidget изменения кода отслеживаются через _update_code_from_editor.
+        if not template and hasattr(self.practice_editor, 'bind'):
+            try:
+                self.practice_editor.bind(text=self._on_code_change)
+            except (KeyError, Exception):
+                pass
 
     def _create_task_tab(self):
-        """Создаёт содержимое вкладки Задание с поддержкой Markdown"""
+        """Создаёт содержимое вкладки Задание"""
         from widgets.markdown_label import MarkdownLabel
-        from kivy.core.window import Window
-        from kivy.core.clipboard import Clipboard
-        from utils.vibration_manager import VibrationManager
 
         theme = ThemeManager.get_theme()
         lang = self.app.current_language
@@ -717,11 +757,8 @@ class LessonView(BoxLayout):
             scroll.bg_rect = Rectangle(pos=scroll.pos, size=scroll.size)
         scroll.bind(pos=self._update_scroll_bg, size=self._update_scroll_bg)
 
-        # ===== ТЕКСТ ЗАДАНИЯ =====
-        task_markdown = MarkdownLabel(
-            text=task_text,
-            font_size=dp(12)
-        )
+        # Текст задания
+        task_markdown = MarkdownLabel(text=task_text, font_size=dp(12))
         task_markdown._update_background()
         content.add_widget(task_markdown)
 
@@ -736,7 +773,7 @@ class LessonView(BoxLayout):
         )
         content.add_widget(sep_label)
 
-        # Заголовок "Шаблоны"
+        # Заголовок шаблонов
         templates_title = Label(
             text=self.app.tr.get('templates', 'Templates') + ":",
             font_size=dp(12),
@@ -748,7 +785,7 @@ class LessonView(BoxLayout):
         )
         content.add_widget(templates_title)
 
-        # ===== ШАБЛОНЫ (без возможности выделения) =====
+        # Блоки шаблонов
         def add_copy_block(parent, title_text, code_text):
             if not code_text or not code_text.strip():
                 return
@@ -782,22 +819,19 @@ class LessonView(BoxLayout):
                 size_hint_y=None,
                 height=max(dp(250), len(code_text.split('\n')) * dp(20) + dp(20)),
                 padding=(dp(8), dp(8)),
-                # Параметры, которые точно существуют в Kivy 2.3.1
                 cursor_blink=False,
                 selection_color=(0, 0, 0, 0),
                 cursor_color=(0, 0, 0, 0),
-                use_handles=False,  # важно для Android
+                use_handles=False,
                 use_bubble=False,
                 multiline=True,
                 do_wrap=False,
             )
 
-            # Жёсткое отключение любого выделения
             def _disable_selection(*args):
                 if code_input.focus:
                     code_input.focus = False
                 code_input.cancel_selection()
-                # Убираем handles на Android
                 try:
                     for h in ('_handle_left', '_handle_right', '_handle_middle'):
                         handle = getattr(code_input, h, None)
@@ -807,13 +841,11 @@ class LessonView(BoxLayout):
                     pass
 
             code_input.bind(focus=_disable_selection)
-            # Дополнительно при любом тапе
             code_input.bind(on_touch_down=lambda *a: _disable_selection())
 
             code_scroll.add_widget(code_input)
             parent.add_widget(code_scroll)
 
-            # Кнопка копирования
             copy_btn = Button(
                 text=self.app.tr.get('copy_to_clipboard', 'Copy to clipboard'),
                 font_name='SourceBold',
@@ -838,7 +870,6 @@ class LessonView(BoxLayout):
         for idx, code in enumerate(ready_codes, 1):
             add_copy_block(content, f"{self.app.tr.get('template', 'Template')} {idx}:", code)
 
-        # Совет
         tip_label = Label(
             text=self.app.tr.get('template_tip',
                                  'Tip: Copy any template above and paste it into the main editor. Then you can modify it as you like!'),
@@ -891,13 +922,34 @@ class LessonView(BoxLayout):
         scroll.add_widget(content)
         self.hint_tab.add_widget(scroll)
 
+    # ------------------------------------------------------------------
+    # Работа с кодом
+    # ------------------------------------------------------------------
+
+    def _update_code_from_editor(self):
+        """Принудительно обновляет код из редактора"""
+        if hasattr(self, 'practice_editor') and hasattr(self.practice_editor, 'get_user_code'):
+            self.user_code = self.practice_editor.get_user_code()
+            self.lesson_manager.save_lesson_code(self.lesson.get('id', 0), self.user_code)
+
     def _on_code_change(self, instance, value):
-        """Обрабатывает изменение кода в редакторе"""
-        if hasattr(self.practice_editor, 'get_user_code'):
+        """
+        ОПТИМИЗАЦИЯ: дебаунс — сохраняем на диск через 1.5 с после последнего изменения,
+        а не при каждом нажатии клавиши.
+        """
+        if hasattr(self, 'practice_editor') and hasattr(self.practice_editor, 'get_user_code'):
             self.user_code = self.practice_editor.get_user_code()
         else:
             self.user_code = value
-        self.lesson_manager.save_lesson_code(self.lesson.get('id', 0), self.user_code)
+
+        if self._save_event:
+            self._save_event.cancel()
+        self._save_event = Clock.schedule_once(
+            lambda dt: self.lesson_manager.save_lesson_code(
+                self.lesson.get('id', 0), self.user_code
+            ),
+            1.5
+        )
 
     def _run_code(self, instance):
         """Запускает код из редактора"""
@@ -919,12 +971,14 @@ class LessonView(BoxLayout):
         else:
             self.app.show_result_popup("Executor not available")
 
+    # ------------------------------------------------------------------
+    # Завершение урока
+    # ------------------------------------------------------------------
+
     def _mark_completed(self, instance):
-        """Показывает диалог подтверждения перед отметкой урока"""
         self._show_completion_dialog()
 
     def _show_completion_dialog(self):
-        """Показывает диалог подтверждения завершения урока"""
         theme = ThemeManager.get_theme()
         tr = self.app.tr
 
@@ -984,7 +1038,6 @@ class LessonView(BoxLayout):
         popup.open()
 
     def _actual_mark_completed(self):
-        """Фактически отмечает урок как пройденный (с course_id)"""
         lesson_id = self.lesson.get('id', 0)
         success = self.lesson_manager.mark_lesson_completed(lesson_id, self.course_id, self.user_code)
 
@@ -997,7 +1050,6 @@ class LessonView(BoxLayout):
             self.app.show_result_popup(
                 f"{self.app.tr.get('lesson_completed', 'Lesson completed!')} +{self.lesson.get('xp', 10)} XP"
             )
-
             self._offer_next_lesson()
         else:
             self.app.show_result_popup(
@@ -1005,10 +1057,8 @@ class LessonView(BoxLayout):
             )
 
     def _offer_next_lesson(self):
-        """Предлагает перейти к следующему уроку"""
         theme = ThemeManager.get_theme()
         tr = self.app.tr
-        lang = self.app.current_language
 
         next_lesson = self.lesson_manager.get_next_lesson(self.course_id)
         if not next_lesson:
@@ -1074,7 +1124,6 @@ class LessonView(BoxLayout):
         popup.open()
 
     def _open_next_lesson(self, lesson):
-        """Открывает следующий урок"""
         from ui.lesson_view import LessonView
 
         new_view = LessonView(self.app, lesson, self.lesson_manager, course_id=self.course_id)
@@ -1084,6 +1133,10 @@ class LessonView(BoxLayout):
         if hasattr(self.app, 'root_layout'):
             self.app.root_layout.add_widget(new_view)
 
+    # ------------------------------------------------------------------
+    # Клавиатура / окно
+    # ------------------------------------------------------------------
+
     def _on_window_resize(self, window, width, height):
         """
         На Android при показе клавиатуры Window.height уменьшается.
@@ -1092,17 +1145,15 @@ class LessonView(BoxLayout):
         if not self.parent:
             return
 
-        parent_h = self.parent.height  # высота root_layout (не меняется)
+        parent_h = self.parent.height
         if parent_h <= 0:
             return
 
-        # Видимая область = текущая высота окна
         visible_h = height
 
         if visible_h < self._win_height * 0.85:
-            # Клавиатура поднялась — занимаем доступную высоту и центрируемся в ней
-            kb_h = self._win_height - visible_h  # пикселей занято клавиатурой
-            kb_fraction = kb_h / parent_h  # доля от root_layout
+            kb_h = self._win_height - visible_h
+            kb_fraction = kb_h / parent_h
 
             new_size_hint_y = (visible_h / parent_h) - 0.02
             new_size_hint_y = max(new_size_hint_y, 0.35)
@@ -1114,14 +1165,20 @@ class LessonView(BoxLayout):
             self.size_hint_y = new_size_hint_y
             self.pos_hint = {'center_x': 0.5, 'center_y': new_center_y}
         else:
-            # Клавиатура скрылась — восстанавливаем
             self._win_height = height
             self.size_hint_y = self._BASE_SIZE_HINT_Y
             self.pos_hint = {'center_x': 0.5, 'center_y': self._BASE_CENTER_Y}
 
+    # ------------------------------------------------------------------
+    # Закрытие / вибрация
+    # ------------------------------------------------------------------
+
     def _close(self, instance):
         """Закрывает диалог урока"""
-        # Отписываемся от клавиатуры перед удалением
+        # Отменяем отложенное сохранение если есть
+        if self._save_event:
+            self._save_event.cancel()
+            self._save_event = None
         Window.unbind(on_resize=self._on_window_resize)
         if self.parent:
             self.parent.remove_widget(self)
