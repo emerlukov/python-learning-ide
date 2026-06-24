@@ -300,6 +300,7 @@ TRANSLATIONS = {
         'coming_soon': 'Скоро',
         'study': 'Изучить',
         'all_courses_completed_msg': 'Поздравляем! Вы прошли все курсы!',
+        'loading...': 'Загрузка...',
     },
     'en': {
         'no_code': 'No code to format',
@@ -597,5 +598,6 @@ TRANSLATIONS = {
         'coming_soon': 'Coming soon',
         'study': 'Study',
         'all_courses_completed_msg': 'Congratulations! You have completed all courses!',
+        'loading...': 'Loading...',
     },
 }
