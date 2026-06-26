@@ -1292,7 +1292,7 @@ class LessonView(BoxLayout):
             symbol = badge_symbols.get(badge_id, '☺')
 
             badge_label = Label(
-                text=f"[size=20]{symbol}[/size] {badge_name}",
+                text=f"[size=70]{symbol}[/size] {badge_name}",
                 markup=True,
                 font_size=dp(14),
                 font_name='DejaVuSans',
