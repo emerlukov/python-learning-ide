@@ -537,6 +537,24 @@ class LessonView(BoxLayout):
             # Строим в следующем кадре — UI успевает перерисоваться
             Clock.schedule_once(lambda dt: self._build_tab(key), 0)
 
+        # Обновляем symbol_bar.text_input при переключении на вкладку practice
+        if key == 'practice' and value == self.practice_tab:
+            def update_symbol_bar(dt):
+                if hasattr(self, 'app') and hasattr(self.app, 'symbol_bar') and hasattr(self, 'practice_editor'):
+                    # Для InteractiveCodeWidget берём text_input
+                    if hasattr(self.practice_editor, 'text_input'):
+                        self.app.symbol_bar.text_input = self.practice_editor.text_input
+                        # Устанавливаем фокус на text_input
+                        self.practice_editor.text_input.focus = True
+                    else:
+                        self.app.symbol_bar.text_input = self.practice_editor
+                        # Устанавливаем фокус на practice_editor
+                        self.practice_editor.focus = True
+            Clock.schedule_once(update_symbol_bar, 0.1)
+        # Восстанавливаем symbol_bar на основной редактор при уходе с practice
+        elif key != 'practice' and hasattr(self, 'app') and hasattr(self.app, 'symbol_bar') and hasattr(self.app, 'code_input'):
+            self.app.symbol_bar.text_input = self.app.code_input
+
     # ------------------------------------------------------------------
     # Навигация между уроками
     # ------------------------------------------------------------------
@@ -1461,6 +1479,11 @@ class LessonView(BoxLayout):
             self._save_event.cancel()
             self._save_event = None
         Window.unbind(on_resize=self._on_window_resize)
+
+        # Восстанавливаем symbol_bar на основной редактор
+        if hasattr(self, 'app') and hasattr(self.app, 'symbol_bar') and hasattr(self.app, 'code_input'):
+            self.app.symbol_bar.text_input = self.app.code_input
+
         if self.parent:
             self.parent.remove_widget(self)
 
