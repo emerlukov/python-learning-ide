@@ -13,6 +13,7 @@ from .screen_utils import (
 )
 from .android_utils import patched_excepthook, android_copy
 from .hotkeys import HotkeyManager
+from .keyboard_tracker import get_keyboard_tracker, KeyboardTracker
 
 # Пытаемся импортировать vibration_manager
 try:
@@ -66,5 +67,7 @@ __all__ = [
     'vibrate',
     'vibrate_on_press',
     'wrap_all_buttons',
-    'auto_wrap_on_build'
+    'auto_wrap_on_build',
+    'get_keyboard_tracker',
+    'KeyboardTracker'
 ]
