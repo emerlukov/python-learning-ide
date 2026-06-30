@@ -535,6 +535,9 @@ class MySymbolScrollBar(BoxLayout):
         super().__init__(**kwargs)
         self.orientation = 'horizontal'
         self.size_hint_y = None
+        self.size_hint_x = None  # Явно устанавливаем для позиционирования в FloatLayout
+        # pos_hint не устанавливаем - используем абсолютное позиционирование через x и y
+        
         category = get_screen_category()
         if category == 'tablet':
             self.height = dp(42)
@@ -548,9 +551,10 @@ class MySymbolScrollBar(BoxLayout):
             self.height = dp(30)
             self.spacing = dp(2)
             self.padding = [dp(2), dp(2), dp(2), dp(2)]
+        
         self.app = None
         self.text_input = text_input
-        print(f"[DEBUG] MySymbolScrollBar initialized with text_input: {text_input}")
+        print(f"[SYMBOL_BAR] Initialized with height={self.height}, size_hint_y={self.size_hint_y}, pos_hint={self.pos_hint}")
         ThemeManager.register(self)
         self.symbols = ['Tab', '#', '( )', '[ ]', '{ }', '" "', "' '", '=', ':', '.', '_', ',', '+', '-', '*', '/',
                         '\\', '%', ')', ']', '}', '<', '>', '!', '|', '&', '@', '~', '?', ';', '$', '^']
