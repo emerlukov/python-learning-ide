@@ -324,6 +324,16 @@ class InteractiveCodeWidget(BoxLayout):
                 VibrationManager.vibrate(0.015)
 
         field.bind(focus=on_focus)
+
+        def on_focus_for_symbol_bar(inst, focused):
+            if not focused:
+                return
+            from kivy.app import App
+            app = App.get_running_app()
+            if app and hasattr(app, 'symbol_bar'):
+                app.symbol_bar.text_input = inst
+
+        field.bind(focus=on_focus_for_symbol_bar)
         return field
 
     # ------------------------------------------------------------------ #
