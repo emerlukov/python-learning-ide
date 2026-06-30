@@ -373,9 +373,9 @@ class MyActionBar(BoxLayout):
     def _refocus(self, ti):
         try:
             if ti and ti.parent:
+                # Восстанавливаем фокус на TextInput, но не насильно вызываем show_keyboard()
+                # чтобы не вызывать лишние show/hide события клавиатуры и дерганье UI.
                 ti.focus = True
-                if hasattr(ti, 'show_keyboard'):
-                    ti.show_keyboard()
         except Exception as e:
             log_error(f"Refocus error: {e}")
 
