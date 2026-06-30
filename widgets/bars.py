@@ -752,21 +752,23 @@ class MySymbolScrollBar(BoxLayout):
                 pass
 
     def _get_active_text_input(self):
-        # Приоритет 1: текущий input_widget (для диалогов)
+        # Приоритет 1: current_input_widget (для диалогов поверх)
         if self.app and hasattr(self.app, 'current_input_widget') and self.app.current_input_widget:
-            print("[DEBUG] Using app.current_input_widget")
             return self.app.current_input_widget
 
-        # Приоритет 2: активный редактор из tab_manager
+        # Приоритет 2: self.text_input — переключается динамически:
+        #   - в основном режиме указывает на app.code_input
+        #   - в уроке (практика) переключается на активное поле InteractiveCodeWidget
+        if self.text_input:
+            return self.text_input
+
+        # Приоритет 3: fallback через tab_manager
         if self.app and hasattr(self.app, 'tab_manager'):
             editor = self.app.tab_manager.get_active_editor()
             if editor and hasattr(editor, 'text_input'):
-                print("[DEBUG] Using editor from tab_manager")
                 return editor.text_input
 
-        # Приоритет 3: сохранённый text_input
-        print("[DEBUG] Using self.text_input")
-        return self.text_input
+        return None
 
     def _refocus(self, ti):
         try:
