@@ -305,6 +305,7 @@ class PythonLearningApp(MDApp):
                     return
 
                 # Устанавливаем позицию сразу без анимации (убираем мерцание)
+                # Прижимаем панель прямо к клавиатуре без отступа
                 self.symbol_bar.pos = (0, h)
                 self.symbol_bar.width = root_layout.width
                 self._last_applied_kb_height = h
