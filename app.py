@@ -255,19 +255,38 @@ class PythonLearningApp(MDApp):
         # Добавляем symbol_bar в root_layout для позиционирования
         root_layout.add_widget(self.symbol_bar)
 
-        # Позиционирование symbol_bar внизу экрана
-        def set_symbol_bar_pos(instance, value):
-            if hasattr(self, 'symbol_bar') and self.symbol_bar:
-                keyboard_height = Window.keyboard_height if hasattr(Window, 'keyboard_height') else 0
-                bar_height = self.symbol_bar.height
-                x = 0
-                y = keyboard_height
-                self.symbol_bar.pos = (x, y)
-                self.symbol_bar.width = root_layout.width
+        # Позиционирование symbol_bar внизу экрана (поднимается вместе с клавиатурой)
+        self._symbol_bar_full_win_height = Window.height
 
-        root_layout.bind(size=set_symbol_bar_pos, pos=set_symbol_bar_pos)
-        Window.bind(on_keyboard_height=set_symbol_bar_pos)
-        Clock.schedule_once(lambda dt: set_symbol_bar_pos(None, None), 0.3)
+        def _update_symbol_bar_pos(*args):
+            if not (hasattr(self, 'symbol_bar') and self.symbol_bar):
+                return
+            # Определяем высоту клавиатуры через уменьшение Window.height
+            current_h = Window.height
+            full_h = self._symbol_bar_full_win_height
+            kb_h = max(0, full_h - current_h)
+
+            # Fallback: пробуем Window.keyboard_height / softkeyboard_height
+            if kb_h == 0:
+                kb_h = getattr(Window, 'keyboard_height', 0) or 0
+            if kb_h == 0 and hasattr(Window, 'softkeyboard_height'):
+                kb_h = Window.softkeyboard_height or 0
+
+            self.symbol_bar.pos = (0, kb_h)
+            self.symbol_bar.width = root_layout.width
+
+        def _on_window_resize_for_bar(window, width, height):
+            # Если окно стало больше — обновляем «полный» размер (клавиатура скрылась)
+            if height > self._symbol_bar_full_win_height * 0.95:
+                self._symbol_bar_full_win_height = height
+            _update_symbol_bar_pos()
+
+        root_layout.bind(size=_update_symbol_bar_pos, pos=_update_symbol_bar_pos)
+        Window.bind(on_resize=_on_window_resize_for_bar)
+        Window.bind(on_keyboard_height=lambda *a: _update_symbol_bar_pos())
+        if hasattr(Window, 'on_softkeyboard_height'):
+            Window.bind(on_softkeyboard_height=lambda *a: _update_symbol_bar_pos())
+        Clock.schedule_once(lambda dt: _update_symbol_bar_pos(), 0.3)
 
         # Настройка автосохранения
         self._setup_autosave()
