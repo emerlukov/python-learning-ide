@@ -577,9 +577,14 @@ class LessonView(BoxLayout):
         except Exception:
             pass
 
-        # Меняем softinput_mode для practice-вкладки (поднимает приложение при клавиатуре)
+        # Для practice-вкладки используем системный режим (не поднимает приложение)
+        # Панель символов будет подниматься с клавиатурой через KeyboardTracker
         if platform == 'android':
-            Window.softinput_mode = 'pan'
+            Window.softinput_mode = ''
+
+        # Обновляем позицию symbol_bar для practice-вкладки
+        if hasattr(self, 'app') and hasattr(self.app, '_symbol_bar_update_fn'):
+            self.app._symbol_bar_update_fn()
 
     # ------------------------------------------------------------------
     # Навигация между уроками
