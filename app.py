@@ -206,6 +206,10 @@ class PythonLearningApp(MDApp):
         self._request_storage_permission()
         self._load_fonts()
 
+        # Устанавливаем режим клавиатуры на Android:
+        # 'below_target' — окно сжимается, keyboard_height обновляется корректно
+        if platform == 'android':
+            Window.softinput_mode = 'below_target'
         Window.keyboard_anim_args = {'d': 0.2, 't': 'in_out_quad'}
         Window.bind(on_key_down=self.hotkey_manager.handle_keyboard)
 
@@ -255,37 +259,20 @@ class PythonLearningApp(MDApp):
         # Добавляем symbol_bar в root_layout для позиционирования
         root_layout.add_widget(self.symbol_bar)
 
-        # Позиционирование symbol_bar внизу экрана (поднимается вместе с клавиатурой)
-        self._symbol_bar_full_win_height = Window.height
-
+        # Позиционирование symbol_bar: всегда внизу, поднимается с клавиатурой.
+        # На Android высота клавиатуры приходит через Window.keyboard_height
+        # (событие on_keyboard_height). Window.height при этом НЕ меняется.
         def _update_symbol_bar_pos(*args):
             if not (hasattr(self, 'symbol_bar') and self.symbol_bar):
                 return
-            # Определяем высоту клавиатуры через уменьшение Window.height
-            current_h = Window.height
-            full_h = self._symbol_bar_full_win_height
-            kb_h = max(0, full_h - current_h)
-
-            # Fallback: пробуем Window.keyboard_height / softkeyboard_height
-            if kb_h == 0:
-                kb_h = getattr(Window, 'keyboard_height', 0) or 0
-            if kb_h == 0 and hasattr(Window, 'softkeyboard_height'):
-                kb_h = Window.softkeyboard_height or 0
-
+            kb_h = getattr(Window, 'keyboard_height', 0) or 0
             self.symbol_bar.pos = (0, kb_h)
             self.symbol_bar.width = root_layout.width
-
-        def _on_window_resize_for_bar(window, width, height):
-            # Если окно стало больше — обновляем «полный» размер (клавиатура скрылась)
-            if height > self._symbol_bar_full_win_height * 0.95:
-                self._symbol_bar_full_win_height = height
-            _update_symbol_bar_pos()
+            print(f"[DEBUG] symbol_bar pos updated: y={kb_h}, width={root_layout.width}")
 
         root_layout.bind(size=_update_symbol_bar_pos, pos=_update_symbol_bar_pos)
-        Window.bind(on_resize=_on_window_resize_for_bar)
-        Window.bind(on_keyboard_height=lambda *a: _update_symbol_bar_pos())
-        if hasattr(Window, 'on_softkeyboard_height'):
-            Window.bind(on_softkeyboard_height=lambda *a: _update_symbol_bar_pos())
+        # on_keyboard_height — основное событие Kivy/Android при появлении клавиатуры
+        Window.bind(keyboard_height=lambda inst, val: _update_symbol_bar_pos())
         Clock.schedule_once(lambda dt: _update_symbol_bar_pos(), 0.3)
 
         # Настройка автосохранения
