@@ -1747,16 +1747,33 @@ class LineNumberTextInput(BoxLayout):
                         PythonActivity = autoclass('org.kivy.android.PythonActivity')
                         activity = PythonActivity.mActivity
                         if activity:
-                            # ADJUST_NOTHING — запрещаем системе двигать/ресайзить
-                            # окно при появлении клавиатуры. Без этого Android
-                            # делает adjustPan и поднимает всё приложение вверх.
-                            # SOFT_INPUT_ADJUST_NOTHING = 0x00000030
-                            activity.getWindow().setSoftInputMode(0x00000030)
+                            # Устанавливаем режим, позволяющий отслеживать высоту клавиатуры
+                            # (ADJUST_RESIZE позволяет окну изменять размер и Window.keyboard_height обновится)
+                            try:
+                                LayoutParams = autoclass('android.view.WindowManager$LayoutParams')
+                                mode = LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+                            except Exception:
+                                # fallback значение (обычно 0x10)
+                                mode = 0x10
+                            try:
+                                activity.getWindow().setSoftInputMode(mode)
+                            except Exception:
+                                pass
+
                             InputMethodManager = autoclass('android.view.inputmethod.InputMethodManager')
                             Context = autoclass('android.content.Context')
                             imm = activity.getSystemService(Context.INPUT_METHOD_SERVICE)
-                            imm.showSoftInput(activity.getCurrentFocus(), InputMethodManager.SHOW_FORCED)
-                    except:
+                            try:
+                                imm.showSoftInput(activity.getCurrentFocus(), InputMethodManager.SHOW_FORCED)
+                            except Exception:
+                                # Последняя попытка: request focus then show
+                                try:
+                                    current = activity.getCurrentFocus()
+                                    if current:
+                                        imm.showSoftInput(current, InputMethodManager.SHOW_FORCED)
+                                except Exception:
+                                    pass
+                    except Exception:
                         pass
         except Exception as e:
             log_error(f"Error showing keyboard: {e}")
