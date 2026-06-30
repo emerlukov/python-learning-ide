@@ -108,8 +108,9 @@ class KeyboardTracker:
                     height = inset_h
             except Exception as e:
                 print(f"[KeyboardTracker] Insets fallback error: {e}")
-        # Если высота изменилась, уведомляем
-        if height != self._last_reported_height:
+        # Если высота изменилась существенно, уведомляем (hysteresis)
+        THRESHOLD_PX = 6
+        if abs(height - self._last_reported_height) >= THRESHOLD_PX:
             self.keyboard_height = height
             self._last_reported_height = height
             self._notify_callbacks()
