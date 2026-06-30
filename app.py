@@ -92,6 +92,11 @@ class PythonLearningApp(MDApp):
         self.search_widget = None
         self._popup = None
 
+        # Отслеживание клавиатуры для синхронизации панели символов
+        self._keyboard_height = 0
+        self._keyboard_visible = False
+        self._symbol_bar_update_timer = None
+
         # Применяем тему
         ThemeManager.apply_saved_theme()
         ThemeManager.register(self)
@@ -259,21 +264,46 @@ class PythonLearningApp(MDApp):
         # Добавляем symbol_bar в root_layout для позиционирования
         root_layout.add_widget(self.symbol_bar)
 
-        # Позиционирование symbol_bar: всегда внизу, поднимается с клавиатурой.
+        # Синхронизация symbol_bar с клавиатурой Android
         # На Android высота клавиатуры приходит через Window.keyboard_height
-        # (событие on_keyboard_height). Window.height при этом НЕ меняется.
+        # Панель символов должна подниматься/опускаться вместе с клавиатурой
         def _update_symbol_bar_pos(*args):
-            if not (hasattr(self, 'symbol_bar') and self.symbol_bar):
+            if not (hasattr(self, 'symbol_bar') and self.symbol_bar and hasattr(self, 'root_layout')):
                 return
-            kb_h = getattr(Window, 'keyboard_height', 0) or 0
-            self.symbol_bar.pos = (0, kb_h)
-            self.symbol_bar.width = root_layout.width
-            print(f"[DEBUG] symbol_bar pos updated: y={kb_h}, width={root_layout.width}")
+            try:
+                kb_h = getattr(Window, 'keyboard_height', 0) or 0
+                # Устанавливаем позицию и размер symbol_bar
+                self.symbol_bar.pos_hint = None
+                self.symbol_bar.pos = (0, kb_h)
+                self.symbol_bar.size_hint_x = 1
+                self.symbol_bar.width = root_layout.width
+                print(f"[DEBUG] symbol_bar pos updated: y={kb_h}, width={root_layout.width}, kb_height={kb_h}")
+            except Exception as e:
+                print(f"[DEBUG] Error updating symbol_bar position: {e}")
 
+        # Подписываемся на изменения layout
         root_layout.bind(size=_update_symbol_bar_pos, pos=_update_symbol_bar_pos)
-        # on_keyboard_height — основное событие Kivy/Android при появлении клавиатуры
+        
+        # on_keyboard_height — основное событие Kivy/Android при появлении/скрытии клавиатуры
         Window.bind(keyboard_height=lambda inst, val: _update_symbol_bar_pos())
+        
+        # Начальное позиционирование с задержкой (даёт время на инициализацию)
         Clock.schedule_once(lambda dt: _update_symbol_bar_pos(), 0.3)
+        
+        # Дополнительное обновление при фокусировке на TextInput (в Android это может менять размеры)
+        def on_focus_any_input(widget, value):
+            if value:  # focus = True
+                Clock.schedule_once(lambda dt: _update_symbol_bar_pos(), 0.1)
+        
+        # Сохраняем callback для использования при привязке к TextInput
+        self._symbol_bar_focus_callback = on_focus_any_input
+        
+        # Дополнительное обновление в главном цикле (на случай если keyboard_height меняется незаметно)
+        def periodic_update(dt):
+            if hasattr(self, 'symbol_bar') and self.symbol_bar and self.symbol_bar.parent:
+                _update_symbol_bar_pos()
+        
+        Clock.schedule_interval(periodic_update, 0.5)
 
         # Настройка автосохранения
         self._setup_autosave()
@@ -538,6 +568,21 @@ class PythonLearningApp(MDApp):
 
         # Обновляем заголовок окна
         self._update_title_from_current_tab()
+
+        # Перезагружаем примеры при смене языка
+        from managers import examples_manager
+        examples_manager.reload()
+
+        # Обновляем спиннер
+        if hasattr(self, 'spinner') and self.spinner:
+            current_text = self.spinner.text
+            self.spinner.values = self._get_example_titles()
+            self.spinner.text = current_text
+
+        # Сохраняем язык
+        self._save_language()
+
+        print(f"[DEBUG] Language changed to: {self.current_language}")
 
     def _get_autosave_path(self):
         """Возвращает путь к файлу автосохранения"""
@@ -1034,7 +1079,7 @@ class PythonLearningApp(MDApp):
 
         scroll = ScrollView(size_hint=(1, 0.85), do_scroll_x=False, do_scroll_y=True)
 
-        # ИЗМЕНЕНИЕ: Заменили 'SourceBold' на 'DejaVuSans' (или 'NotoSans'), чтобы читались спецсимволы звезд и наград
+        # ИЗМЕНЕНИЕ: Заменили 'SourceBold' на 'DejaVuSans', чтобы читались спецсимволы звезд и наград
         output_view = TextInput(
             text=str(result), readonly=True, font_size=dp(16),
             font_name='DejaVuSans', background_color=theme['result_bg'],
