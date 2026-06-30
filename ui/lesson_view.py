@@ -558,7 +558,6 @@ class LessonView(BoxLayout):
             self.app.symbol_bar.text_input = self.app.code_input
             # Возвращаем softinput_mode для главного редактора (не поднимает приложение)
             if platform == 'android':
-                from kivy.core.window import Window
                 Window.softinput_mode = ''
 
     def _update_symbol_bar_for_practice(self):
@@ -580,7 +579,6 @@ class LessonView(BoxLayout):
 
         # Меняем softinput_mode для practice-вкладки (поднимает приложение при клавиатуре)
         if platform == 'android':
-            from kivy.core.window import Window
             Window.softinput_mode = 'pan'
 
     # ------------------------------------------------------------------
@@ -1514,7 +1512,6 @@ class LessonView(BoxLayout):
 
         # Возвращаем softinput_mode для главного редактора (не поднимает приложение)
         if platform == 'android':
-            from kivy.core.window import Window
             Window.softinput_mode = ''
 
         if self.parent:
