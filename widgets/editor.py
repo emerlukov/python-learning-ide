@@ -1718,19 +1718,23 @@ class LineNumberTextInput(BoxLayout):
                 self._unfreeze_scroll()
             Clock.schedule_once(_ensure_and_unfreeze, 0.3)
             
-            # Синхронизация symbol_bar с клавиатурой при фокусировке
+            # === ОБНОВЛЕНИЕ СИМВОЛ-ПАНЕЛИ ===
             app = App.get_running_app()
-            if app and hasattr(app, '_symbol_bar_focus_callback'):
-                Clock.schedule_once(lambda dt: app._symbol_bar_focus_callback(instance, True), 0.1)
+            if app and hasattr(app, '_symbol_bar_update_fn'):
+                # Множественные обновления при получении фокуса
+                Clock.schedule_once(lambda dt: app._symbol_bar_update_fn(), 0.05)
+                Clock.schedule_once(lambda dt: app._symbol_bar_update_fn(), 0.1)
+                Clock.schedule_once(lambda dt: app._symbol_bar_update_fn(), 0.15)
+                Clock.schedule_once(lambda dt: app._symbol_bar_update_fn(), 0.25)
+                Clock.schedule_once(lambda dt: app._symbol_bar_update_fn(), 0.4)
+                
         else:
             self._keyboard_visible = False
-            # Обрезаем лишние строки когда клавиатура скрыта
-            #Clock.schedule_once(self._trim_trailing_lines, 0.1)
             
-            # Синхронизация symbol_bar при потере фокуса
+            # Обновление при потере фокуса
             app = App.get_running_app()
-            if app and hasattr(app, '_symbol_bar_focus_callback'):
-                Clock.schedule_once(lambda dt: app._symbol_bar_focus_callback(instance, False), 0.1)
+            if app and hasattr(app, '_symbol_bar_update_fn'):
+                Clock.schedule_once(lambda dt: app._symbol_bar_update_fn(), 0.1)
 
     def _show_keyboard(self, dt=None):
         try:
