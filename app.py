@@ -39,6 +39,7 @@ from utils.hotkeys import HotkeyManager
 
 from utils.vibration_manager import VibrationManager, wrap_all_buttons, auto_wrap_on_build
 from utils.paths import user_data_path, ensure_user_data_dir, migrate_legacy_data
+from utils.keyboard_tracker import get_keyboard_tracker
 
 
 class PythonLearningApp(MDApp):
@@ -239,8 +240,10 @@ class PythonLearningApp(MDApp):
         # Панель символов внизу экрана (создаём до инициализации редактора)
         self.symbol_bar = MySymbolScrollBar(None)
         self.symbol_bar.app = self
-        self.symbol_bar.size_hint_x = 1
-        self.symbol_bar.size_hint_y = None
+        # Явно устанавливаем параметры для позиционирования в FloatLayout
+        self.symbol_bar.size_hint = (1, None)  # Растягиваем по ширине, фиксированная высота
+        self.symbol_bar.x = 0  # Начальная позиция X
+        self.symbol_bar.y = 0  # Начальная позиция Y (будет обновляться)
 
         # Вкладки
         tab_bar = self.tab_manager.create_tab_bar(theme)
@@ -262,48 +265,53 @@ class PythonLearningApp(MDApp):
         root_layout = self._create_run_button(main_layout, theme)
 
         # Добавляем symbol_bar в root_layout для позиционирования
+        # ВАЖНО: symbol_bar должна быть в самом конце, чтобы она была сверху
         root_layout.add_widget(self.symbol_bar)
 
-        # Синхронизация symbol_bar с клавиатурой Android
-        # На Android высота клавиатуры приходит через Window.keyboard_height
-        # Панель символов должна подниматься/опускаться вместе с клавиатурой
-        def _update_symbol_bar_pos(*args):
-            if not (hasattr(self, 'symbol_bar') and self.symbol_bar and hasattr(self, 'root_layout')):
+        # === ИСПОЛЬЗУЕМ KeyboardTracker ДЛЯ НАДЕЖНОЙ СИНХРОНИЗАЦИИ ===
+        keyboard_tracker = get_keyboard_tracker()
+        
+        def _on_keyboard_height_changed(height):
+            """Колбек вызывается при изменении высоты клавиатуры"""
+            if not (hasattr(self, 'symbol_bar') and self.symbol_bar):
                 return
             try:
-                kb_h = getattr(Window, 'keyboard_height', 0) or 0
-                # Устанавливаем позицию и размер symbol_bar
-                self.symbol_bar.pos_hint = None
-                self.symbol_bar.pos = (0, kb_h)
-                self.symbol_bar.size_hint_x = 1
+                # Устанавливаем новую позицию
+                self.symbol_bar.x = 0
+                self.symbol_bar.y = height
                 self.symbol_bar.width = root_layout.width
-                print(f"[DEBUG] symbol_bar pos updated: y={kb_h}, width={root_layout.width}, kb_height={kb_h}")
+                
+                print(f"[KEYBOARD_CHANGE] symbol_bar moved to y={height}, width={root_layout.width}")
+                
             except Exception as e:
-                print(f"[DEBUG] Error updating symbol_bar position: {e}")
-
-        # Подписываемся на изменения layout
-        root_layout.bind(size=_update_symbol_bar_pos, pos=_update_symbol_bar_pos)
+                print(f"[ERROR] Failed to update symbol_bar: {e}")
         
-        # on_keyboard_height — основное событие Kivy/Android при появлении/скрытии клавиатуры
-        Window.bind(keyboard_height=lambda inst, val: _update_symbol_bar_pos())
+        # Регистрируем колбек
+        keyboard_tracker.add_callback(_on_keyboard_height_changed)
         
-        # Начальное позиционирование с задержкой (даёт время на инициализацию)
+        def _update_symbol_bar_pos(*args):
+            """Явное обновление позиции (для других событий)"""
+            if not (hasattr(self, 'symbol_bar') and self.symbol_bar):
+                return
+            try:
+                kb_h = keyboard_tracker.get_keyboard_height()
+                self.symbol_bar.x = 0
+                self.symbol_bar.y = kb_h
+                self.symbol_bar.width = root_layout.width
+                
+            except Exception as e:
+                print(f"[ERROR] _update_symbol_bar_pos: {e}")
+        
+        # Привязываем обновление к изменению размера root_layout
+        root_layout.bind(size=_update_symbol_bar_pos)
+        
+        # Начальное позиционирование
         Clock.schedule_once(lambda dt: _update_symbol_bar_pos(), 0.3)
+        Clock.schedule_once(lambda dt: _update_symbol_bar_pos(), 0.5)
         
-        # Дополнительное обновление при фокусировке на TextInput (в Android это может менять размеры)
-        def on_focus_any_input(widget, value):
-            if value:  # focus = True
-                Clock.schedule_once(lambda dt: _update_symbol_bar_pos(), 0.1)
-        
-        # Сохраняем callback для использования при привязке к TextInput
-        self._symbol_bar_focus_callback = on_focus_any_input
-        
-        # Дополнительное обновление в главном цикле (на случай если keyboard_height меняется незаметно)
-        def periodic_update(dt):
-            if hasattr(self, 'symbol_bar') and self.symbol_bar and self.symbol_bar.parent:
-                _update_symbol_bar_pos()
-        
-        Clock.schedule_interval(periodic_update, 0.5)
+        # Сохраняем для использования в редакторе
+        self._symbol_bar_update_fn = _update_symbol_bar_pos
+        self._keyboard_tracker = keyboard_tracker
 
         # Настройка автосохранения
         self._setup_autosave()
