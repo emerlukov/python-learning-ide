@@ -555,6 +555,10 @@ class LessonView(BoxLayout):
         if not is_practice and hasattr(self, 'app') and hasattr(self.app, 'symbol_bar') and hasattr(self.app,
                                                                                                     'code_input'):
             self.app.symbol_bar.text_input = self.app.code_input
+            # Возвращаем softinput_mode для главного редактора (не поднимает приложение)
+            if platform == 'android':
+                from kivy.core.window import Window
+                Window.softinput_mode = 'adjustNothing'
 
     def _update_symbol_bar_for_practice(self):
         """Перенаправляет symbol_bar на редактор вкладки Практика."""
@@ -572,6 +576,11 @@ class LessonView(BoxLayout):
                 target.focus = True
         except Exception:
             pass
+
+        # Меняем softinput_mode для practice-вкладки (поднимает приложение при клавиатуре)
+        if platform == 'android':
+            from kivy.core.window import Window
+            Window.softinput_mode = 'pan'
 
     # ------------------------------------------------------------------
     # Навигация между уроками
@@ -1501,6 +1510,11 @@ class LessonView(BoxLayout):
         # Восстанавливаем symbol_bar на основной редактор
         if hasattr(self, 'app') and hasattr(self.app, 'symbol_bar') and hasattr(self.app, 'code_input'):
             self.app.symbol_bar.text_input = self.app.code_input
+
+        # Возвращаем softinput_mode для главного редактора (не поднимает приложение)
+        if platform == 'android':
+            from kivy.core.window import Window
+            Window.softinput_mode = 'adjustNothing'
 
         if self.parent:
             self.parent.remove_widget(self)
