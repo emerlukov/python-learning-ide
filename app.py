@@ -227,9 +227,11 @@ class PythonLearningApp(MDApp):
         self.action_bar.app = self
         main_layout.add_widget(self.action_bar)
 
+        # Панель символов внизу экрана (создаём до инициализации редактора)
         self.symbol_bar = MySymbolScrollBar(None)
         self.symbol_bar.app = self
-        main_layout.add_widget(self.symbol_bar)
+        self.symbol_bar.size_hint_x = 1
+        self.symbol_bar.size_hint_y = None
 
         # Вкладки
         tab_bar = self.tab_manager.create_tab_bar(theme)
@@ -249,6 +251,23 @@ class PythonLearningApp(MDApp):
 
         # Плавающая кнопка Run
         root_layout = self._create_run_button(main_layout, theme)
+
+        # Добавляем symbol_bar в root_layout для позиционирования
+        root_layout.add_widget(self.symbol_bar)
+
+        # Позиционирование symbol_bar внизу экрана
+        def set_symbol_bar_pos(instance, value):
+            if hasattr(self, 'symbol_bar') and self.symbol_bar:
+                keyboard_height = Window.keyboard_height if hasattr(Window, 'keyboard_height') else 0
+                bar_height = self.symbol_bar.height
+                x = 0
+                y = keyboard_height
+                self.symbol_bar.pos = (x, y)
+                self.symbol_bar.width = root_layout.width
+
+        root_layout.bind(size=set_symbol_bar_pos, pos=set_symbol_bar_pos)
+        Window.bind(on_keyboard_height=set_symbol_bar_pos)
+        Clock.schedule_once(lambda dt: set_symbol_bar_pos(None, None), 0.3)
 
         # Настройка автосохранения
         self._setup_autosave()
