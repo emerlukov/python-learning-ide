@@ -60,7 +60,6 @@ class KeyboardTracker:
 
     def _on_keyboard_height(self, window, height):
         """Обработчик события on_keyboard_height"""
-        print(f"[KeyboardTracker] keyboard_height event: {height}")
         self.keyboard_height = height
         self._notify_callbacks()
 
@@ -72,11 +71,9 @@ class KeyboardTracker:
         # Если окно уменьшилось значительно, то появилась клавиатура
         if height_diff > 50:  # Минимальная высота клавиатуры ~50 пиксель
             self.keyboard_height = height_diff
-            print(f"[KeyboardTracker] Detected keyboard from window resize: {self.keyboard_height}")
             self._notify_callbacks()
         elif height_diff < -50:  # Окно увеличилось - клавиатура скрыта
             self.keyboard_height = 0
-            print("[KeyboardTracker] Keyboard hidden (window expanded)")
             self._notify_callbacks()
 
         self.last_window_height = current_height
@@ -152,11 +149,10 @@ class KeyboardTracker:
                     # insets.bottom содержит высоту IME
                     if insets is not None:
                         bottom = int(insets.bottom)
-                        print(f"[KeyboardTracker] Insets IME bottom={bottom}")
                         return bottom
             except Exception as e:
                 # Иногда getRootWindowInsets или Type не доступны — продолжим к fallback
-                print(f"[KeyboardTracker] WindowInsets method failed: {e}")
+                pass
 
             # Fallback: используем видимую область окна (decorView.getWindowVisibleDisplayFrame)
             try:
@@ -166,13 +162,10 @@ class KeyboardTracker:
                 # высота экрана - rect.bottom = высота клавиатуры
                 screen_h = decor.getHeight() or activity.getWindowManager().getDefaultDisplay().getHeight()
                 kb_h = int(max(0, screen_h - rect.bottom))
-                print(f"[KeyboardTracker] DecorView fallback keyboard_h={kb_h} screen_h={screen_h} rect.bottom={rect.bottom}")
                 return kb_h
             except Exception as e:
-                print(f"[KeyboardTracker] DecorView fallback failed: {e}")
                 return 0
         except Exception as e:
-            print(f"[KeyboardTracker] jnius not available or error: {e}")
             return 0
 
 
