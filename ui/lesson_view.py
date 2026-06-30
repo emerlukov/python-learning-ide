@@ -276,10 +276,10 @@ class LessonView(BoxLayout):
 
         # ========== ПАНЕЛЬ СТАТИСТИКИ (XP, STREAK) ==========
         stats_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(30), spacing=dp(10))
-        
+
         total_xp = self.lesson_manager.get_total_xp()
         streak_days = self.lesson_manager.get_streak_days()
-        
+
         self.xp_label = Label(
             text=f"★ {total_xp} XP",
             font_size=dp(12),
@@ -289,7 +289,7 @@ class LessonView(BoxLayout):
             halign='left'
         )
         self.xp_label.bind(width=lambda inst, val: setattr(inst, 'text_size', (val, None)))
-        
+
         self.streak_label = Label(
             text=f"▲ {streak_days} {self.app.tr.get('streak_days', 'Day streak: {}').format(streak_days)}",
             font_size=dp(12),
@@ -299,14 +299,14 @@ class LessonView(BoxLayout):
             halign='right'
         )
         self.streak_label.bind(width=lambda inst, val: setattr(inst, 'text_size', (val, None)))
-        
+
         stats_layout.add_widget(self.xp_label)
         stats_layout.add_widget(self.streak_label)
         self.add_widget(stats_layout)
 
         # ========== ПАНЕЛЬ БЕЙДЖЕЙ ==========
         badges_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(25), spacing=dp(5))
-        
+
         self.badges_label = Label(
             text=self._get_badges_text(),
             font_size=dp(10),
@@ -316,7 +316,7 @@ class LessonView(BoxLayout):
             halign='left'
         )
         self.badges_label.bind(width=lambda inst, val: setattr(inst, 'text_size', (val, None)))
-        
+
         badges_layout.add_widget(self.badges_label)
         self.add_widget(badges_layout)
 
@@ -476,11 +476,11 @@ class LessonView(BoxLayout):
         if hasattr(self, 'xp_label'):
             total_xp = self.lesson_manager.get_total_xp()
             self.xp_label.text = f"★ {total_xp} XP"
-        
+
         if hasattr(self, 'streak_label'):
             streak_days = self.lesson_manager.get_streak_days()
             self.streak_label.text = f"▲ {streak_days} {self.app.tr.get('streak_days', 'Day streak: {}').format(streak_days)}"
-        
+
         if hasattr(self, 'badges_label'):
             self.badges_label.text = self._get_badges_text()
 
@@ -507,10 +507,10 @@ class LessonView(BoxLayout):
         self._tabs_built.add(tab_key)
 
         builders = {
-            'theory':   self._create_theory_tab,
-            'task':     self._create_task_tab,
+            'theory': self._create_theory_tab,
+            'task': self._create_task_tab,
             'practice': self._create_practice_tab,
-            'hint':     self._create_hint_tab,
+            'hint': self._create_hint_tab,
         }
         builder = builders.get(tab_key)
         if builder:
@@ -527,33 +527,51 @@ class LessonView(BoxLayout):
 
         # Определяем ключ выбранной вкладки
         tab_map = {
-            id(self.theory_tab):   'theory',
-            id(self.task_tab):     'task',
+            id(self.theory_tab): 'theory',
+            id(self.task_tab): 'task',
             id(self.practice_tab): 'practice',
-            id(self.hint_tab):     'hint',
+            id(self.hint_tab): 'hint',
         }
         key = tab_map.get(id(value))
+
+        is_practice = (key == 'practice')
+
         if key and key not in self._tabs_built:
             # Строим в следующем кадре — UI успевает перерисоваться
-            Clock.schedule_once(lambda dt: self._build_tab(key), 0)
+            if is_practice:
+                # После постройки вкладки дополнительно обновляем symbol_bar
+                def _build_then_update(dt):
+                    self._build_tab(key)
+                    Clock.schedule_once(lambda dt2: self._update_symbol_bar_for_practice(), 0.05)
 
-        # Обновляем symbol_bar.text_input при переключении на вкладку practice
-        if key == 'practice' and value == self.practice_tab:
-            def update_symbol_bar(dt):
-                if hasattr(self, 'app') and hasattr(self.app, 'symbol_bar') and hasattr(self, 'practice_editor'):
-                    # Для InteractiveCodeWidget берём text_input
-                    if hasattr(self.practice_editor, 'text_input'):
-                        self.app.symbol_bar.text_input = self.practice_editor.text_input
-                        # Устанавливаем фокус на text_input
-                        self.practice_editor.text_input.focus = True
-                    else:
-                        self.app.symbol_bar.text_input = self.practice_editor
-                        # Устанавливаем фокус на practice_editor
-                        self.practice_editor.focus = True
-            Clock.schedule_once(update_symbol_bar, 0.1)
+                Clock.schedule_once(_build_then_update, 0)
+            else:
+                Clock.schedule_once(lambda dt: self._build_tab(key), 0)
+        elif is_practice:
+            # Вкладка уже построена — просто обновляем symbol_bar
+            Clock.schedule_once(lambda dt: self._update_symbol_bar_for_practice(), 0.05)
+
         # Восстанавливаем symbol_bar на основной редактор при уходе с practice
-        elif key != 'practice' and hasattr(self, 'app') and hasattr(self.app, 'symbol_bar') and hasattr(self.app, 'code_input'):
+        if not is_practice and hasattr(self, 'app') and hasattr(self.app, 'symbol_bar') and hasattr(self.app,
+                                                                                                    'code_input'):
             self.app.symbol_bar.text_input = self.app.code_input
+
+    def _update_symbol_bar_for_practice(self):
+        """Перенаправляет symbol_bar на редактор вкладки Практика."""
+        if not (hasattr(self, 'app') and hasattr(self.app, 'symbol_bar')):
+            return
+        if not hasattr(self, 'practice_editor'):
+            return
+        editor = self.practice_editor
+        # InteractiveCodeWidget хранит реальный TextInput в .text_input
+        target = getattr(editor, 'text_input', editor)
+        self.app.symbol_bar.text_input = target
+        # Фокус — только если виджет уже в дереве и видим
+        try:
+            if target and target.parent:
+                target.focus = True
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Навигация между уроками
