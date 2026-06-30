@@ -21,6 +21,7 @@ from kivy.metrics import dp
 from kivy.app import App
 from kivy.core.clipboard import Clipboard
 from kivy.core.window import Window
+from kivy.utils import platform
 
 from ide_core.themes import ThemeManager
 from ide_core.lessons import LessonManager
@@ -558,7 +559,7 @@ class LessonView(BoxLayout):
             # Возвращаем softinput_mode для главного редактора (не поднимает приложение)
             if platform == 'android':
                 from kivy.core.window import Window
-                Window.softinput_mode = 'adjustNothing'
+                Window.softinput_mode = ''
 
     def _update_symbol_bar_for_practice(self):
         """Перенаправляет symbol_bar на редактор вкладки Практика."""
@@ -1514,7 +1515,7 @@ class LessonView(BoxLayout):
         # Возвращаем softinput_mode для главного редактора (не поднимает приложение)
         if platform == 'android':
             from kivy.core.window import Window
-            Window.softinput_mode = 'adjustNothing'
+            Window.softinput_mode = ''
 
         if self.parent:
             self.parent.remove_widget(self)
