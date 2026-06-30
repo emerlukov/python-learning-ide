@@ -1717,10 +1717,20 @@ class LineNumberTextInput(BoxLayout):
                 self._ensure_trailing_empty_lines()
                 self._unfreeze_scroll()
             Clock.schedule_once(_ensure_and_unfreeze, 0.3)
+            
+            # Синхронизация symbol_bar с клавиатурой при фокусировке
+            app = App.get_running_app()
+            if app and hasattr(app, '_symbol_bar_focus_callback'):
+                Clock.schedule_once(lambda dt: app._symbol_bar_focus_callback(instance, True), 0.1)
         else:
             self._keyboard_visible = False
             # Обрезаем лишние строки когда клавиатура скрыта
             #Clock.schedule_once(self._trim_trailing_lines, 0.1)
+            
+            # Синхронизация symbol_bar при потере фокуса
+            app = App.get_running_app()
+            if app and hasattr(app, '_symbol_bar_focus_callback'):
+                Clock.schedule_once(lambda dt: app._symbol_bar_focus_callback(instance, False), 0.1)
 
     def _show_keyboard(self, dt=None):
         try:
