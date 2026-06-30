@@ -99,6 +99,15 @@ class KeyboardTracker:
             if height_diff > 50:
                 height = height_diff
 
+        # Способ 3: попытка использовать WindowInsets (Android API 30+)
+        # если высота всё ещё равна 0 и мы на Android — попробуем получить IME через jnius
+        if height == 0 and platform == 'android':
+            try:
+                inset_h = self._get_keyboard_height_from_insets()
+                if inset_h and inset_h > 0:
+                    height = inset_h
+            except Exception as e:
+                print(f"[KeyboardTracker] Insets fallback error: {e}")
         # Если высота изменилась, уведомляем
         if height != self._last_reported_height:
             self.keyboard_height = height
@@ -116,6 +125,54 @@ class KeyboardTracker:
     def get_keyboard_height(self):
         """Возвращает текущую высоту клавиатуры"""
         return self.keyboard_height
+
+    def _get_keyboard_height_from_insets(self):
+        """Попытка получить высоту IME через WindowInsets (Android API 30+).
+        Возвращает высоту в пикселях или 0 если не удалось.
+        """
+        try:
+            # Импортируем jnius только на Android
+            from jnius import autoclass
+
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            activity = PythonActivity.mActivity
+            if not activity:
+                return 0
+
+            decor = activity.getWindow().getDecorView()
+            # Попробуем получить WindowInsets и Insets для IME
+            try:
+                WindowInsetsType = autoclass('android.view.WindowInsets$Type')
+                root_insets = decor.getRootWindowInsets()
+                if root_insets is not None:
+                    # getInsets требует int параметр (WindowInsets.Type.ime())
+                    ime_type = WindowInsetsType.ime()
+                    insets = root_insets.getInsets(ime_type)
+                    # insets.bottom содержит высоту IME
+                    if insets is not None:
+                        bottom = int(insets.bottom)
+                        print(f"[KeyboardTracker] Insets IME bottom={bottom}")
+                        return bottom
+            except Exception as e:
+                # Иногда getRootWindowInsets или Type не доступны — продолжим к fallback
+                print(f"[KeyboardTracker] WindowInsets method failed: {e}")
+
+            # Fallback: используем видимую область окна (decorView.getWindowVisibleDisplayFrame)
+            try:
+                Rect = autoclass('android.graphics.Rect')
+                rect = Rect()
+                decor.getWindowVisibleDisplayFrame(rect)
+                # высота экрана - rect.bottom = высота клавиатуры
+                screen_h = decor.getHeight() or activity.getWindowManager().getDefaultDisplay().getHeight()
+                kb_h = int(max(0, screen_h - rect.bottom))
+                print(f"[KeyboardTracker] DecorView fallback keyboard_h={kb_h} screen_h={screen_h} rect.bottom={rect.bottom}")
+                return kb_h
+            except Exception as e:
+                print(f"[KeyboardTracker] DecorView fallback failed: {e}")
+                return 0
+        except Exception as e:
+            print(f"[KeyboardTracker] jnius not available or error: {e}")
+            return 0
 
 
 # Глобальный экземпляр
