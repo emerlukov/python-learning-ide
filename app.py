@@ -305,14 +305,16 @@ class PythonLearningApp(MDApp):
                     return
 
                 # Устанавливаем позицию сразу без анимации (убираем мерцание)
-                # Прижимаем панель прямо к клавиатуре без отступа
-                self.symbol_bar.pos = (0, h)
+                # При скрытой клавиатуре - вниз экрана (y=0)
+                # При открытой клавиатуре - прямо прижата к клавиатуре (y=h)
+                if h > 0:
+                    self.symbol_bar.pos = (0, h)
+                else:
+                    self.symbol_bar.pos = (0, 0)
                 self.symbol_bar.width = root_layout.width
                 self._last_applied_kb_height = h
-
-                print(f"[KEYBOARD_CHANGE] symbol_bar set to y={h}, width={root_layout.width}")
             except Exception as e:
-                print(f"[ERROR] _apply_kb_height: {e}")
+                pass
 
         def _on_keyboard_height_changed(height):
             """Колбек вызывается при изменении высоты клавиатуры (debounced)"""
