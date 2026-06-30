@@ -1721,12 +1721,10 @@ class LineNumberTextInput(BoxLayout):
             # === ОБНОВЛЕНИЕ СИМВОЛ-ПАНЕЛИ ===
             app = App.get_running_app()
             if app and hasattr(app, '_symbol_bar_update_fn'):
-                # Множественные обновления при получении фокуса
+                # Уменьшаем количество обновлений при получении фокуса, оставляем 3 для надежности
                 Clock.schedule_once(lambda dt: app._symbol_bar_update_fn(), 0.05)
-                Clock.schedule_once(lambda dt: app._symbol_bar_update_fn(), 0.1)
-                Clock.schedule_once(lambda dt: app._symbol_bar_update_fn(), 0.15)
-                Clock.schedule_once(lambda dt: app._symbol_bar_update_fn(), 0.25)
-                Clock.schedule_once(lambda dt: app._symbol_bar_update_fn(), 0.4)
+                Clock.schedule_once(lambda dt: app._symbol_bar_update_fn(), 0.12)
+                Clock.schedule_once(lambda dt: app._symbol_bar_update_fn(), 0.30)
                 
         else:
             self._keyboard_visible = False
@@ -1749,16 +1747,9 @@ class LineNumberTextInput(BoxLayout):
                         if activity:
                             # Устанавливаем режим, позволяющий отслеживать высоту клавиатуры
                             # (ADJUST_RESIZE позволяет окну изменять размер и Window.keyboard_height обновится)
-                            try:
-                                LayoutParams = autoclass('android.view.WindowManager$LayoutParams')
-                                mode = LayoutParams.SOFT_INPUT_ADJUST_RESIZE
-                            except Exception:
-                                # fallback значение (обычно 0x10)
-                                mode = 0x10
-                            try:
-                                activity.getWindow().setSoftInputMode(mode)
-                            except Exception:
-                                pass
+                            # Не меняем softInputMode — используем WindowInsets для определения высоты клавиатуры,
+                            # чтобы избежать переразметки интерфейса (дерганья верхних панелей).
+                            pass
 
                             InputMethodManager = autoclass('android.view.inputmethod.InputMethodManager')
                             Context = autoclass('android.content.Context')
