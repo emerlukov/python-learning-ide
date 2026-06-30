@@ -17,12 +17,14 @@ from kivy.clock import Clock
 from kivy.metrics import dp
 from kivy.utils import platform
 from kivy.core.clipboard import Clipboard
+from kivy.animation import Animation
 
 from utils import (
     log_error, get_screen_category, reset_screen_cache,
     adaptive_dp, adaptive_sp, get_tab_count,
     patched_excepthook, android_copy
 )
+from utils.keyboard_tracker import get_keyboard_tracker
 from ide_core import SettingsManager, ThemeManager, SyntaxStyleManager, TRANSLATIONS, LessonManager
 from widgets import MyActionBar, MySymbolScrollBar
 from managers import AutoCompleteWidget, CodeExecutor, TabManager
@@ -213,9 +215,10 @@ class PythonLearningApp(MDApp):
         self._load_fonts()
 
         # Устанавливаем режим клавиатуры на Android:
-        # 'below_target' — окно сжимается, keyboard_height обновляется корректно
+        # 'adjustNothing' — окно не сжимается и не сдвигается при клавиатуре (для главного редактора)
+        # Для practice-вкладки будем менять динамически
         if platform == 'android':
-            Window.softinput_mode = 'below_target'
+            Window.softinput_mode = 'adjustNothing'
         Window.keyboard_anim_args = {'d': 0.2, 't': 'in_out_quad'}
         Window.bind(on_key_down=self.hotkey_manager.handle_keyboard)
 
@@ -270,35 +273,64 @@ class PythonLearningApp(MDApp):
 
         # === ИСПОЛЬЗУЕМ KeyboardTracker ДЛЯ НАДЕЖНОЙ СИНХРОНИЗАЦИИ ===
         keyboard_tracker = get_keyboard_tracker()
-        
-        def _on_keyboard_height_changed(height):
-            """Колбек вызывается при изменении высоты клавиатуры"""
-            if not (hasattr(self, 'symbol_bar') and self.symbol_bar):
-                return
+        # Попытка сохранить текущий soft input mode, чтобы при необходимости восстанавливать
+        self._prev_soft_input_mode = None
+        if platform == 'android':
             try:
-                # Устанавливаем новую позицию
-                self.symbol_bar.x = 0
-                self.symbol_bar.y = height
+                from jnius import autoclass
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                activity = PythonActivity.mActivity
+                if activity:
+                    try:
+                        attrs = activity.getWindow().getAttributes()
+                        self._prev_soft_input_mode = int(attrs.softInputMode)
+                    except Exception:
+                        self._prev_soft_input_mode = None
+            except Exception:
+                self._prev_soft_input_mode = None
+        
+        # Debounced update to avoid jitter (увеличил debounce для уменьшения мерцания)
+        self._pending_kb_height = None
+        self._kb_update_ev = None
+        self._last_applied_kb_height = None
+
+        def _apply_kb_height(dt):
+            try:
+                h = getattr(self, '_pending_kb_height', 0) or 0
+                if not (hasattr(self, 'symbol_bar') and self.symbol_bar):
+                    return
+
+                # Не обновляем если высота не изменилась существенно (предотвращаем лишние обновления)
+                if self._last_applied_kb_height is not None and abs(h - self._last_applied_kb_height) < 5:
+                    return
+
+                # Устанавливаем позицию сразу без анимации (убираем мерцание)
+                self.symbol_bar.pos = (0, h)
                 self.symbol_bar.width = root_layout.width
-                
-                print(f"[KEYBOARD_CHANGE] symbol_bar moved to y={height}, width={root_layout.width}")
-                
+                self._last_applied_kb_height = h
+
+                print(f"[KEYBOARD_CHANGE] symbol_bar set to y={h}, width={root_layout.width}")
             except Exception as e:
-                print(f"[ERROR] Failed to update symbol_bar: {e}")
+                print(f"[ERROR] _apply_kb_height: {e}")
+
+        def _on_keyboard_height_changed(height):
+            """Колбек вызывается при изменении высоты клавиатуры (debounced)"""
+            # store and schedule
+            self._pending_kb_height = int(height or 0)
+            if self._kb_update_ev:
+                Clock.unschedule(self._kb_update_ev)
+            # Увеличил задержку для debounce (0.1 вместо 0.02)
+            self._kb_update_ev = Clock.schedule_once(_apply_kb_height, 0.1)
         
         # Регистрируем колбек
         keyboard_tracker.add_callback(_on_keyboard_height_changed)
         
         def _update_symbol_bar_pos(*args):
-            """Явное обновление позиции (для других событий)"""
-            if not (hasattr(self, 'symbol_bar') and self.symbol_bar):
-                return
+            """Явное обновление позиции (для других событий) - uses same debounced path"""
             try:
-                kb_h = keyboard_tracker.get_keyboard_height()
-                self.symbol_bar.x = 0
-                self.symbol_bar.y = kb_h
-                self.symbol_bar.width = root_layout.width
-                
+                kb_h = int(keyboard_tracker.get_keyboard_height() or 0)
+                # reuse pending mechanism
+                _on_keyboard_height_changed(kb_h)
             except Exception as e:
                 print(f"[ERROR] _update_symbol_bar_pos: {e}")
         
