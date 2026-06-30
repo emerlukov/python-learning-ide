@@ -215,10 +215,10 @@ class PythonLearningApp(MDApp):
         self._load_fonts()
 
         # Устанавливаем режим клавиатуры на Android:
-        # 'adjustNothing' — окно не сжимается и не сдвигается при клавиатуре (для главного редактора)
-        # Для practice-вкладки будем менять динамически
+        # '' — системный режим по умолчанию (не поднимает приложение в главном редакторе)
+        # Для practice-вкладки будем менять динамически на 'pan'
         if platform == 'android':
-            Window.softinput_mode = 'adjustNothing'
+            Window.softinput_mode = ''
         Window.keyboard_anim_args = {'d': 0.2, 't': 'in_out_quad'}
         Window.bind(on_key_down=self.hotkey_manager.handle_keyboard)
 
