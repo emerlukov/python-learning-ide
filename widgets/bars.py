@@ -639,38 +639,25 @@ class MySymbolScrollBar(BoxLayout):
             btn.color = theme['symbol_btn_text']
 
     def handle_action(self, instance):
-        print(f"[DEBUG] SymbolBar button pressed: {instance.text}")
-        print(f"[DEBUG] self.app = {self.app}")
-        print(f"[DEBUG] self.text_input = {self.text_input}")
-
-        # ВИБРАЦИЯ
-        #if self.app and hasattr(self.app, 'vibrate_short'):
-            #self.app.vibrate_short()
-
         if instance.text != 'Tab':
             self._saved_sel_start = None
             self._saved_sel_end = None
         try:
             ti = self._get_active_text_input()
-            print(f"[DEBUG] Got text input: {ti}")
             if not ti:
-                print("[DEBUG] No text input found!")
                 return
             action = self._action_map.get(instance.text)
-            print(f"[DEBUG] Action found: {action}")
             if action:
+                # Сохраняем фокус перед вставкой символа
+                had_focus = ti.focus
                 action(ti)
-                Clock.schedule_once(lambda dt: self._refocus(ti), 0.05)
-            else:
-                print(f"[DEBUG] No action found for: {instance.text}")
+                # Не восстанавливаем фокус чтобы не вызывать обновление клавиатуры
+                # Clock.schedule_once(lambda dt: self._refocus(ti), 0.05)
         except Exception as e:
             log_error(f"SymbolBar error: {e}")
-            print(f"[DEBUG] SymbolBar exception: {e}")
 
     def _handle_tab_button(self, ti):
         try:
-            print("[DEBUG] Symbol bar Tab button pressed")
-
             editor = None
             app = App.get_running_app()
             if app and hasattr(app, 'tab_manager'):
@@ -729,7 +716,8 @@ class MySymbolScrollBar(BoxLayout):
 
             def restore(dt):
                 try:
-                    ti.focus = True
+                    # Не восстанавливаем фокус чтобы не вызывать обновление клавиатуры
+                    # ti.focus = True
                     ti.select_text(new_start, new_end)
                     Clock.schedule_once(lambda _: editor._unfreeze_scroll(), 0)
                 except Exception as e:
