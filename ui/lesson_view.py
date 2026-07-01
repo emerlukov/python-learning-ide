@@ -693,6 +693,12 @@ class LessonView(BoxLayout):
                 placeholder.parent.remove_widget(placeholder)
             parent.add_widget(new_view)
 
+            # Поднимаем symbol_bar наверх чтобы он был поверх окна урока
+            if hasattr(self.app, 'symbol_bar') and self.app.symbol_bar:
+                if hasattr(self.app, 'root_layout') and self.app.root_layout:
+                    self.app.root_layout.remove_widget(self.app.symbol_bar)
+                    self.app.root_layout.add_widget(self.app.symbol_bar)
+
         Clock.schedule_once(_do_create, 0)
 
     # ------------------------------------------------------------------
@@ -1462,6 +1468,12 @@ class LessonView(BoxLayout):
 
         if hasattr(self.app, 'root_layout'):
             self.app.root_layout.add_widget(new_view)
+
+        # Поднимаем symbol_bar наверх чтобы он был поверх окна урока
+        if hasattr(self.app, 'symbol_bar') and self.app.symbol_bar:
+            if hasattr(self.app, 'root_layout') and self.app.root_layout:
+                self.app.root_layout.remove_widget(self.app.symbol_bar)
+                self.app.root_layout.add_widget(self.app.symbol_bar)
 
     # ------------------------------------------------------------------
     # Клавиатура / окно
