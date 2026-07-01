@@ -577,15 +577,18 @@ class LessonView(BoxLayout):
         except Exception:
             pass
 
-        # ИСПРАВЛЕНИЕ: Для practice-вкладки используем режим 'pan'
-        # Это позволит окну автоматически поднять приложение при открытии клавиатуры,
-        # чтобы поле ввода не было перекрыто
+        # ИСПРАВЛЕНИЕ: Для practice-вкладки отключаем поднимание окна
+        # Вместо этого добавляем пусто место в конце контента,
+        # чтобы ScrollView мог скроллить поле ввода над клавиатурой
         if platform == 'android':
-            Window.softinput_mode = 'pan'
+            Window.softinput_mode = ''
 
         # Обновляем позицию symbol_bar для practice-вкладки
         if hasattr(self, 'app') and hasattr(self.app, '_symbol_bar_update_fn'):
             self.app._symbol_bar_update_fn()
+        
+        # Добавляем пусто место, чтобы контент мог скроллиться
+        Clock.schedule_once(lambda dt: self._add_keyboard_spacing(), 0.1)
 
     # ------------------------------------------------------------------
     # Навигация между уроками
@@ -866,8 +869,8 @@ class LessonView(BoxLayout):
             )
             Clock.schedule_once(lambda dt: self._update_code_from_editor(), 0.1)
             self.practice_tab.add_widget(self.practice_editor)
-            # Добавляем пустые строки в конец текста с задержкой после инициализации
-            Clock.schedule_once(lambda dt: self._add_trailing_lines(), 0.5)
+            # Добавляем пусто место для клавиатуры
+            Clock.schedule_once(lambda dt: self._add_keyboard_spacing(), 0.5)
         else:
             from kivy.uix.codeinput import CodeInput
             from pygments.lexers import PythonLexer
@@ -894,8 +897,8 @@ class LessonView(BoxLayout):
                 self.user_code = starter_code
 
             self.practice_tab.add_widget(self.practice_editor)
-            # Добавляем пустые строки в конец текста с задержкой после инициализации
-            Clock.schedule_once(lambda dt: self._add_trailing_lines(), 0.5)
+            # Добавляем пусто место для клавиатуры
+            Clock.schedule_once(lambda dt: self._add_keyboard_spacing(), 0.5)
 
     def _add_trailing_lines(self):
         """Добавляет пустые строки в конец текста для видимости над клавиатурой"""
@@ -909,6 +912,36 @@ class LessonView(BoxLayout):
                     # CodeInput
                     current_text = self.practice_editor.text
                     self.practice_editor.text = current_text.rstrip('\n') + '\n' * 50
+        except Exception as e:
+            pass
+
+    def _add_keyboard_spacing(self):
+        """Добавляет дополнительное пусто место в конец для клавиатуры + панели символов"""
+        try:
+            if not hasattr(self, 'practice_editor'):
+                return
+            
+            # Примерный расчет высоты на основе высоты окна
+            # Обычно клавиатура занимает 40-50% высоты экрана
+            # + панель символов ~40-50 dp
+            keyboard_approx_height = int(Window.height * 0.45)  # 45% от высоты экрана
+            symbol_bar_height = dp(45)  # примерная высота панели
+            total_spacing = keyboard_approx_height + symbol_bar_height
+            
+            # Конвертируем в количество строк (примерно 20px на строку текста)
+            # Нужно добавить еще ~100 строк для надежности
+            additional_lines = 100
+            
+            if hasattr(self.practice_editor, 'text_input'):
+                # InteractiveCodeWidget
+                current_text = self.practice_editor.text_input.text
+                # Добавляем дополнительные пустые строки
+                self.practice_editor.text_input.text = current_text + '\n' * additional_lines
+            else:
+                # CodeInput
+                current_text = self.practice_editor.text
+                # Добавляем дополнительные пустые строки
+                self.practice_editor.text = current_text + '\n' * additional_lines
         except Exception as e:
             pass
 
