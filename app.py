@@ -100,6 +100,13 @@ class PythonLearningApp(MDApp):
         self._keyboard_visible = False
         self._symbol_bar_update_timer = None
 
+        # === НОВЫЕ ПЕРЕМЕННЫЕ ДЛЯ СИНХРОНИЗАЦИИ С КЛАВИАТУРОЙ ===
+        self._pending_kb_height = 0
+        self._last_applied_kb_height = None
+        self._last_window_height = 0
+        self._kb_update_ev = None
+        self._keyboard_tracker = None
+
         # Применяем тему
         ThemeManager.apply_saved_theme()
         ThemeManager.register(self)
@@ -183,13 +190,7 @@ class PythonLearningApp(MDApp):
 
     def vibrate_short(self):
         """Единый метод вибрации - закомментирован, т.к. вибрация теперь через VibrationManager"""
-        # Временно отключаем, чтобы не было двойной вибрации
-        # try:
-        #     from plyer import vibrator
-        #     vibrator.vibrate(0.02)
-        # except:
-        #     pass
-        pass  # Вибрация теперь через автоматическую обёртку
+        pass
 
     def get_vibration_settings(self):
         """Возвращает настройки вибрации для UI"""
@@ -202,21 +203,17 @@ class PythonLearningApp(MDApp):
         """Включает/выключает вибрацию глобально"""
         VibrationManager.set_enabled(enabled)
 
-
     def set_vibration_duration(self, duration):
         """Устанавливает длительность вибрации"""
         VibrationManager.set_duration(duration)
 
-
     def _create_main_widget(self):
         """Создаёт главный виджет приложения"""
-        self._request_android_permissions()  # ← ДОБАВЛЕНО
+        self._request_android_permissions()
         self._request_storage_permission()
         self._load_fonts()
 
-        # Устанавливаем режим клавиатуры на Android:
-        # '' — системный режим по умолчанию (не поднимает приложение в главном редакторе)
-        # Для practice-вкладки будем менять динамически на 'pan'
+        # Устанавливаем режим клавиатуры на Android
         if platform == 'android':
             Window.softinput_mode = ''
         Window.keyboard_anim_args = {'d': 0.2, 't': 'in_out_quad'}
@@ -243,10 +240,9 @@ class PythonLearningApp(MDApp):
         # Панель символов внизу экрана (создаём до инициализации редактора)
         self.symbol_bar = MySymbolScrollBar(None)
         self.symbol_bar.app = self
-        # Явно устанавливаем параметры для позиционирования в FloatLayout
-        self.symbol_bar.size_hint = (1, None)  # Растягиваем по ширине, фиксированная высота
-        self.symbol_bar.x = 0  # Начальная позиция X
-        self.symbol_bar.y = 0  # Начальная позиция Y (будет обновляться)
+        self.symbol_bar.size_hint = (1, None)
+        self.symbol_bar.x = 0
+        self.symbol_bar.y = 0
 
         # Вкладки
         tab_bar = self.tab_manager.create_tab_bar(theme)
@@ -268,85 +264,10 @@ class PythonLearningApp(MDApp):
         root_layout = self._create_run_button(main_layout, theme)
 
         # Добавляем symbol_bar в root_layout для позиционирования
-        # ВАЖНО: symbol_bar должна быть в самом конце, чтобы она была сверху
         root_layout.add_widget(self.symbol_bar)
 
-        # === ИСПОЛЬЗУЕМ KeyboardTracker ДЛЯ НАДЕЖНОЙ СИНХРОНИЗАЦИИ ===
-        keyboard_tracker = get_keyboard_tracker()
-        # Попытка сохранить текущий soft input mode, чтобы при необходимости восстанавливать
-        self._prev_soft_input_mode = None
-        if platform == 'android':
-            try:
-                from jnius import autoclass
-                PythonActivity = autoclass('org.kivy.android.PythonActivity')
-                activity = PythonActivity.mActivity
-                if activity:
-                    try:
-                        attrs = activity.getWindow().getAttributes()
-                        self._prev_soft_input_mode = int(attrs.softInputMode)
-                    except Exception:
-                        self._prev_soft_input_mode = None
-            except Exception:
-                self._prev_soft_input_mode = None
-        
-        # Debounced update to avoid jitter (увеличил debounce для уменьшения мерцания)
-        self._pending_kb_height = None
-        self._kb_update_ev = None
-        self._last_applied_kb_height = None
-
-        def _apply_kb_height(dt):
-            try:
-                h = getattr(self, '_pending_kb_height', 0) or 0
-                if not (hasattr(self, 'symbol_bar') and self.symbol_bar):
-                    return
-
-                # Не обновляем если высота не изменилась существенно (предотвращаем лишние обновления)
-                if self._last_applied_kb_height is not None and abs(h - self._last_applied_kb_height) < 5:
-                    return
-
-                # Устанавливаем позицию сразу без анимации (убираем мерцание)
-                # При скрытой клавиатуре - вниз экрана (y=0)
-                # При открытой клавиатуре - прямо прижата к клавиатуре (y=h)
-                if h > 0:
-                    self.symbol_bar.pos = (0, h)
-                else:
-                    self.symbol_bar.pos = (0, 0)
-                self.symbol_bar.width = root_layout.width
-                self._last_applied_kb_height = h
-            except Exception as e:
-                pass
-
-        def _on_keyboard_height_changed(height):
-            """Колбек вызывается при изменении высоты клавиатуры (debounced)"""
-            # store and schedule
-            self._pending_kb_height = int(height or 0)
-            if self._kb_update_ev:
-                Clock.unschedule(self._kb_update_ev)
-            # Увеличил задержку для debounce (0.1 вместо 0.02)
-            self._kb_update_ev = Clock.schedule_once(_apply_kb_height, 0.1)
-        
-        # Регистрируем колбек
-        keyboard_tracker.add_callback(_on_keyboard_height_changed)
-        
-        def _update_symbol_bar_pos(*args):
-            """Явное обновление позиции (для других событий) - uses same debounced path"""
-            try:
-                kb_h = int(keyboard_tracker.get_keyboard_height() or 0)
-                # reuse pending mechanism
-                _on_keyboard_height_changed(kb_h)
-            except Exception as e:
-                print(f"[ERROR] _update_symbol_bar_pos: {e}")
-        
-        # Привязываем обновление к изменению размера root_layout
-        root_layout.bind(size=_update_symbol_bar_pos)
-        
-        # Начальное позиционирование
-        Clock.schedule_once(lambda dt: _update_symbol_bar_pos(), 0.3)
-        Clock.schedule_once(lambda dt: _update_symbol_bar_pos(), 0.5)
-        
-        # Сохраняем для использования в редакторе
-        self._symbol_bar_update_fn = _update_symbol_bar_pos
-        self._keyboard_tracker = keyboard_tracker
+        # === УЛУЧШЕННАЯ СИНХРОНИЗАЦИЯ С КЛАВИАТУРОЙ ===
+        self._setup_keyboard_sync(root_layout)
 
         # Настройка автосохранения
         self._setup_autosave()
@@ -358,6 +279,187 @@ class PythonLearningApp(MDApp):
         self.root_layout = root_layout
 
         return root_layout
+
+    def _setup_keyboard_sync(self, root_layout):
+        """Настраивает синхронизацию панели символов с клавиатурой"""
+        # Сохраняем root_layout для использования в колбеках
+        self._root_layout_for_kb = root_layout
+
+        # Сохраняем начальную высоту окна
+        self._last_window_height = Window.height
+        self._pending_kb_height = 0
+        self._last_applied_kb_height = None
+
+        # Получаем KeyboardTracker
+        self._keyboard_tracker = get_keyboard_tracker()
+
+        # Подписываемся на события клавиатуры
+        if platform == 'android':
+            self._keyboard_tracker.add_callback(self._on_keyboard_height_changed)
+
+        # Подписываемся на изменение размера окна
+        Window.bind(on_resize=self._on_window_resize)
+
+        # Подписываемся на событие keyboard_height (если оно есть)
+        Window.bind(keyboard_height=self._on_window_keyboard_height)
+
+        # Функция обновления позиции
+        def _update_symbol_bar_pos(*args):
+            try:
+                # Пытаемся получить высоту из разных источников
+                kb_h = 0
+
+                # 1. Из KeyboardTracker
+                if self._keyboard_tracker:
+                    kb_h = int(self._keyboard_tracker.get_keyboard_height() or 0)
+
+                # 2. Если нет - из Window
+                if kb_h == 0:
+                    kb_h = getattr(Window, 'keyboard_height', 0) or 0
+
+                # 3. Если всё ещё 0 - через разницу размеров
+                if kb_h == 0:
+                    height_diff = self._last_window_height - Window.height
+                    if height_diff > 50:
+                        kb_h = height_diff
+
+                self._on_keyboard_height_changed(kb_h)
+            except Exception as e:
+                log_error(f"_update_symbol_bar_pos: {e}")
+
+        # Привязываем обновление к изменению размера root_layout
+        root_layout.bind(size=_update_symbol_bar_pos)
+
+        # Периодическая проверка (резервный механизм)
+        Clock.schedule_interval(self._check_keyboard_height, 0.15)
+
+        # Начальное позиционирование
+        Clock.schedule_once(lambda dt: _update_symbol_bar_pos(), 0.1)
+        Clock.schedule_once(lambda dt: _update_symbol_bar_pos(), 0.3)
+        Clock.schedule_once(lambda dt: _update_symbol_bar_pos(), 0.5)
+
+        # Сохраняем для использования в редакторе
+        self._symbol_bar_update_fn = _update_symbol_bar_pos
+
+    def _on_window_resize(self, window, width, height):
+        """Обработчик изменения размера окна"""
+        try:
+            # Сохраняем текущую высоту
+            old_height = self._last_window_height
+            self._last_window_height = height
+
+            # Если высота изменилась значительно - обновляем панель
+            if old_height > 0:
+                diff = abs(old_height - height)
+                if diff > 30:  # Значительное изменение
+                    # Отменяем предыдущий таймер
+                    if self._kb_update_ev:
+                        Clock.unschedule(self._kb_update_ev)
+                    # Планируем обновление
+                    self._kb_update_ev = Clock.schedule_once(self._apply_kb_height, 0.01)
+        except Exception as e:
+            log_error(f"_on_window_resize error: {e}")
+
+    def _on_window_keyboard_height(self, window, height):
+        """Обработчик события keyboard_height"""
+        self._on_keyboard_height_changed(height)
+
+    def _on_keyboard_height_changed(self, height):
+        """Колбек вызывается при изменении высоты клавиатуры"""
+        try:
+            # Сохраняем высоту
+            h = int(height or 0)
+
+            # Если высота меньше 10 - считаем что клавиатура скрыта
+            if h < 10:
+                h = 0
+
+            self._pending_kb_height = h
+
+            # Отменяем предыдущий таймер
+            if self._kb_update_ev:
+                Clock.unschedule(self._kb_update_ev)
+
+            # Применяем с небольшой задержкой для стабильности
+            self._kb_update_ev = Clock.schedule_once(self._apply_kb_height, 0.02)
+        except Exception as e:
+            log_error(f"_on_keyboard_height_changed error: {e}")
+
+    def _check_keyboard_height(self, dt):
+        """Периодическая проверка высоты клавиатуры (резервный механизм)"""
+        try:
+            if not self._keyboard_tracker:
+                return
+
+            # Получаем высоту из трекера
+            h = self._keyboard_tracker.get_keyboard_height()
+
+            # Если есть изменения - обновляем
+            if h != self._pending_kb_height:
+                self._on_keyboard_height_changed(h)
+        except Exception as e:
+            pass
+
+    def _apply_kb_height(self, dt):
+        """Применяет высоту клавиатуры к панели символов"""
+        try:
+            # Получаем высоту из нескольких источников
+            h = 0
+
+            # 1. Из сохраненного значения
+            h1 = self._pending_kb_height or 0
+
+            # 2. Из Window.keyboard_height
+            h2 = getattr(Window, 'keyboard_height', 0) or 0
+
+            # 3. Из KeyboardTracker
+            h3 = self._keyboard_tracker.get_keyboard_height() if self._keyboard_tracker else 0
+
+            # 4. Разница высоты окна
+            height_diff = self._last_window_height - Window.height
+            h4 = height_diff if height_diff > 50 else 0
+
+            # Берем максимальное значение (для надежности)
+            h = max(h1, h2, h3, h4)
+
+            # Если высота меньше порога - клавиатура скрыта
+            if h < 10:
+                h = 0
+
+            # Получаем root_layout
+            root_layout = getattr(self, '_root_layout_for_kb', None)
+            if not root_layout:
+                root_layout = getattr(self, 'root_layout', None)
+
+            if not (hasattr(self, 'symbol_bar') and self.symbol_bar):
+                return
+
+            # === ПРИМЕНЯЕМ ПОЗИЦИЮ ===
+            if h > 0:
+                # Проверяем, не изменилась ли высота кардинально
+                if self._last_applied_kb_height is not None:
+                    diff = abs(h - self._last_applied_kb_height)
+                    # Если изменение больше 20% или больше 30px - обновляем
+                    if diff > 30 or (self._last_applied_kb_height > 0 and diff > self._last_applied_kb_height * 0.2):
+                        self.symbol_bar.pos = (0, h)
+                        self._last_applied_kb_height = h
+                else:
+                    # Первое применение
+                    self.symbol_bar.pos = (0, h)
+                    self._last_applied_kb_height = h
+            else:
+                # Клавиатура скрыта
+                self.symbol_bar.pos = (0, 0)
+                self._last_applied_kb_height = 0
+
+            # Обновляем ширину
+            if root_layout:
+                self.symbol_bar.width = root_layout.width
+            else:
+                self.symbol_bar.width = Window.width
+
+        except Exception as e:
+            log_error(f"_apply_kb_height error: {e}")
 
     def _init_editor(self):
         """Инициализирует редактор и загружает вкладки"""
@@ -542,7 +644,6 @@ class PythonLearningApp(MDApp):
 
     def _load_language(self):
         """Загружает сохранённый язык"""
-        # Сначала пробуем из настроек
         try:
             lang = SettingsManager.get_language()
             if lang in ['ru', 'en']:
@@ -551,7 +652,6 @@ class PythonLearningApp(MDApp):
         except Exception as e:
             log_error(f"Error reading language from settings: {e}")
 
-        # Затем из файла
         try:
             lang_file = user_data_path('language.txt')
             if os.path.exists(lang_file):
@@ -559,7 +659,6 @@ class PythonLearningApp(MDApp):
                     lang = f.read().strip()
                     if lang in ['ru', 'en']:
                         log_error(f"Loaded language from file: {lang}")
-                        # Сохраняем в настройки для синхронизации
                         SettingsManager.save_language(lang)
                         return lang
         except Exception as e:
@@ -571,9 +670,7 @@ class PythonLearningApp(MDApp):
     def _save_language(self):
         """Сохраняет текущий язык"""
         try:
-            # Сохраняем в настройки
             SettingsManager.save_language(self.current_language)
-            # Сохраняем в файл
             lang_file = user_data_path('language.txt')
             ensure_user_data_dir()
             with open(lang_file, 'w') as f:
@@ -586,12 +683,10 @@ class PythonLearningApp(MDApp):
         """Применяет сохранённый язык ко всем UI элементам"""
         log_error(f"Applying language: {self.current_language}")
 
-        # Обновляем спиннер примеров
         if hasattr(self, 'spinner'):
             self.spinner.text = self.tr.get('examples', 'Examples')
             self.spinner.values = self._get_example_titles()
 
-        # Обновляем заголовки вкладок
         if hasattr(self, 'tab_manager'):
             for tab in self.tab_manager.tabs:
                 current_title = tab['title']
@@ -605,24 +700,19 @@ class PythonLearningApp(MDApp):
                     tab['title'] = new_title
             self.tab_manager._update_tab_bar()
 
-        # Обновляем меню
         if hasattr(self, '_menu_dropdown'):
             self._create_menu_items(ThemeManager.get_theme())
 
-        # Обновляем заголовок окна
         self._update_title_from_current_tab()
 
-        # Перезагружаем примеры при смене языка
         from managers import examples_manager
         examples_manager.reload()
 
-        # Обновляем спиннер
         if hasattr(self, 'spinner') and self.spinner:
             current_text = self.spinner.text
             self.spinner.values = self._get_example_titles()
             self.spinner.text = current_text
 
-        # Сохраняем язык
         self._save_language()
 
         print(f"[DEBUG] Language changed to: {self.current_language}")
@@ -641,12 +731,10 @@ class PythonLearningApp(MDApp):
         if not os.path.exists(fonts_dir):
             return
 
-        # Базовые шрифты
         noto_path = os.path.join(fonts_dir, 'NotoSans-Regular.ttf')
         if os.path.exists(noto_path):
             LabelBase.register(name='Roboto', fn_regular=noto_path)
 
-        # Моноширинные шрифты
         font_files = {
             'JetBrainsMono': 'JetBrainsMono.ttf',
             'FiraCode': 'FiraCode-Regular.ttf',
@@ -661,12 +749,10 @@ class PythonLearningApp(MDApp):
             if os.path.exists(font_path):
                 LabelBase.register(name=font_name, fn_regular=font_path)
 
-        # DejaVuSans для спецсимволов
         dejavu_path = os.path.join(fonts_dir, 'DejaVuSans.ttf')
         if os.path.exists(dejavu_path):
             LabelBase.register(name='DejaVuSans', fn_regular=dejavu_path)
 
-        # Жирный шрифт для интерфейса
         bold_path = os.path.join(fonts_dir, 'SourceSansPro-Bold.ttf')
         if os.path.exists(bold_path):
             LabelBase.register(name='SourceBold', fn_regular=bold_path)
@@ -792,14 +878,12 @@ class PythonLearningApp(MDApp):
             return
 
         try:
-            # Проверяем версию Android
             from jnius import autoclass
             Build = autoclass('android.os.Build$VERSION')
 
-            if Build.SDK_INT >= 30:  # Android 11+
+            if Build.SDK_INT >= 30:
                 Environment = autoclass('android.os.Environment')
                 if not Environment.isExternalStorageManager():
-                    # Показываем диалог с инструкцией
                     self.show_manage_storage_dialog()
         except Exception as e:
             print(f"Permission check error: {e}")
@@ -807,7 +891,7 @@ class PythonLearningApp(MDApp):
     def show_manage_storage_dialog(self):
         """Показывает диалог с инструкцией по включению доступа к файлам"""
         theme = ThemeManager.get_theme()
-        tr = self.tr  # ← используем текущий язык
+        tr = self.tr
 
         from kivy.uix.boxlayout import BoxLayout
         from kivy.uix.label import Label
@@ -927,21 +1011,17 @@ class PythonLearningApp(MDApp):
         if hasattr(self, 'bg_color'):
             self.bg_color.rgba = theme['app_bg']
 
-        # Обновляем верхние панели
         if hasattr(self, 'top_bar_builder'):
             self.top_bar_builder.update_theme(theme)
 
-        # Обновляем панели действий
         if hasattr(self, 'action_bar'):
             self.action_bar.apply_theme(theme)
         if hasattr(self, 'symbol_bar'):
             self.symbol_bar.apply_theme(theme)
 
-        # Обновляем кнопку Run
         if hasattr(self, 'run_btn'):
             self._update_run_button_theme(theme)
 
-        # Обновляем панель вкладок
         if hasattr(self, 'tab_manager'):
             self.tab_manager.update_tab_bar_theme(theme)
 
@@ -975,16 +1055,13 @@ class PythonLearningApp(MDApp):
         """Обновляет UI после поворота экрана"""
         reset_screen_cache()
 
-        # Обновляем верхние панели
         if hasattr(self, 'top_bar_builder'):
             self.top_bar_builder.update_theme(ThemeManager.get_theme())
 
-        # Обновляем максимальное количество вкладок
         if hasattr(self, 'tab_manager'):
             self.tab_manager.max_visible = get_tab_count()
             self.tab_manager._update_tab_bar()
 
-        # Обновляем высоту панелей
         category = get_screen_category()
 
         if hasattr(self, 'action_bar'):
@@ -1003,7 +1080,6 @@ class PythonLearningApp(MDApp):
             else:
                 self.symbol_bar.height = dp(30)
 
-        # Обновляем панель номеров строк
         if hasattr(self, 'editor') and self.editor:
             Clock.schedule_once(self.editor._force_line_panel_refresh, 0.2)
             Clock.schedule_once(lambda dt: self.editor._update_line_panel(), 0.3)
@@ -1062,7 +1138,6 @@ class PythonLearningApp(MDApp):
             self.show_result_popup("Ошибка: редактор не инициализирован")
             return
 
-        # === ИСПРАВЛЕНИЕ ===
         code = self.editor.get_text()
 
         if not code.strip():
@@ -1100,13 +1175,7 @@ class PythonLearningApp(MDApp):
     # ====================== ДИАЛОГИ ======================
 
     def show_result_popup(self, result, success=None):
-        """
-        Показывает результат в всплывающем окне
-
-        Args:
-            result: текст результата
-            success: True - успех, False - ошибка, None - нейтрально (пока не используется)
-        """
+        """Показывает результат в всплывающем окне"""
         if len(result) > 50000:
             result = result[:50000] + "\n\n... " + self.tr.get('output_truncated', '(truncated)')
 
@@ -1122,7 +1191,6 @@ class PythonLearningApp(MDApp):
 
         scroll = ScrollView(size_hint=(1, 0.85), do_scroll_x=False, do_scroll_y=True)
 
-        # ИЗМЕНЕНИЕ: Заменили 'SourceBold' на 'DejaVuSans', чтобы читались спецсимволы звезд и наград
         output_view = TextInput(
             text=str(result), readonly=True, font_size=dp(16),
             font_name='DejaVuSans', background_color=theme['result_bg'],
@@ -1217,7 +1285,6 @@ class PythonLearningApp(MDApp):
 
             filename = os.path.basename(file_path)
 
-            # Находим вкладку по ID и отмечаем как сохранённую
             if hasattr(self, 'tab_manager') and self.tab_manager:
                 for i, tab in enumerate(self.tab_manager.tabs):
                     if tab.get('id') == tab_id:
@@ -1236,7 +1303,6 @@ class PythonLearningApp(MDApp):
         from file_manager import FileBrowserPopup
 
         def on_saved(file_path, saved_content):
-            """Callback после выбора пути сохранения"""
             try:
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(content)
@@ -1287,7 +1353,6 @@ class PythonLearningApp(MDApp):
             print("[DEBUG] Adding to root_layout")
             self.root_layout.add_widget(content)
         else:
-            # Ищем корневой виджет
             print("[DEBUG] root_layout not found, searching...")
             for child in self.root.children:
                 print(f"[DEBUG] child: {child}")
@@ -1372,7 +1437,6 @@ class PythonLearningApp(MDApp):
     def _on_examples_loaded(self, examples):
         """Вызывается когда примеры загружены"""
         self.examples_loaded = True
-        # Обновляем спиннер, если он уже создан
         if hasattr(self, 'spinner') and self.spinner:
             self.spinner.values = self._get_example_titles()
         print("[DEBUG] Examples loaded successfully")
@@ -1384,12 +1448,9 @@ class PythonLearningApp(MDApp):
 
     def load_example(self, spinner, text):
         """Загружает выбранный пример"""
-        #self.vibrate_short()
-
         if not text or text == self.tr.get('examples', 'Examples'):
             return
 
-        # Получаем код примера из менеджера с текущим языком
         from managers import examples_manager
         code = examples_manager.get_example(text, self.current_language)
 
@@ -1398,11 +1459,8 @@ class PythonLearningApp(MDApp):
         print(f"[DEBUG] Code length: {len(code)}")
 
         if code.startswith('# Загрузка') or code.startswith('# Loading'):
-            # Если примеры ещё не загружены, показываем сообщение
             self.show_result_popup("Загрузка примеров...\nПодождите секунду")
-            # Пробуем загрузить
             examples_manager.load_examples_async()
-            # Повторяем попытку через 0.5 секунды
             Clock.schedule_once(lambda dt: self.load_example(spinner, text), 0.5)
             return
 
@@ -1526,8 +1584,6 @@ class PythonLearningApp(MDApp):
 
     def show_context_menu(self, instance):
         """Показывает контекстное меню (кнопка ☰)"""
-        #self.vibrate_short()
-
         theme = ThemeManager.get_theme()
         from kivy.uix.dropdown import DropDown
 
@@ -1562,7 +1618,6 @@ class PythonLearningApp(MDApp):
         self._menu_dropdown.clear_widgets()
         tr = self.tr
 
-        # Стилизация фона
         if hasattr(self._menu_dropdown, 'container'):
             container = self._menu_dropdown.container
             container.canvas.before.clear()
@@ -1622,7 +1677,6 @@ class PythonLearningApp(MDApp):
             box.bind(on_release=lambda bt, f=func: self.menu_action(bt, f))
             self._menu_dropdown.add_widget(box)
 
-        # ========== ДОБАВИТЬ ОБЁРТКУ КНОПОК В ГЛАВНОМ МЕНЮ ==========
         if hasattr(self, 'wrap_widget_buttons'):
             for child in self._menu_dropdown.container.children:
                 self.wrap_widget_buttons(child)
@@ -1631,7 +1685,6 @@ class PythonLearningApp(MDApp):
 
     def menu_action(self, button, func):
         """Обработчик нажатия на пункт меню"""
-        #self.vibrate_short()
         if hasattr(self, '_menu_dropdown'):
             self._menu_dropdown.dismiss()
         func(None)
@@ -1660,7 +1713,6 @@ class PythonLearningApp(MDApp):
         """Обновляет язык интерфейса при смене языка"""
         tr = self.tr
 
-        # Переименовываем вкладки
         if hasattr(self, 'tab_manager'):
             for tab in self.tab_manager.tabs:
                 current_title = tab['title']
@@ -1674,32 +1726,25 @@ class PythonLearningApp(MDApp):
                     tab['title'] = new_title
             self.tab_manager._update_tab_bar()
 
-        # Обновляем верхние панели
         if hasattr(self, 'top_bar_builder'):
             self.top_bar_builder.update_language()
 
-        # Обновляем кнопку курса
         if hasattr(self, 'course_btn') and self.course_btn:
             self.course_btn.text = tr.get('course', 'Course')
 
-        # Обновляем меню
         if hasattr(self, '_menu_dropdown'):
             self._create_menu_items(ThemeManager.get_theme())
 
-        # Обновляем заголовок
         self._update_title_from_current_tab()
 
-        # Перезагружаем примеры при смене языка
         from managers import examples_manager
         examples_manager.reload()
 
-        # Обновляем спиннер
         if hasattr(self, 'spinner') and self.spinner:
             current_text = self.spinner.text
             self.spinner.values = self._get_example_titles()
             self.spinner.text = current_text
 
-        # Сохраняем язык
         self._save_language()
 
         print(f"[DEBUG] Language changed to: {self.current_language}")
@@ -1708,12 +1753,6 @@ class PythonLearningApp(MDApp):
 
     def vibrate_short(self):
         """Короткая вибрация - ОТКЛЮЧЕНА, используется VibrationManager"""
-        # ВСЕ РУЧНЫЕ ВЫЗОВЫ ОТКЛЮЧЕНЫ
-        # try:
-        #     from plyer import vibrator
-        #     vibrator.vibrate(0.02)
-        # except:
-        #     pass
         pass
 
     # ====================== ЖИЗНЕННЫЙ ЦИКЛ ======================
@@ -1722,7 +1761,6 @@ class PythonLearningApp(MDApp):
         """Запуск приложения"""
         from kivy.clock import Clock
 
-        # Применяем язык при старте
         Clock.schedule_once(lambda dt: self._apply_language_to_ui(), 0.2)
 
         if platform == 'android':
@@ -1738,7 +1776,6 @@ class PythonLearningApp(MDApp):
     def refresh_file_list(self):
         """Обновляет список файлов (для совместимости)"""
         if hasattr(self, '_current_file_popup') and self._current_file_popup:
-            # Если есть открытый диалог, обновляем его
             if hasattr(self._current_file_popup, '_refresh_list'):
                 self._current_file_popup._refresh_list()
 
@@ -1765,7 +1802,22 @@ class PythonLearningApp(MDApp):
             self.action_bar.cleanup()
         if hasattr(self, 'symbol_bar') and hasattr(self.symbol_bar, 'cleanup'):
             self.symbol_bar.cleanup()
+
+        # Отписываемся от событий клавиатуры
+        if hasattr(self, '_keyboard_tracker'):
+            try:
+                self._keyboard_tracker.remove_callback(self._on_keyboard_height_changed)
+            except:
+                pass
+
+        if hasattr(self, '_kb_update_ev'):
+            try:
+                Clock.unschedule(self._kb_update_ev)
+            except:
+                pass
+
         ThemeManager.unregister(self)
+
 
 if __name__ == "__main__":
     PythonLearningApp().run()
