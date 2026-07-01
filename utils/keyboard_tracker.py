@@ -168,6 +168,52 @@ class KeyboardTracker:
         except Exception as e:
             return 0
 
+    def get_system_navigation_bar_height(self):
+        """Возвращает высоту системной навигационной панели Android (в пикселях).
+        Это нужно для компенсации отступа при позиционировании symbol_bar."""
+        if platform != 'android':
+            return 0
+
+        try:
+            from jnius import autoclass
+
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            activity = PythonActivity.mActivity
+            if not activity:
+                return 0
+
+            decor = activity.getWindow().getDecorView()
+
+            # Способ 1: через WindowInsets (Android API 30+)
+            try:
+                WindowInsetsType = autoclass('android.view.WindowInsets$Type')
+                root_insets = decor.getRootWindowInsets()
+                if root_insets is not None:
+                    # navigationBars() - тип для навигационной панели
+                    nav_type = WindowInsetsType.navigationBars()
+                    insets = root_insets.getInsets(nav_type)
+                    if insets is not None:
+                        bottom = int(insets.bottom)
+                        return bottom
+            except Exception as e:
+                pass
+
+            # Способ 2: через видимую область окна
+            try:
+                Rect = autoclass('android.graphics.Rect')
+                rect = Rect()
+                decor.getWindowVisibleDisplayFrame(rect)
+                screen_h = decor.getHeight() or activity.getWindowManager().getDefaultDisplay().getHeight()
+                # rect.top - это статус-бар, screen_h - rect.bottom - это навигационная панель
+                nav_h = int(max(0, screen_h - rect.bottom))
+                return nav_h
+            except Exception as e:
+                pass
+
+            return 0
+        except Exception as e:
+            return 0
+
 
 # Глобальный экземпляр
 _tracker = None
