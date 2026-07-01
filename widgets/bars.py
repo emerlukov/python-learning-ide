@@ -648,11 +648,11 @@ class MySymbolScrollBar(BoxLayout):
                 return
             action = self._action_map.get(instance.text)
             if action:
-                # Сохраняем фокус перед вставкой символа
-                had_focus = ti.focus
+                # Принудительно сохраняем фокус перед вставкой символа
+                ti.focus = True
                 action(ti)
-                # Не восстанавливаем фокус чтобы не вызывать обновление клавиатуры
-                # Clock.schedule_once(lambda dt: self._refocus(ti), 0.05)
+                # Убеждаемся что фокус остался на TextInput
+                Clock.schedule_once(lambda dt: setattr(ti, 'focus', True), 0.01)
         except Exception as e:
             log_error(f"SymbolBar error: {e}")
 
