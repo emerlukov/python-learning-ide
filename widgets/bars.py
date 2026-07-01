@@ -588,7 +588,8 @@ class MySymbolScrollBar(BoxLayout):
             btn = Button(text=symbol, font_name='SourceBold', size_hint=(None, 1), width=width,
                          background_color=theme['symbol_btn_bg'], background_normal='', background_down='',
                          color=theme['symbol_btn_text'], font_size=dp(13))
-            btn.bind(on_press=self.handle_action)
+            # Используем on_release, чтобы не переключать фокус во время нажатия (меньше шансов на hide/show клавиатуры)
+            btn.bind(on_release=self.handle_action)
             self.buttons.append(btn)
 
     def _add_buttons_to_container(self):
@@ -648,11 +649,10 @@ class MySymbolScrollBar(BoxLayout):
                 return
             action = self._action_map.get(instance.text)
             if action:
-                # Принудительно сохраняем фокус перед вставкой символа
-                ti.focus = True
+                # Выполняем вставку без резких переключений фокуса — затем безопасно восстанавливаем фокус и показываем клавиатуру
                 action(ti)
-                # Убеждаемся что фокус остался на TextInput
-                Clock.schedule_once(lambda dt: setattr(ti, 'focus', True), 0.01)
+                # Гарантированно восстановим фокус и вызовем show_keyboard() в следующем кадре
+                Clock.schedule_once(lambda dt: self._refocus(ti), 0.01)
         except Exception as e:
             log_error(f"SymbolBar error: {e}")
 
