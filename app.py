@@ -426,6 +426,11 @@ class PythonLearningApp(MDApp):
             if h < 10:
                 h = 0
 
+            # Получаем высоту системной навигационной панели для компенсации
+            nav_bar_height = 0
+            if self._keyboard_tracker and platform == 'android':
+                nav_bar_height = self._keyboard_tracker.get_system_navigation_bar_height()
+
             # Получаем root_layout
             root_layout = getattr(self, '_root_layout_for_kb', None)
             if not root_layout:
@@ -436,19 +441,23 @@ class PythonLearningApp(MDApp):
 
             # === ПРИМЕНЯЕМ ПОЗИЦИЮ ===
             if h > 0:
+                # Добавляем компенсацию системной навигационной панели
+                # чтобы панель символов была прямо прижата к клавиатуре
+                final_y = h + nav_bar_height
+
                 # Проверяем, не изменилась ли высота кардинально
                 if self._last_applied_kb_height is not None:
                     diff = abs(h - self._last_applied_kb_height)
                     # Если изменение больше 20% или больше 30px - обновляем
                     if diff > 30 or (self._last_applied_kb_height > 0 and diff > self._last_applied_kb_height * 0.2):
-                        self.symbol_bar.pos = (0, h)
+                        self.symbol_bar.pos = (0, final_y)
                         self._last_applied_kb_height = h
                 else:
                     # Первое применение
-                    self.symbol_bar.pos = (0, h)
+                    self.symbol_bar.pos = (0, final_y)
                     self._last_applied_kb_height = h
             else:
-                # Клавиатура скрыта
+                # Клавиатура скрыта - вниз экрана
                 self.symbol_bar.pos = (0, 0)
                 self._last_applied_kb_height = 0
 
