@@ -920,28 +920,61 @@ class LessonView(BoxLayout):
         try:
             if not hasattr(self, 'practice_editor'):
                 return
-            
-            # Примерный расчет высоты на основе высоты окна
-            # Обычно клавиатура занимает 40-50% высоты экрана
-            # + панель символов ~40-50 dp
-            keyboard_approx_height = int(Window.height * 0.45)  # 45% от высоты экрана
+            # Попытка получить реальную высоту клавиатуры (если есть трекер)
+            kb_h = 0
+            try:
+                if platform == 'android' and hasattr(self.app, '_keyboard_tracker') and self.app._keyboard_tracker:
+                    kb_h = int(self.app._keyboard_tracker.get_keyboard_height() or 0)
+            except Exception:
+                kb_h = 0
+
+            # Фоллбэк: примерный расчет высоты на основе высоты окна
+            if not kb_h:
+                kb_h = int(Window.height * 0.45)  # 45% от высоты экрана
+
             symbol_bar_height = dp(45)  # примерная высота панели
-            total_spacing = keyboard_approx_height + symbol_bar_height
-            
-            # Конвертируем в количество строк (примерно 20px на строку текста)
-            # Нужно добавить еще ~100 строк для надежности
+            total_spacing = int(kb_h + symbol_bar_height)
+
+            # Если practice_editor — InteractiveCodeWidget (есть main_container + scroll)
+            pe = self.practice_editor
+            # Защита от повторного добавления spacer'а
+            try:
+                if hasattr(pe, '_kb_spacer_added') and pe._kb_spacer_added:
+                    return
+            except Exception:
+                pass
+
+            # Если это виджет с main_container (InteractiveCodeWidget)
+            if hasattr(pe, 'main_container') and hasattr(pe, 'scroll'):
+                # Добавим пустой Label фиксированной высоты в конец main_container
+                from kivy.uix.label import Label as KivyLabel
+                spacer = KivyLabel(size_hint_y=None, height=total_spacing)
+                # Пометим spacer чтобы не добавлять ещё раз
+                try:
+                    pe._kb_spacer_widget = spacer
+                    pe._kb_spacer_added = True
+                except Exception:
+                    pass
+                pe.main_container.add_widget(spacer)
+                # Обновим минимальную высоту контейнера
+                try:
+                    pe.main_container.height = max(pe.main_container.height + total_spacing, pe.main_container.height)
+                except Exception:
+                    pass
+                return
+
+            # Если это CodeInput / TextInput — добавляем пустые строки в текст
             additional_lines = 100
-            
-            if hasattr(self.practice_editor, 'text_input'):
-                # InteractiveCodeWidget
-                current_text = self.practice_editor.text_input.text
-                # Добавляем дополнительные пустые строки
-                self.practice_editor.text_input.text = current_text + '\n' * additional_lines
-            else:
-                # CodeInput
-                current_text = self.practice_editor.text
-                # Добавляем дополнительные пустые строки
-                self.practice_editor.text = current_text + '\n' * additional_lines
+            if hasattr(pe, 'text_input') and hasattr(pe.text_input, 'text'):
+                current_text = pe.text_input.text
+                if not getattr(pe, '_kb_trailing_added', False):
+                    pe.text_input.text = current_text + '\n' * additional_lines
+                    pe._kb_trailing_added = True
+            elif hasattr(pe, 'text'):
+                current_text = pe.text
+                if not getattr(pe, '_kb_trailing_added', False):
+                    pe.text = current_text + '\n' * additional_lines
+                    pe._kb_trailing_added = True
         except Exception as e:
             pass
 
