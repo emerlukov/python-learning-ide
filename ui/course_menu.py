@@ -539,6 +539,12 @@ class CourseMenu(BoxLayout):
         if hasattr(self.app, 'root_layout'):
             self.app.root_layout.add_widget(lesson_view)
 
+        # Поднимаем symbol_bar наверх чтобы он был поверх окна урока
+        if hasattr(self.app, 'symbol_bar') and self.app.symbol_bar:
+            if hasattr(self.app, 'root_layout') and self.app.root_layout:
+                self.app.root_layout.remove_widget(self.app.symbol_bar)
+                self.app.root_layout.add_widget(self.app.symbol_bar)
+
     def _update_row_bg(self, instance, value):
         if hasattr(instance, 'canvas'):
             instance.canvas.before.clear()
