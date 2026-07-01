@@ -865,6 +865,8 @@ class LessonView(BoxLayout):
             )
             Clock.schedule_once(lambda dt: self._update_code_from_editor(), 0.1)
             self.practice_tab.add_widget(self.practice_editor)
+            # Добавляем пустые строки в конец текста с задержкой после инициализации
+            Clock.schedule_once(lambda dt: self._add_trailing_lines(), 0.5)
         else:
             from kivy.uix.codeinput import CodeInput
             from pygments.lexers import PythonLexer
@@ -891,15 +893,23 @@ class LessonView(BoxLayout):
                 self.user_code = starter_code
 
             self.practice_tab.add_widget(self.practice_editor)
+            # Добавляем пустые строки в конец текста с задержкой после инициализации
+            Clock.schedule_once(lambda dt: self._add_trailing_lines(), 0.5)
 
-        # Привязываем слушатель изменений.
-        # InteractiveCodeWidget не имеет свойства 'text' — биндим только CodeInput.
-        # Для InteractiveCodeWidget изменения кода отслеживаются через _update_code_from_editor.
-        if not template and hasattr(self.practice_editor, 'bind'):
-            try:
-                self.practice_editor.bind(text=self._on_code_change)
-            except (KeyError, Exception):
-                pass
+    def _add_trailing_lines(self):
+        """Добавляет пустые строки в конец текста для видимости над клавиатурой"""
+        try:
+            if hasattr(self, 'practice_editor'):
+                if hasattr(self.practice_editor, 'text_input'):
+                    # InteractiveCodeWidget
+                    current_text = self.practice_editor.text_input.text
+                    self.practice_editor.text_input.text = current_text.rstrip('\n') + '\n' * 50
+                else:
+                    # CodeInput
+                    current_text = self.practice_editor.text
+                    self.practice_editor.text = current_text.rstrip('\n') + '\n' * 50
+        except Exception as e:
+            pass
 
     def _create_task_tab(self):
         """Создаёт содержимое вкладки Задание"""
