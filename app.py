@@ -426,6 +426,12 @@ class PythonLearningApp(MDApp):
             if h < 10:
                 h = 0
 
+            # ИСПРАВЛЕНИЕ: Вычитаем высоту системной навигационной панели
+            # Это нужно для правильного позиционирования symbol_bar
+            if h > 0 and platform == 'android':
+                nav_bar_h = self._keyboard_tracker.get_system_navigation_bar_height() if self._keyboard_tracker else 0
+                h = max(0, h - nav_bar_h)
+
             # Получаем root_layout
             root_layout = getattr(self, '_root_layout_for_kb', None)
             if not root_layout:
