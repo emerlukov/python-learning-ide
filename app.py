@@ -330,8 +330,8 @@ class PythonLearningApp(MDApp):
         # Привязываем обновление к изменению размера root_layout
         root_layout.bind(size=_update_symbol_bar_pos)
 
-        # Периодическая проверка (резервный механизм)
-        Clock.schedule_interval(self._check_keyboard_height, 0.15)
+        # Периодическая проверка (резервный механизм) - редкие проверки чтобы не было дергания
+        Clock.schedule_interval(self._check_keyboard_height, 0.5)
 
         # Начальное позиционирование
         Clock.schedule_once(lambda dt: _update_symbol_bar_pos(), 0.1)
