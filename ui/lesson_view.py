@@ -577,10 +577,11 @@ class LessonView(BoxLayout):
         except Exception:
             pass
 
-        # Для practice-вкладки используем системный режим (не поднимает приложение)
-        # Панель символов будет подниматься с клавиатурой через KeyboardTracker
+        # ИСПРАВЛЕНИЕ: Для practice-вкладки используем режим 'pan'
+        # Это позволит окну автоматически поднять приложение при открытии клавиатуры,
+        # чтобы поле ввода не было перекрыто
         if platform == 'android':
-            Window.softinput_mode = ''
+            Window.softinput_mode = 'pan'
 
         # Обновляем позицию symbol_bar для practice-вкладки
         if hasattr(self, 'app') and hasattr(self.app, '_symbol_bar_update_fn'):
