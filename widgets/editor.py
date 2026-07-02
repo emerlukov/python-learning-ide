@@ -1220,7 +1220,7 @@ class LineNumberTextInput(BoxLayout):
         if self._keyboard_visible:
             TARGET = 23  # достаточно для прокрутки над клавиатурой (увеличено на 3 строки)
         else:
-            TARGET = 5  # минимальный запас когда клавиатуры нет
+            TARGET = 0  # минимальный запас когда клавиатуры нет
 
         if not self.original_lines:
             return
