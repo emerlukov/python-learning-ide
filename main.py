@@ -82,7 +82,7 @@ Config.set('kivy', 'window_icon', '')
 Config.set('kivy', 'window_title', 'Python Learning IDE')
 Config.set('kivy', 'exit_on_escape', '0')
 Config.set('kivy', 'keyboard_mode', 'system')
-Window.softinput_mode = 'pan'
+Window.softinput_mode = 'below_target'
 Window.keyboard_anim_args = {'d': 0, 't': 'linear'}
 
 # Устанавливаем обработчик ошибок
