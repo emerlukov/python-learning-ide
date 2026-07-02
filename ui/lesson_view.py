@@ -556,9 +556,9 @@ class LessonView(BoxLayout):
         if not is_practice and hasattr(self, 'app') and hasattr(self.app, 'symbol_bar') and hasattr(self.app,
                                                                                                     'code_input'):
             self.app.symbol_bar.text_input = self.app.code_input
-            # Возвращаем softinput_mode для главного редактора (не поднимает приложение)
+            # Возвращаем стабильный режим softinput_mode для главного редактора (не поднимает окно)
             if platform == 'android':
-                Window.softinput_mode = ''
+                Window.softinput_mode = 'below_target'
 
     def _update_symbol_bar_for_practice(self):
         """Перенаправляет symbol_bar на редактор вкладки Практика."""
@@ -581,7 +581,8 @@ class LessonView(BoxLayout):
         # Вместо этого добавляем пусто место в конце контента,
         # чтобы ScrollView мог скроллить поле ввода над клавиатурой
         if platform == 'android':
-            Window.softinput_mode = ''
+            # Оставляем режим, предотвращающий поднимание окна — spacer добавляет отступ
+            Window.softinput_mode = 'below_target'
 
         # Обновляем позицию symbol_bar для practice-вкладки
         if hasattr(self, 'app') and hasattr(self.app, '_symbol_bar_update_fn'):
@@ -949,16 +950,41 @@ class LessonView(BoxLayout):
                 # Добавим пустой Label фиксированной высоты в конец main_container
                 from kivy.uix.label import Label as KivyLabel
                 spacer = KivyLabel(size_hint_y=None, height=total_spacing)
+
+                # Если уже есть spacer — удалим его (может быть вставлен не в конце) чтобы потом добавить в конец
+                try:
+                    existing = getattr(pe, '_kb_spacer_widget', None)
+                    if existing is not None:
+                        if getattr(existing, 'parent', None) is pe.main_container:
+                            # если existing уже последний — ничего не делаем
+                            if pe.main_container.children and pe.main_container.children[0] is existing:
+                                return
+                            try:
+                                existing.parent.remove_widget(existing)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
                 # Пометим spacer чтобы не добавлять ещё раз
                 try:
                     pe._kb_spacer_widget = spacer
                     pe._kb_spacer_added = True
                 except Exception:
                     pass
-                pe.main_container.add_widget(spacer)
-                # Обновим минимальную высоту контейнера
+
+                # Добавляем spacer в конец контейнера (add_widget без индекса добавляет в конец)
                 try:
-                    pe.main_container.height = max(pe.main_container.height + total_spacing, pe.main_container.height)
+                    pe.main_container.add_widget(spacer)
+                except Exception:
+                    try:
+                        pe.main_container.add_widget(spacer)
+                    except Exception:
+                        pass
+
+                # Обновим минимальную высоту контейнера: увеличиваем на total_spacing
+                try:
+                    pe.main_container.height = pe.main_container.height + total_spacing
                 except Exception:
                     pass
                 return
@@ -1604,9 +1630,9 @@ class LessonView(BoxLayout):
         if hasattr(self, 'app') and hasattr(self.app, 'symbol_bar') and hasattr(self.app, 'code_input'):
             self.app.symbol_bar.text_input = self.app.code_input
 
-        # Возвращаем softinput_mode для главного редактора (не поднимает приложение)
+        # Возвращаем стабильный режим softinput_mode для главного редактора (не поднимает окно)
         if platform == 'android':
-            Window.softinput_mode = ''
+            Window.softinput_mode = 'below_target'
 
         if self.parent:
             self.parent.remove_widget(self)
