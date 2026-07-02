@@ -256,8 +256,8 @@ class AnimatedSplashScreen(Screen):
         if editor and hasattr(editor, 'text_input'):
             # 2. ВКЛЮЧАЕМ ввод, который был отключен
             editor.text_input.disabled = False
-            # 3. Устанавливаем стабильный режим софт-клавиатуры
-            Window.softinput_mode = 'below_target'
+            # 3. Режим софт-клавиатуры уже установлен в app.py, не переопределяем
+            # (уже запрещена система двигать окно при открытии клавиатуры)
             # 4. Даем фокус редактору кода через небольшую задержку
             Clock.schedule_once(lambda dt: setattr(editor.text_input, 'focus', True), 0.1)
 
