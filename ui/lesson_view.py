@@ -558,7 +558,7 @@ class LessonView(BoxLayout):
             self.app.symbol_bar.text_input = self.app.code_input
             # Возвращаем стабильный режим softinput_mode для главного редактора (не поднимает окно)
             if platform == 'android':
-                Window.softinput_mode = 'below_target'
+                Window.softinput_mode = ''
 
     def _update_symbol_bar_for_practice(self):
         """Перенаправляет symbol_bar на редактор вкладки Практика."""
@@ -582,7 +582,7 @@ class LessonView(BoxLayout):
         # чтобы ScrollView мог скроллить поле ввода над клавиатурой
         if platform == 'android':
             # Оставляем режим, предотвращающий поднимание окна — spacer добавляет отступ
-            Window.softinput_mode = 'below_target'
+            Window.softinput_mode = ''
 
         # Обновляем позицию symbol_bar для practice-вкладки
         if hasattr(self, 'app') and hasattr(self.app, '_symbol_bar_update_fn'):
@@ -1671,7 +1671,7 @@ class LessonView(BoxLayout):
 
         # Возвращаем стабильный режим softinput_mode для главного редактора (не поднимает окно)
         if platform == 'android':
-            Window.softinput_mode = 'below_target'
+            Window.softinput_mode = ''
 
         if self.parent:
             self.parent.remove_widget(self)
