@@ -587,9 +587,6 @@ class LessonView(BoxLayout):
         # Обновляем позицию symbol_bar для practice-вкладки
         if hasattr(self, 'app') and hasattr(self.app, '_symbol_bar_update_fn'):
             self.app._symbol_bar_update_fn()
-        
-        # Добавляем пусто место, чтобы контент мог скроллиться
-        Clock.schedule_once(lambda dt: self._add_keyboard_spacing(), 0.1)
 
     # ------------------------------------------------------------------
     # Навигация между уроками
@@ -870,8 +867,6 @@ class LessonView(BoxLayout):
             )
             Clock.schedule_once(lambda dt: self._update_code_from_editor(), 0.1)
             self.practice_tab.add_widget(self.practice_editor)
-            # Добавляем пусто место для клавиатуры
-            Clock.schedule_once(lambda dt: self._add_keyboard_spacing(), 0.5)
         else:
             from kivy.uix.codeinput import CodeInput
             from pygments.lexers import PythonLexer
@@ -898,8 +893,6 @@ class LessonView(BoxLayout):
                 self.user_code = starter_code
 
             self.practice_tab.add_widget(self.practice_editor)
-            # Добавляем пусто место для клавиатуры
-            Clock.schedule_once(lambda dt: self._add_keyboard_spacing(), 0.5)
 
     def _add_trailing_lines(self):
         """Добавляет пустые строки в конец текста для видимости над клавиатурой"""
