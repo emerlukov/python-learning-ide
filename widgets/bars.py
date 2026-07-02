@@ -765,9 +765,9 @@ class MySymbolScrollBar(BoxLayout):
     def _refocus(self, ti):
         try:
             if ti and ti.parent:
+                # Восстанавливаем фокус на TextInput, но НЕ вызываем show_keyboard()
+                # напрямую — это может вызвать hide->show у IME и дерганье UI.
                 ti.focus = True
-                if hasattr(ti, 'show_keyboard'):
-                    ti.show_keyboard()
         except Exception as e:
             log_error(f"Refocus error: {e}")
 
