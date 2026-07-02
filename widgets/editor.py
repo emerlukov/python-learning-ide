@@ -1220,7 +1220,7 @@ class LineNumberTextInput(BoxLayout):
         if self._keyboard_visible:
             TARGET = 23  # достаточно для прокрутки над клавиатурой (увеличено на 3 строки)
         else:
-            TARGET = 0  # минимальный запас когда клавиатуры нет
+            TARGET = 5  # минимальный запас когда клавиатуры нет
 
         if not self.original_lines:
             return
@@ -1244,6 +1244,9 @@ class LineNumberTextInput(BoxLayout):
 
         self._ensuring_trailing = True
         try:
+            # Замораживаем скролл, чтобы предотвратить поднятие приложения
+            self._freeze_scroll()
+            
             # Сохраняем позицию курсора
             cursor_index = self.text_input.cursor_index()
             lines_to_add = TARGET - trailing
@@ -1263,7 +1266,11 @@ class LineNumberTextInput(BoxLayout):
             except:
                 pass
 
+            # Размораживаем скролл
+            Clock.schedule_once(self._unfreeze_scroll, 0)
+
         except Exception as e:
+            self._unfreeze_scroll()
             log_error(f"_ensure_trailing_empty_lines error: {e}")
         finally:
             self._ensuring_trailing = False
