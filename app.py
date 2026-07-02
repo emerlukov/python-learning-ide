@@ -213,9 +213,9 @@ class PythonLearningApp(MDApp):
         self._request_storage_permission()
         self._load_fonts()
 
-        # Устанавливаем стабильный режим клавиатуры на Android (не поднимать окно)
+        # Запрещаем системе двигать/менять размер окна при открытии клавиатуры в главном редакторе
         if platform == 'android':
-            # 'below_target' предотвращает автоматическое поднятие всего окна при открытии клавиатуры
+            # '' (пустая строка) — полное запрещение системе трогать окно/менять размер
             Window.softinput_mode = ''
         Window.keyboard_anim_args = {'d': 0.2, 't': 'in_out_quad'}
         Window.bind(on_key_down=self.hotkey_manager.handle_keyboard)
