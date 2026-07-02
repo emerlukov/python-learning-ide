@@ -213,9 +213,10 @@ class PythonLearningApp(MDApp):
         self._request_storage_permission()
         self._load_fonts()
 
-        # Устанавливаем режим клавиатуры на Android
+        # Устанавливаем стабильный режим клавиатуры на Android (не поднимать окно)
         if platform == 'android':
-            Window.softinput_mode = ''
+            # 'below_target' предотвращает автоматическое поднятие всего окна при открытии клавиатуры
+            Window.softinput_mode = 'below_target'
         Window.keyboard_anim_args = {'d': 0.2, 't': 'in_out_quad'}
         Window.bind(on_key_down=self.hotkey_manager.handle_keyboard)
 
