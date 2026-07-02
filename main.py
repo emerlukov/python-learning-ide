@@ -82,6 +82,7 @@ Config.set('kivy', 'window_icon', '')
 Config.set('kivy', 'window_title', 'Python Learning IDE')
 Config.set('kivy', 'exit_on_escape', '0')
 Config.set('kivy', 'keyboard_mode', 'system')
+# Запрещаем системе двигать/менять размер окна при открытии клавиатуры (самая жёсткая защита)
 Window.softinput_mode = ''
 Window.keyboard_anim_args = {'d': 0, 't': 'linear'}
 
