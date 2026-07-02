@@ -938,9 +938,27 @@ class LessonView(BoxLayout):
 
             # Если practice_editor — InteractiveCodeWidget (есть main_container + scroll)
             pe = self.practice_editor
-            # Защита от повторного добавления spacer'а
+            # Если spacer уже добавлен — обновим его высоту и убедимся, что он в конце
             try:
-                if hasattr(pe, '_kb_spacer_added') and pe._kb_spacer_added:
+                if getattr(pe, '_kb_spacer_added', False):
+                    sp = getattr(pe, '_kb_spacer_widget', None)
+                    if sp is not None:
+                        try:
+                            sp.height = total_spacing
+                        except Exception:
+                            pass
+                        # Если у нас есть контейнер — переместим spacer в конец при необходимости
+                        try:
+                            if hasattr(pe, 'main_container') and sp in pe.main_container.children:
+                                # В Kivy children[0] — последний добавленный виджет, поэтому проверяем children[0]
+                                if not (pe.main_container.children and pe.main_container.children[0] is sp):
+                                    try:
+                                        pe.main_container.remove_widget(sp)
+                                        pe.main_container.add_widget(sp)
+                                    except Exception:
+                                        pass
+                        except Exception:
+                            pass
                     return
             except Exception:
                 pass
@@ -951,21 +969,6 @@ class LessonView(BoxLayout):
                 from kivy.uix.label import Label as KivyLabel
                 spacer = KivyLabel(size_hint_y=None, height=total_spacing)
 
-                # Если уже есть spacer — удалим его (может быть вставлен не в конце) чтобы потом добавить в конец
-                try:
-                    existing = getattr(pe, '_kb_spacer_widget', None)
-                    if existing is not None:
-                        if getattr(existing, 'parent', None) is pe.main_container:
-                            # если existing уже последний — ничего не делаем
-                            if pe.main_container.children and pe.main_container.children[0] is existing:
-                                return
-                            try:
-                                existing.parent.remove_widget(existing)
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
-
                 # Пометим spacer чтобы не добавлять ещё раз
                 try:
                     pe._kb_spacer_widget = spacer
@@ -973,7 +976,7 @@ class LessonView(BoxLayout):
                 except Exception:
                     pass
 
-                # Добавляем spacer в конец контейнера (add_widget без индекса добавляет в конец)
+                # Добавляем spacer в конец контейнера (add_widget без индекса добавляет в конец визуально)
                 try:
                     pe.main_container.add_widget(spacer)
                 except Exception:
@@ -985,6 +988,42 @@ class LessonView(BoxLayout):
                 # Обновим минимальную высоту контейнера: увеличиваем на total_spacing
                 try:
                     pe.main_container.height = pe.main_container.height + total_spacing
+                except Exception:
+                    pass
+
+                # Убедимся, что spacer останется последним даже если динамически добавится контент позже.
+                try:
+                    def _ensure_spacer_last(instance, value):
+                        try:
+                            mc = pe.main_container
+                            sp = getattr(pe, '_kb_spacer_widget', None)
+                            if not sp:
+                                return
+                            # Если spacer есть в children но не последний (children[0] — последний добавленный), переместим его
+                            if sp in mc.children and not (mc.children and mc.children[0] is sp):
+                                try:
+                                    mc.remove_widget(sp)
+                                    mc.add_widget(sp)
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+
+                    # Подпишемся на изменение children, чтобы автоматически перемещать spacer в конец
+                    if not getattr(pe, '_kb_spacer_bound', False):
+                        try:
+                            pe.main_container.bind(children=_ensure_spacer_last)
+                            pe._kb_spacer_bound = True
+                        except Exception:
+                            pass
+
+                    # Несколько попыток переместить spacer с задержкой — на случай, если контент строится асинхронно
+                    from kivy.clock import Clock as _Clock
+                    try:
+                        _Clock.schedule_once(lambda dt: _ensure_spacer_last(pe.main_container, None), 0.05)
+                        _Clock.schedule_once(lambda dt: _ensure_spacer_last(pe.main_container, None), 0.25)
+                    except Exception:
+                        pass
                 except Exception:
                     pass
                 return
