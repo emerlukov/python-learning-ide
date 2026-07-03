@@ -1141,13 +1141,22 @@ class LineNumberTextInput(BoxLayout):
             self._save_undo_state(immediate=False)
 
         app = App.get_running_app()
-        if app and hasattr(app, 'autocomplete'):
+        if app:
             try:
                 cursor_index = instance.cursor_index()
                 before_cursor = value[:cursor_index]
                 match = re.search(r'([a-zA-Z_]\w*)$', before_cursor)
                 current_word = match.group(1) if match else ''
-                app.autocomplete.show_suggestions(current_word)
+
+
+
+                # Сохраняем старый механизм для совместимости
+                if hasattr(app, 'autocomplete'):
+                    app.autocomplete.show_suggestions(current_word)
+
+                # Обработка IME для Google Keyboard и других методов ввода
+                if hasattr(app, 'ime_text_handler'):
+                    app.ime_text_handler.update_composition(current_word, cursor_index)
             except:
                 pass
 
