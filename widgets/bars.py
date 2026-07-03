@@ -304,6 +304,23 @@ class MyActionBar(BoxLayout):
 
     def _show_autocomplete(self):
         app = App.get_running_app()
+
+        # Сначала пытаемся использовать новое всплывающее окно
+        if app and hasattr(app, 'autocomplete_popup'):
+            ti = self._get_active_text_input()
+            if ti:
+                # Получаем слово перед курсором
+                text = ti.text
+                cursor_pos = ti.cursor_index()
+                before_cursor = text[:cursor_pos]
+                match = re.search(r'([a-zA-Z_]\w*)$', before_cursor)
+                current_word = match.group(1) if match else ""
+
+                # Показываем новое автодополнение
+                app.autocomplete_popup.show(current_word, ti)
+                return
+
+        # Fallback на старый механизм
         tr = app.tr if app else TRANSLATIONS['ru']
 
         def insert_word(word):
@@ -373,8 +390,8 @@ class MyActionBar(BoxLayout):
     def _refocus(self, ti):
         try:
             if ti and ti.parent:
-                # Восстанавливаем фокус на TextInput, но не насильно вызываем show_keyboard()
-                # чтобы не вызывать лишние show/hide события клавиатуры и дерганье UI.
+                # Восстанавливаем фокус на TextInput, но НЕ вызываем show_keyboard()
+                # напрямую — это может вызвать hide->show у IME и дерганье UI.
                 ti.focus = True
         except Exception as e:
             log_error(f"Refocus error: {e}")
