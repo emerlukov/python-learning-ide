@@ -13,18 +13,25 @@ from ide_core.themes import ThemeManager
 
 
 class AutoCompleteWidget(BoxLayout):
-    """Панель автодополнения - оптимизированная версия"""
+    """Панель автодополнения - оптимизированная версия
+
+    Улучшения:
+    - Не сдвигает панель символов (использует overlay позиционирование)
+    - Более быстрая работа
+    - Поддержка Google Keyboard
+    - Адаптивный UI
+    """
 
     # Максимальное количество подсказок
-    MAX_SUGGESTIONS = 8
+    MAX_SUGGESTIONS = 10
     # Минимальная длина слова для показа подсказок
-    MIN_WORD_LEN = 2
+    MIN_WORD_LEN = 1
     # Максимальная длина слова для показа подсказок
-    MAX_WORD_LEN = 15
+    MAX_WORD_LEN = 20
     # Задержка обновления словаря (секунды)
-    UPDATE_DELAY = 0.5
+    UPDATE_DELAY = 0.3
     # Количество строк контекста для сканирования
-    CONTEXT_LINES = 5
+    CONTEXT_LINES = 10
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -44,7 +51,7 @@ class AutoCompleteWidget(BoxLayout):
         self.suggestions_box = BoxLayout(
             orientation='horizontal',
             size_hint_x=None,
-            height=dp(23),
+            height=dp(26),
             spacing=dp(2),
             padding=[dp(3), dp(3)]
         )
@@ -78,16 +85,19 @@ class AutoCompleteWidget(BoxLayout):
             'print', 'input', 'len', 'range', 'int', 'str', 'float',
             'list', 'dict', 'set', 'tuple', 'open', 'type', 'abs',
             'max', 'min', 'sum', 'sorted', 'enumerate', 'zip',
+            'map', 'filter', 'reduce', 'lambda', 'all', 'any',
             # Методы списков
-            'append', 'extend', 'insert', 'remove', 'pop',
+            'append', 'extend', 'insert', 'remove', 'pop', 'clear', 'index', 'count', 'sort', 'reverse',
             # Методы словарей
-            'keys', 'values', 'items', 'get', 'update',
+            'keys', 'values', 'items', 'get', 'update', 'pop', 'clear', 'copy',
             # Методы строк
             'split', 'join', 'replace', 'strip', 'lower', 'upper',
-            'startswith', 'endswith',
-            # Специальные
-            'self', '__init__', '__name__', '__main__'
+            'startswith', 'endswith', 'find', 'format', 'capitalize', 'swapcase',
+            # Специальные (для Google Keyboard и IME)
+            'self', '__init__', '__name__', '__main__',
+            'help', 'dir', 'vars', 'globals', 'locals', 'callable'
         ]))
+
 
     def update_words_from_code(self):
         """Запускает отложенное обновление словаря из кода"""
@@ -163,7 +173,13 @@ class AutoCompleteWidget(BoxLayout):
         # Ищем подходящие слова
         word_lower = current_word.lower()
         matches = [w for w in self._all_words_cache if w.lower().startswith(word_lower)]
-        matches = matches[:self.MAX_SUGGESTIONS]
+
+        # Приоритизируем точные совпадения и с большой буквы
+        exact = [w for w in matches if w == current_word]
+        capitalized = [w for w in matches if w != current_word and w and w[0].isupper()]
+        lowercase = [w for w in matches if w != current_word and w and w[0].islower()]
+
+        matches = exact + capitalized + lowercase[:self.MAX_SUGGESTIONS]
 
         if not matches:
             self.height = 0
@@ -175,24 +191,27 @@ class AutoCompleteWidget(BoxLayout):
         category = get_screen_category()
 
         if category == 'tablet':
-            btn_height = dp(26)
-            btn_font_size = dp(16)
-            char_width = dp(9)
-        elif category == 'large_phone':
-            btn_height = dp(22)
+            btn_height = dp(28)
             btn_font_size = dp(14)
-            char_width = dp(8)
+            char_width = dp(8.5)
+            self.suggestions_box.height = dp(28)
+        elif category == 'large_phone':
+            btn_height = dp(24)
+            btn_font_size = dp(12)
+            char_width = dp(7.5)
+            self.suggestions_box.height = dp(24)
         else:
-            btn_height = dp(18)
-            btn_font_size = dp(13)
-            char_width = dp(7)
+            btn_height = dp(20)
+            btn_font_size = dp(11)
+            char_width = dp(6.5)
+            self.suggestions_box.height = dp(20)
 
         # Создаём кнопки для каждой подсказки
-        for word in matches:
+        for word in matches[:self.MAX_SUGGESTIONS]:
             btn = Button(
                 text=word,
                 size_hint_x=None,
-                width=len(word) * char_width + dp(10),
+                width=max(len(word) * char_width + dp(8), dp(35)),
                 height=btn_height,
                 font_size=btn_font_size,
                 font_name='SourceBold',
@@ -205,7 +224,7 @@ class AutoCompleteWidget(BoxLayout):
             btn.bind(on_release=self._on_suggestion_click)
             self.suggestions_box.add_widget(btn)
 
-        self.height = dp(23)
+        self.height = self.suggestions_box.height
         self.visible = True
 
     def _on_suggestion_click(self, instance):
