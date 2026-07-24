@@ -74,7 +74,7 @@ class MyActionBar(BoxLayout):
         self._keywords_popup = None
         self._autocomplete_popup = None
         self.action_keys = [self.ACTION_UNDO, self.ACTION_REDO, self.ACTION_COPY, self.ACTION_PASTE, self.ACTION_CUT,
-                            self.ACTION_SEL_ALL, self.ACTION_AUTO, self.ACTION_KEY, self.ACTION_CLEAN, self.ACTION_FIND,
+                            self.ACTION_SEL_ALL, self.ACTION_KEY, self.ACTION_CLEAN, self.ACTION_FIND,
                             self.ACTION_FIND_REPLACE, self.ACTION_GOTO]
         self.buttons = []
         self._create_scroll_view()
@@ -305,20 +305,10 @@ class MyActionBar(BoxLayout):
     def _show_autocomplete(self):
         app = App.get_running_app()
 
-        # Сначала пытаемся использовать новое всплывающее окно
-        if app and hasattr(app, 'autocomplete_popup'):
-            ti = self._get_active_text_input()
-            if ti:
-                # Получаем слово перед курсором
-                text = ti.text
-                cursor_pos = ti.cursor_index()
-                before_cursor = text[:cursor_pos]
-                match = re.search(r'([a-zA-Z_]\w*)$', before_cursor)
-                current_word = match.group(1) if match else ""
-
-                # Показываем новое автодополнение
-                app.autocomplete_popup.show(current_word, ti)
-                return
+        # Используем AutoCompleteWidget для показа полного списка
+        if app and hasattr(app, 'autocomplete'):
+            app.autocomplete.show_full_list()
+            return
 
         # Fallback на старый механизм
         tr = app.tr if app else TRANSLATIONS['ru']
@@ -573,7 +563,7 @@ class MySymbolScrollBar(BoxLayout):
         self.text_input = text_input
         print(f"[SYMBOL_BAR] Initialized with height={self.height}, size_hint_y={self.size_hint_y}, pos_hint={self.pos_hint}")
         ThemeManager.register(self)
-        self.symbols = ['Tab', '#', '( )', '[ ]', '{ }', '" "', "' '", '=', ':', '.', '_', ',', '+', '-', '*', '/',
+        self.symbols = ['Tab', 'Auto', '#', '( )', '[ ]', '{ }', '" "', "' '", '=', ':', '.', '_', ',', '+', '-', '*', '/',
                         '\\', '%', ')', ']', '}', '<', '>', '!', '|', '&', '@', '~', '?', ';', '$', '^']
         self._action_map = self._build_action_map()
         self.buttons = []
@@ -637,7 +627,8 @@ class MySymbolScrollBar(BoxLayout):
             return lambda ti: ti.insert_text(text)
 
         return {
-            'Tab': lambda ti: self._handle_tab_button(ti), '=': insert_text('='), ':': insert_text(':'),
+            'Tab': lambda ti: self._handle_tab_button(ti), 'Auto': lambda ti: self._handle_autocomplete_button(ti),
+            '=': insert_text('='), ':': insert_text(':'),
             ',': insert_text(','), '.': insert_text('.'), '_': insert_text('_'), '+': insert_text('+'),
             '-': insert_text('-'), '*': insert_text('*'), '/': insert_text('/'), '\\': insert_text('\\'),
             '%': insert_text('%'), '#': insert_text('#'), '@': insert_text('@'), '&': insert_text('&'),
@@ -672,6 +663,12 @@ class MySymbolScrollBar(BoxLayout):
                 Clock.schedule_once(lambda dt: self._refocus(ti), 0.01)
         except Exception as e:
             log_error(f"SymbolBar error: {e}")
+
+    def _handle_autocomplete_button(self, ti):
+        """Обрабатывает нажатие кнопки автодополнения"""
+        app = App.get_running_app()
+        if app and hasattr(app, 'autocomplete'):
+            app.autocomplete.show_full_list()
 
     def _handle_tab_button(self, ti):
         try:
