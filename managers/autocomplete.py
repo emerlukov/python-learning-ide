@@ -5,6 +5,7 @@ import re
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.textinput import TextInput
 from kivy.clock import Clock
 from kivy.metrics import dp
 
@@ -46,8 +47,35 @@ class AutoCompleteWidget(BoxLayout):
         self._all_words_cache = []
         self._last_text_hash = 0
         self._update_timer = None
+        self._filter_text = ''
+        self._filter_input = None
+        self._showing_full_list = False
 
         # UI компоненты
+        self.filter_box = BoxLayout(
+            orientation='horizontal',
+            size_hint_y=None,
+            height=0,
+            spacing=dp(2),
+            padding=[dp(3), dp(3)]
+        )
+        self.filter_box.opacity = 0
+        
+        self._filter_input = TextInput(
+            hint_text='Filter...',
+            multiline=False,
+            size_hint=(1, 1),
+            font_size=dp(12),
+            font_name='SourceBold',
+            padding=[dp(5), dp(5), dp(5), dp(5)],
+            background_color=ThemeManager.get_theme()['input_bg'],
+            foreground_color=ThemeManager.get_theme()['input_text'],
+            cursor_color=ThemeManager.get_theme()['input_cursor'],
+            hint_text_color=ThemeManager.get_theme()['hint_text']
+        )
+        self._filter_input.bind(text=self._on_filter_changed)
+        self.filter_box.add_widget(self._filter_input)
+        
         self.suggestions_box = BoxLayout(
             orientation='horizontal',
             size_hint_x=None,
@@ -64,7 +92,15 @@ class AutoCompleteWidget(BoxLayout):
             bar_width=dp(2)
         )
         self.scroll.add_widget(self.suggestions_box)
-        self.add_widget(self.scroll)
+        
+        # Контейнер для фильтра и подсказок
+        self.main_container = BoxLayout(orientation='vertical', size_hint=(1, 1))
+        self.main_container.add_widget(self.filter_box)
+        self.main_container.add_widget(self.scroll)
+        self.add_widget(self.main_container)
+        
+        # Регистрируем в ThemeManager
+        ThemeManager.register(self)
 
     def _get_base_words(self):
         """Возвращает базовый список ключевых слов Python (кешированный)"""
@@ -86,16 +122,26 @@ class AutoCompleteWidget(BoxLayout):
             'list', 'dict', 'set', 'tuple', 'open', 'type', 'abs',
             'max', 'min', 'sum', 'sorted', 'enumerate', 'zip',
             'map', 'filter', 'reduce', 'lambda', 'all', 'any',
+            'bool', 'complex', 'divmod', 'eval', 'exec', 'hash', 'id',
+            'isinstance', 'issubclass', 'iter', 'next', 'object', 'ord',
+            'pow', 'repr', 'round', 'slice', 'super', 'bin', 'hex', 'oct',
+            'chr', 'bytes', 'bytearray', 'memoryview', 'frozenset',
             # Методы списков
-            'append', 'extend', 'insert', 'remove', 'pop', 'clear', 'index', 'count', 'sort', 'reverse',
+            'append', 'extend', 'insert', 'remove', 'pop', 'clear', 'index', 'count', 'sort', 'reverse', 'copy',
             # Методы словарей
-            'keys', 'values', 'items', 'get', 'update', 'pop', 'clear', 'copy',
+            'keys', 'values', 'items', 'get', 'update', 'pop', 'clear', 'copy', 'fromkeys', 'setdefault',
             # Методы строк
             'split', 'join', 'replace', 'strip', 'lower', 'upper',
             'startswith', 'endswith', 'find', 'format', 'capitalize', 'swapcase',
+            'title', 'lstrip', 'rstrip', 'ljust', 'rjust', 'center',
+            'isalpha', 'isdigit', 'isalnum', 'isspace', 'islower', 'isupper', 'istitle',
+            'rfind', 'rindex', 'expandtabs', 'partition', 'rpartition', 'splitlines', 'zfill',
+            # Методы множеств
+            'add', 'remove', 'discard', 'pop', 'clear', 'union', 'intersection', 'difference',
+            'symmetric_difference', 'issubset', 'issuperset', 'isdisjoint',
             # Специальные (для Google Keyboard и IME)
             'self', '__init__', '__name__', '__main__',
-            'help', 'dir', 'vars', 'globals', 'locals', 'callable'
+            'help', 'dir', 'vars', 'globals', 'locals', 'callable', 'hasattr', 'getattr', 'setattr', 'delattr'
         ]))
 
 
@@ -150,9 +196,39 @@ class AutoCompleteWidget(BoxLayout):
 
         self._all_words_cache = sorted(combined)
 
+    def _on_filter_changed(self, instance, value):
+        """Обрабатывает изменение текста фильтра"""
+        self._filter_text = value
+        if self._showing_full_list:
+            self._show_full_list_internal()
+        elif self.visible:
+            # Если панель видна, обновляем подсказки с учётом фильтра
+            self._refresh_suggestions()
+
+    def _refresh_suggestions(self):
+        """Обновляет подсказки с учётом текущего фильтра"""
+        if not self.visible:
+            return
+        
+        # Получаем текущее слово из редактора
+        if not self.code_input:
+            return
+        
+        text = self.code_input.text
+        cursor_pos = self.code_input.cursor_index()
+        before_cursor = text[:cursor_pos]
+        match = re.search(r'([a-zA-Z_]\w*)$', before_cursor)
+        current_word = match.group(1) if match else ""
+        
+        self._render_suggestions(current_word)
+
     def show_suggestions(self, current_word):
         """Показывает подсказки для текущего слова"""
         self.suggestions_box.clear_widgets()
+        self._showing_full_list = False
+        self._filter_text = ''
+        if self._filter_input:
+            self._filter_input.text = ''
 
         # Проверяем, нужно ли показывать подсказки
         if not current_word:
@@ -170,9 +246,20 @@ class AutoCompleteWidget(BoxLayout):
         if self.code_input and self.code_input.text.strip():
             self.update_words_from_code()
 
+        self._render_suggestions(current_word)
+
+    def _render_suggestions(self, current_word):
+        """Отрисовывает подсказки для текущего слова"""
+        self.suggestions_box.clear_widgets()
+        
         # Ищем подходящие слова
         word_lower = current_word.lower()
         matches = [w for w in self._all_words_cache if w.lower().startswith(word_lower)]
+        
+        # Применяем фильтр, если есть
+        if self._filter_text:
+            filter_lower = self._filter_text.lower()
+            matches = [w for w in matches if filter_lower in w.lower()]
 
         # Приоритизируем точные совпадения и с большой буквы
         exact = [w for w in matches if w == current_word]
@@ -224,8 +311,97 @@ class AutoCompleteWidget(BoxLayout):
             btn.bind(on_release=self._on_suggestion_click)
             self.suggestions_box.add_widget(btn)
 
-        self.height = self.suggestions_box.height
+        # Показываем фильтр только при полном списке
+        self.filter_box.height = dp(28) if self._showing_full_list else 0
+        self.filter_box.opacity = 1 if self._showing_full_list else 0
+        self.height = self.filter_box.height + self.suggestions_box.height
         self.visible = True
+
+    def show_full_list(self):
+        """Показывает полный список ключевых слов"""
+        # Если уже показывается полный список, скрываем его
+        if self._showing_full_list and self.visible:
+            self.hide()
+            return
+        
+        self._showing_full_list = True
+        self._filter_text = ''
+        if self._filter_input:
+            self._filter_input.text = ''
+        
+        # Обновляем словарь из кода
+        if self.code_input and self.code_input.text.strip():
+            self.update_words_from_code()
+        
+        self._show_full_list_internal()
+
+    def _show_full_list_internal(self):
+        """Внутренний метод для показа полного списка"""
+        self.suggestions_box.clear_widgets()
+        
+        # Получаем все слова
+        all_words = self._all_words_cache
+        
+        # Применяем фильтр, если есть
+        if self._filter_text:
+            filter_lower = self._filter_text.lower()
+            all_words = [w for w in all_words if filter_lower in w.lower()]
+        
+        # Ограничиваем количество
+        all_words = all_words[:50]
+        
+        if not all_words:
+            self.height = 0
+            self.visible = False
+            return
+        
+        # Адаптивные размеры
+        theme = ThemeManager.get_theme()
+        category = get_screen_category()
+
+        if category == 'tablet':
+            btn_height = dp(28)
+            btn_font_size = dp(14)
+            char_width = dp(8.5)
+            self.suggestions_box.height = dp(28)
+        elif category == 'large_phone':
+            btn_height = dp(24)
+            btn_font_size = dp(12)
+            char_width = dp(7.5)
+            self.suggestions_box.height = dp(24)
+        else:
+            btn_height = dp(20)
+            btn_font_size = dp(11)
+            char_width = dp(6.5)
+            self.suggestions_box.height = dp(20)
+        
+        # Создаём кнопки
+        for word in all_words:
+            btn = Button(
+                text=word,
+                size_hint_x=None,
+                width=max(len(word) * char_width + dp(8), dp(35)),
+                height=btn_height,
+                font_size=btn_font_size,
+                font_name='SourceBold',
+                background_color=theme['widget_bg'],
+                background_normal='',
+                background_down='',
+                color=theme['text_color']
+            )
+            btn.word = word
+            btn.bind(on_release=self._on_suggestion_click)
+            self.suggestions_box.add_widget(btn)
+        
+        # Показываем фильтр
+        self.filter_box.height = dp(28)
+        self.filter_box.opacity = 1
+        self.height = self.filter_box.height + self.suggestions_box.height
+        self.visible = True
+        
+        # Фокус на фильтр
+        if self._filter_input:
+            self._filter_input.focus = True
 
     def _on_suggestion_click(self, instance):
         """Обрабатывает выбор подсказки"""
@@ -259,7 +435,16 @@ class AutoCompleteWidget(BoxLayout):
         """Скрывает панель автодополнения"""
         self.height = 0
         self.visible = False
+        self._showing_full_list = False
+        self._filter_text = ''
+        if self._filter_input:
+            self._filter_input.text = ''
+            self._filter_input.focus = False
         self.suggestions_box.clear_widgets()
+        
+        # Скрываем поле фильтра
+        self.filter_box.height = 0
+        self.filter_box.opacity = 0
 
         # Отменяем запланированное обновление
         if self._update_timer:
@@ -274,3 +459,11 @@ class AutoCompleteWidget(BoxLayout):
         if self._update_timer:
             self._update_timer.cancel()
             self._update_timer = None
+
+    def apply_theme(self, theme):
+        """Применяет тему к виджету"""
+        if self._filter_input:
+            self._filter_input.background_color = theme['input_bg']
+            self._filter_input.foreground_color = theme['input_text']
+            self._filter_input.cursor_color = theme['input_cursor']
+            self._filter_input.hint_text_color = theme['hint_text']
