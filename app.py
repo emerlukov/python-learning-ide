@@ -27,7 +27,7 @@ from utils import (
 from utils.keyboard_tracker import get_keyboard_tracker
 from ide_core import SettingsManager, ThemeManager, SyntaxStyleManager, TRANSLATIONS, LessonManager
 from widgets import MyActionBar, MySymbolScrollBar
-from managers import AutoCompleteWidget, CodeExecutor, TabManager, AutoCompletePopup, KeyboardSupport, IMETextHandler
+from managers import AutoCompleteWidget, CodeExecutor, TabManager, KeyboardSupport, IMETextHandler
 from file_manager import FileManager
 from managers import examples_manager
 
@@ -108,7 +108,6 @@ class PythonLearningApp(MDApp):
         self._keyboard_tracker = None
 
         # === НОВЫЕ КОМПОНЕНТЫ АВТОДОПОЛНЕНИЯ И IME ===
-        self.autocomplete_popup = AutoCompletePopup()
         self.keyboard_support = KeyboardSupport()
         self.ime_text_handler = IMETextHandler()
 
@@ -243,6 +242,11 @@ class PythonLearningApp(MDApp):
         self.action_bar.app = self
         main_layout.add_widget(self.action_bar)
 
+        # Автодополнение (вверху экрана)
+        self.autocomplete = AutoCompleteWidget()
+        self.autocomplete.code_input = None
+        main_layout.add_widget(self.autocomplete)
+
         # Панель символов внизу экрана (создаём до инициализации редактора)
         self.symbol_bar = MySymbolScrollBar(None)
         self.symbol_bar.app = self
@@ -253,11 +257,6 @@ class PythonLearningApp(MDApp):
         # Вкладки
         tab_bar = self.tab_manager.create_tab_bar(theme)
         main_layout.add_widget(tab_bar)
-
-        # Автодополнение
-        self.autocomplete = AutoCompleteWidget()
-        self.autocomplete.code_input = None
-        main_layout.add_widget(self.autocomplete)
 
         # Редактор
         self._init_editor()
@@ -495,8 +494,6 @@ class PythonLearningApp(MDApp):
         self.action_bar.text_input = self.code_input
         self.symbol_bar.text_input = self.code_input
         self.autocomplete.code_input = self.code_input
-        if hasattr(self, 'autocomplete_popup'):
-            self.autocomplete_popup.code_input = self.code_input
         self._current_file = self.tab_manager.get_active_file()
 
         # Применяем сохранённый шрифт
@@ -539,8 +536,6 @@ class PythonLearningApp(MDApp):
             self.symbol_bar.text_input = self.code_input
         if hasattr(self, 'autocomplete') and self.autocomplete:
             self.autocomplete.code_input = self.code_input
-        if hasattr(self, 'autocomplete_popup') and self.autocomplete_popup:
-            self.autocomplete_popup.code_input = self.code_input
 
         # Применяем сохранённый шрифт
         self._apply_saved_font()
