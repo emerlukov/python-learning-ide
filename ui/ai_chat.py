@@ -17,6 +17,7 @@ from kivy.clock import Clock
 from kivy.uix.label import Label  # Добавляем обычный Label
 from kivy.uix.textinput import TextInput  # Добавляем обычный TextInput
 from kivy.core.clipboard import Clipboard
+from kivy.core.window import Window
 from ide_core.themes import DARK_THEME, LIGHT_THEME, ThemeManager
 from widgets.markdown_label import MarkdownLabel
 
@@ -34,6 +35,9 @@ class AiChatScreen(MDBoxLayout):
 
         # Получаем тему динамически
         self._update_theme()
+
+        # Слушаем изменение высоты клавиатуры для автоматической прокрутки
+        Window.bind(keyboard_height=self._on_keyboard_height)
         
         # Layout свойства
         self.orientation = "vertical"
@@ -400,6 +404,12 @@ class AiChatScreen(MDBoxLayout):
             self.stop_btn.disabled = True
             self._current_bot_card = None
             self._current_bot_label = None
+
+    def _on_keyboard_height(self, instance, keyboard_height):
+        """Обработка изменения высоты клавиатуры"""
+        if keyboard_height > 0:
+            # Клавиатура открылась - прокручиваем к низу
+            Clock.schedule_once(lambda dt: self._scroll_to_bottom(), 0.1)
     
     def _quick(self, action):
         if action == "clear":
@@ -434,13 +444,13 @@ class AiChatScreen(MDBoxLayout):
 
 def open_ai_chat(agent, locale="ru", get_context_callback=None):
     print(f"[AI Chat] Opening AI chat screen...")
-    
+
     from kivy.uix.modalview import ModalView
-    
+
     # Создаем экран чата
     chat_screen = AiChatScreen(agent, locale=locale, get_context_callback=get_context_callback)
     chat_screen.name = "ai_chat_screen"
-    
+
     # Получаем тему для background_color modal
     try:
         if ThemeManager:
@@ -450,20 +460,37 @@ def open_ai_chat(agent, locale="ru", get_context_callback=None):
             bg_color = (0.15, 0.15, 0.2, 0.95)
     except:
         bg_color = (0.15, 0.15, 0.2, 0.95)
-    
+
     # Создаем ModalView (подобие popup)
     modal = ModalView(
         size_hint=(0.95, 0.85),
         background_color=bg_color,
     )
-    
+
     # Передаем ссылку на modal в chat_screen
     chat_screen.modal = modal
-    
+
+    # Обработка клавиатуры - поднимаем modal при открытии клавиатуры
+    def on_keyboard_height(instance, keyboard_height):
+        if keyboard_height > 0:
+            # Клавиатура открылась - уменьшаем высоту modal
+            modal.size_hint_y = 0.6
+        else:
+            # Клавиатура закрылась - возвращаем нормальную высоту
+            modal.size_hint_y = 0.85
+
+    Window.bind(keyboard_height=on_keyboard_height)
+
     modal.add_widget(chat_screen)
-    
+
     print(f"[AI Chat] Modal created, opening...")
     modal.open()
     print(f"[AI Chat] Modal opened")
-    
+
+    # Отвязываем слушатель при закрытии
+    def on_dismiss(instance):
+        Window.unbind(keyboard_height=on_keyboard_height)
+
+    modal.bind(on_dismiss=on_dismiss)
+
     return modal
