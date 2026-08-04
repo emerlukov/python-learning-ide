@@ -10,6 +10,7 @@ from .input_handler import InputHandler
 from .emergency_recovery import EmergencyRecovery
 from .file_handlers import FileOperationHandlers
 from .examples_manager import examples_manager, ExamplesManager
+from .ai_agent import AIAgent
 
 __all__ = [
     'AutoCompleteWidget',
@@ -21,5 +22,6 @@ __all__ = [
     'EmergencyRecovery',
     'FileOperationHandlers',
     'examples_manager',
-    'ExamplesManager'
+    'ExamplesManager',
+    'AIAgent'
 ]

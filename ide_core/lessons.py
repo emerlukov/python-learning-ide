@@ -32,6 +32,7 @@ class LessonManager:
         self._progress_path = user_data_path('progress.json')
         self._courses = None
         self._progress = None
+        self._metadata = {}
         self._load_courses()
         self._load_progress()
 
@@ -41,6 +42,9 @@ class LessonManager:
             try:
                 with open(self._course_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
+
+                    # Сохраняем metadata если есть
+                    self._metadata = data.get('metadata', {})
 
                     # Поддержка старого формата (один курс без обёртки)
                     if 'lessons' in data and 'title_ru' in data:
@@ -60,6 +64,7 @@ class LessonManager:
                 log_error(f"Error loading courses: {e}")
 
         self._courses = self._get_default_courses()
+        self._metadata = {}
         self._save_courses()
 
     def _get_default_courses(self) -> List[Dict]:
@@ -110,6 +115,11 @@ class LessonManager:
                         self._progress['lesson_times'] = {}
                         self._progress['version'] = 4
 
+                    # Миграция версии 4 -> 5 (добавляем quiz_results)
+                    if self._progress.get('version', 4) == 4:
+                        self._progress['quiz_results'] = {}
+                        self._progress['version'] = 5
+
                     if 'completed_lessons_by_course' not in self._progress:
                         self._progress['completed_lessons_by_course'] = {}
                     if 'lesson_successful_runs' not in self._progress:
@@ -122,12 +132,14 @@ class LessonManager:
                         self._progress['last_activity_date'] = None
                     if 'lesson_times' not in self._progress:
                         self._progress['lesson_times'] = {}
+                    if 'quiz_results' not in self._progress:
+                        self._progress['quiz_results'] = {}
                     return
             except Exception as e:
                 log_error(f"Error loading progress: {e}")
 
         self._progress = {
-            "version": 4,
+            "version": 5,
             "started_at": datetime.now().isoformat(),
             "last_course_id": 1,
             "last_lesson_id": None,
@@ -140,7 +152,8 @@ class LessonManager:
             "badges": [],
             "streak_days": 0,
             "last_activity_date": None,
-            "lesson_times": {}
+            "lesson_times": {},
+            "quiz_results": {}
         }
         self._save_progress()
 
@@ -227,6 +240,61 @@ class LessonManager:
                         return lesson_copy
         return None
 
+    def get_lesson_solution(self, lesson: Dict, lang: str = 'ru') -> List[str]:
+        """Возвращает решение урока на нужном языке"""
+        solution_key = f'solution_{lang}'
+        solution = lesson.get(solution_key)
+        if solution:
+            return solution
+        # Fallback на русский
+        solution_ru = lesson.get('solution_ru')
+        if solution_ru:
+            return solution_ru
+        # Fallback на английский
+        return lesson.get('solution_en', lesson.get('solution', []))
+
+    def get_solution_display(self, lesson: Dict, lang: str = 'ru') -> str:
+        """Возвращает отформатированный текст решения для отображения"""
+        solution = self.get_lesson_solution(lesson, lang)
+        if not solution:
+            return ""
+
+        if isinstance(solution, list):
+            return "\n".join([f"{i + 1}. {s}" for i, s in enumerate(solution)])
+        return str(solution)
+
+    def get_lesson_quiz(self, lesson: Dict, lang: str = 'ru') -> List[Dict]:
+        """Возвращает вопросы для викторины"""
+        return lesson.get(f'quiz_{lang}', [])
+
+    def get_lesson_tags(self, lesson: Dict) -> List[str]:
+        """Возвращает теги урока"""
+        return lesson.get('tags', [])
+
+    def get_lesson_prerequisites(self, lesson: Dict) -> List[int]:
+        """Возвращает список ID обязательных уроков"""
+        return lesson.get('prerequisites', [])
+
+    def get_metadata(self) -> Dict:
+        """Возвращает метаданные курса"""
+        return self._metadata
+
+    def get_metadata_title(self, lang: str = 'ru') -> str:
+        """Возвращает заголовок из метаданных"""
+        return self._metadata.get(f'title_{lang}', self._metadata.get('title_ru', ''))
+
+    def get_metadata_description(self, lang: str = 'ru') -> str:
+        """Возвращает описание из метаданных"""
+        return self._metadata.get(f'description_{lang}', self._metadata.get('description_ru', ''))
+
+    def get_metadata_total_xp(self) -> int:
+        """Возвращает общее количество XP из метаданных"""
+        return self._metadata.get('total_xp', 0)
+
+    def get_metadata_modules(self) -> List[Dict]:
+        """Возвращает список модулей из метаданных"""
+        return self._metadata.get('modules', [])
+
     def get_lesson_by_order(self, course_id: int, order: int) -> Optional[Dict]:
         """Возвращает урок по порядковому номеру в курсе"""
         course = self.get_course(course_id)
@@ -284,14 +352,27 @@ class LessonManager:
         return lesson_id in completed
 
     def is_lesson_available(self, lesson_id: int, course_id: int) -> bool:
-        """Проверяет, доступен ли урок (пройден предыдущий)"""
+        """
+        Проверяет, доступен ли урок.
+        Сначала проверяет prerequisites, если они есть.
+        Если prerequisites нет - использует старую логику по order.
+        """
         lesson = self.get_lesson(lesson_id, course_id)
         if not lesson:
             return False
-        # Первый урок всегда доступен
+
+        # Проверяем prerequisites
+        prerequisites = lesson.get('prerequisites', [])
+        if prerequisites:
+            for prereq_id in prerequisites:
+                if not self.is_lesson_completed(prereq_id, course_id):
+                    return False
+            return True
+
+        # Если prerequisites нет - используем старую логику по order
         if lesson.get('order') == 1:
             return True
-        # Проверяем, пройден ли предыдущий урок
+
         prev_lesson = self.get_lesson_by_order(course_id, lesson.get('order') - 1)
         if prev_lesson:
             return self.is_lesson_completed(prev_lesson.get('id'), course_id)
@@ -321,9 +402,58 @@ class LessonManager:
     def get_lesson_starter_code(self, lesson: Dict, lang: str = 'ru') -> str:
         return lesson.get(f'starter_code_{lang}', lesson.get('starter_code_ru', ''))
 
+    def get_lesson_learning_objectives(self, lesson: Dict, lang: str = 'ru') -> List[str]:
+        """Возвращает цели обучения урока"""
+        return lesson.get(f'learning_objectives_{lang}', lesson.get('learning_objectives_ru', []))
+
+    def get_lesson_ready_codes(self, lesson: Dict, lang: str = 'ru') -> List[str]:
+        """Возвращает готовые примеры кода для урока"""
+        return lesson.get(f'ready_codes_{lang}', lesson.get('ready_codes_ru', []))
+
+    def get_lesson_common_mistakes(self, lesson: Dict, lang: str = 'ru') -> List[str]:
+        """Возвращает список частых ошибок для урока"""
+        return lesson.get(f'common_mistakes_{lang}', lesson.get('common_mistakes_ru', []))
+
+    def get_lesson_difficulty(self, lesson: Dict) -> int:
+        """Возвращает уровень сложности урока (1-5)"""
+        return lesson.get('difficulty', 1)
+
+    def get_lesson_badge(self, lesson: Dict) -> str:
+        """Возвращает ID бейджа за прохождение урока"""
+        return lesson.get('badge', '')
+
+    def get_lesson_unlocks(self, lesson: Dict) -> int:
+        """Возвращает ID следующего урока, который открывается после прохождения"""
+        return lesson.get('unlocks', 0)
+
     def get_saved_code(self, lesson_id: int) -> str:
         """Возвращает сохранённый код для урока"""
         return self._progress.get('lesson_codes', {}).get(str(lesson_id), '')
+
+    # ====================== ВИКТОРИНА (QUIZ) ======================
+
+    def save_quiz_result(self, lesson_id: int, score: int, total: int, answers: Dict = None):
+        """Сохраняет результат викторины с ответами"""
+        quiz_results = self._progress.get('quiz_results', {})
+        key = str(lesson_id)
+        quiz_results[key] = {
+            'score': score,
+            'total': total,
+            'percentage': (score / total * 100) if total > 0 else 0,
+            'completed_at': datetime.now().isoformat() if score == total else None,
+            'answers': answers or {}
+        }
+        self._progress['quiz_results'] = quiz_results
+        self._save_progress()
+
+    def get_quiz_result(self, lesson_id: int) -> Optional[Dict]:
+        """Возвращает результат викторины"""
+        return self._progress.get('quiz_results', {}).get(str(lesson_id))
+
+    def is_quiz_completed(self, lesson_id: int) -> bool:
+        """Проверяет, пройдена ли викторина"""
+        result = self.get_quiz_result(lesson_id)
+        return result is not None and result.get('score', 0) == result.get('total', 0)
 
     # ====================== ДЕЙСТВИЯ С УРОКАМИ ======================
 
@@ -441,6 +571,23 @@ class LessonManager:
         """Проверяет, есть ли у пользователя бейдж"""
         return badge_id in self._progress.get('badges', [])
 
+    _ACHIEVEMENT_BADGE_IDS = frozenset({
+        'first_try', 'week_streak', 'month_streak',
+        'ten_lessons', 'course_complete', 'quiz_master',
+    })
+
+    def is_achievement_badge(self, badge_id: str) -> bool:
+        """True для системных достижений, False для бейджей из course.json"""
+        return badge_id in self._ACHIEVEMENT_BADGE_IDS
+
+    def award_lesson_badge(self, lesson: Dict) -> Optional[str]:
+        """Выдаёт бейдж урока из course.json, если он указан и ещё не получен"""
+        badge_id = lesson.get('badge', '')
+        if badge_id and not self.has_badge(badge_id):
+            self.add_badge(badge_id, badge_id)
+            return badge_id
+        return None
+
     def record_lesson_time(self, lesson_id: int, seconds: int):
         """Записывает время прохождения урока"""
         times = self._progress.get('lesson_times', {})
@@ -479,6 +626,11 @@ class LessonManager:
             completed_ids = self.get_completed_lesson_ids(course_id)
             if len(completed_ids) >= total_lessons and total_lessons > 0 and not self.has_badge('course_complete'):
                 self.add_badge('course_complete', 'Курс завершён')
+
+        # Бейдж за отличную викторину (100% правильных ответов)
+        quiz_result = self.get_quiz_result(lesson_id)
+        if quiz_result and quiz_result.get('percentage', 0) == 100 and not self.has_badge('quiz_master'):
+            self.add_badge('quiz_master', 'Мастер викторины')
 
     def set_last_lesson(self, lesson_id: int, course_id: int = None):
         """Устанавливает последний открытый урок"""
@@ -578,7 +730,7 @@ class LessonManager:
             course_key = str(course_id)
             if course_key in self._progress.get('completed_lessons_by_course', {}):
                 self._progress['completed_lessons_by_course'][course_key] = []
-            
+
             # Сбрасываем связанные данные для уроков этого курса
             course = self.get_course(course_id)
             if course:
@@ -596,6 +748,9 @@ class LessonManager:
                     # Удаляем время прохождения
                     if str(lesson_id) in self._progress.get('lesson_times', {}):
                         del self._progress['lesson_times'][str(lesson_id)]
+                    # Удаляем результаты викторины
+                    if str(lesson_id) in self._progress.get('quiz_results', {}):
+                        del self._progress['quiz_results'][str(lesson_id)]
         else:
             # Полный сброс всего прогресса
             self._progress['completed_lessons'] = []
@@ -608,6 +763,7 @@ class LessonManager:
             self._progress['streak_days'] = 0
             self._progress['last_activity_date'] = None
             self._progress['lesson_times'] = {}
+            self._progress['quiz_results'] = {}
             self._progress['last_lesson_id'] = None
 
         self._save_progress()

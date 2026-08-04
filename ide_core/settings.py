@@ -89,3 +89,15 @@ class SettingsManager:
         settings = cls.load()
         settings['vibration_enabled'] = enabled
         return cls.save(settings)
+
+    @classmethod
+    def get_ai_groq_key(cls):
+        return cls.load().get("ai_groq_key", "")
+
+    @classmethod
+    def get_ai_gemini_key(cls):
+        return cls.load().get("ai_gemini_key", "")
+
+    @classmethod
+    def get_ai_provider(cls):
+        return cls.load().get("ai_provider", "groq")

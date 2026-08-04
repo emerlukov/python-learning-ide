@@ -113,6 +113,53 @@ class KeyboardSupport:
         except Exception as e:
             print(f"[IME] Enable IME features failed: {e}")
 
+    def enable_suggestions_for_textinput(self, text_input_widget):
+        """Включает системные подсказки для TextInput через Android API"""
+        if not platform == 'android':
+            return
+
+        try:
+            from jnius import autoclass, cast
+
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            activity = PythonActivity.mActivity
+
+            # Получаем нативный view из Kivy TextInput
+            if hasattr(text_input_widget, '_proxy_ref'):
+                proxy = text_input_widget._proxy_ref
+                if hasattr(proxy, 'get_view'):
+                    native_view = proxy.get_view()
+                    
+                    # Приводим к EditText
+                    EditText = autoclass('android.widget.EditText')
+                    if isinstance(native_view, EditText):
+                        # Включаем подсказки через Android API
+                        TYPE_CLASS_TEXT = autoclass('android.text.InputType').TYPE_CLASS_TEXT
+                        TYPE_TEXT_FLAG_AUTO_CORRECT = autoclass('android.text.InputType').TYPE_TEXT_FLAG_AUTO_CORRECT
+                        TYPE_TEXT_FLAG_AUTO_COMPLETE = autoclass('android.text.InputType').TYPE_TEXT_FLAG_AUTO_COMPLETE
+                        TYPE_TEXT_FLAG_NO_SUGGESTIONS = autoclass('android.text.InputType').TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                        
+                        # Получаем текущий input_type
+                        current_type = native_view.getInputType()
+                        
+                        # Убираем флаг NO_SUGGESTIONS если он есть
+                        new_type = current_type & ~TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                        
+                        # Добавляем флаги для автокоррекции и автодополнения
+                        new_type = new_type | TYPE_TEXT_FLAG_AUTO_CORRECT | TYPE_TEXT_FLAG_AUTO_COMPLETE
+                        
+                        # Устанавливаем новый input_type
+                        native_view.setInputType(new_type)
+                        
+                        print("[IME] Enabled suggestions for TextInput via Android API")
+                        return True
+
+            print("[IME] Could not enable suggestions - view not accessible")
+            return False
+        except Exception as e:
+            print(f"[IME] Enable suggestions for TextInput failed: {e}")
+            return False
+
     def get_keyboard_info(self):
         """Возвращает информацию о текущей клавиатуре"""
         info = {
