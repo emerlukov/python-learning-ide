@@ -1,6 +1,6 @@
 # ui/lesson_view.py
 """
-Lesson view dialog with theory, practice, task and hint tabs
+Lesson view dialog with theory, practice, task, quiz and hint tabs
 
 ОПТИМИЗАЦИИ (v2):
   1. Ленивая загрузка вкладок — контент строится только при первом открытии вкладки.
@@ -8,6 +8,7 @@ Lesson view dialog with theory, practice, task and hint tabs
   3. Дебаунс сохранения кода — запись на диск не на каждый символ, а с задержкой 1.5 с.
   4. _force_defocus_tree ограничена глубиной и работает через итеративный стек.
   5. _wrap_buttons отложен до 0.5 с (вместо 0.1 с).
+  6. Добавлена вкладка Quiz для самопроверки знаний.
 """
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
@@ -23,12 +24,40 @@ from kivy.core.clipboard import Clipboard
 from kivy.core.window import Window
 from kivy.utils import platform
 
-from ide_core.themes import ThemeManager
-from ide_core.lessons import LessonManager
-from widgets.editor import LineNumberTextInput
-from widgets.dialogs import ThemedPopup
+# Импорт с защитой от ошибок при прямом запуске
+try:
+    from ide_core.themes import ThemeManager
+except ImportError:
+    ThemeManager = None
+
+try:
+    from ide_core.lessons import LessonManager
+except ImportError:
+    LessonManager = None
+
+try:
+    from widgets.editor import LineNumberTextInput
+except ImportError:
+    LineNumberTextInput = None
+
+try:
+    from widgets.dialogs import ThemedPopup
+except ImportError:
+    ThemedPopup = None
 from widgets import InteractiveCodeWidget
 from utils.vibration_manager import VibrationManager
+
+
+ACHIEVEMENT_BADGE_SYMBOLS = {
+    'first_try': '☺',
+    'week_streak': '☻',
+    'month_streak': '☯',
+    'ten_lessons': '☮',
+    'course_complete': '★',
+    'quiz_master': '☿',
+}
+LESSON_BADGE_SYMBOL = '◆'
+BADGES_PANEL_SYMBOL = '♛'
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +228,7 @@ class LessonView(BoxLayout):
         self.user_code = ""
         self._keyboard_height = 0
         self._last_run_success = False
+        self._quiz_results = {}  # Для хранения выбранных ответов
 
         # --- ОПТИМИЗАЦИЯ: дебаунс сохранения ---
         self._save_event = None
@@ -244,14 +274,28 @@ class LessonView(BoxLayout):
         lesson_id = lesson.get('id', 0)
         lesson_order = lesson.get('order', lesson_id)
         title = self.lesson_manager.get_lesson_title(lesson, lang)
+        difficulty = self.lesson_manager.get_lesson_difficulty(lesson)
+        badge = self.lesson_manager.get_lesson_badge(lesson)
+        xp = lesson.get('xp', 10)
+        tags = self.lesson_manager.get_lesson_tags(lesson)
 
         # ========== ВЕРХНЯЯ ПАНЕЛЬ ==========
         header_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(40), spacing=dp(10))
 
+        # Отображение сложности и XP
+        difficulty_stars = "★" * difficulty
+        title_text = f"{tr.get('lesson', 'Lesson')} {lesson_order}: {title}"
+        if difficulty > 0:
+            title_text += f" [{difficulty_stars}]"
+        if badge:
+            badge_name = tr.get(f'badge_{badge}', badge)
+            title_text += f" [{badge_name}]"
+        title_text += f" ({xp} XP)"
+
         title_label = Label(
-            text=f"{tr.get('lesson', 'Lesson')} {lesson_order}: {title}",
-            font_size=dp(16),
-            font_name='SourceBold',
+            text=title_text,
+            font_size=dp(14),
+            font_name='DejaVuSans',
             color=theme['text_color'],
             halign='left',
             size_hint_x=0.8
@@ -305,21 +349,31 @@ class LessonView(BoxLayout):
         stats_layout.add_widget(self.streak_label)
         self.add_widget(stats_layout)
 
-        # ========== ПАНЕЛЬ БЕЙДЖЕЙ ==========
-        badges_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(25), spacing=dp(5))
+        # ========== ПАНЕЛЬ БЕЙДЖЕЙ (компактная, тап → popup) ==========
+        self.badges_layout = BoxLayout(
+            orientation='horizontal', size_hint_y=None, height=dp(28), spacing=dp(5),
+        )
 
-        self.badges_label = Label(
-            text=self._get_badges_text(),
+        self.badges_btn = Button(
+            text=self._get_badges_summary_text(),
             font_size=dp(10),
             font_name='DejaVuSans',
-            color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+            background_normal='', background_down='',
+            halign='left',
+            valign='middle',
             size_hint_x=1,
-            halign='left'
+            padding=(dp(10), 0),
         )
-        self.badges_label.bind(width=lambda inst, val: setattr(inst, 'text_size', (val, None)))
+        self.badges_btn.bind(on_release=self._show_all_badges_popup)
+        self.badges_btn.bind(state=self._on_badges_btn_state)
+        self.badges_btn.bind(
+            size=lambda inst, val: setattr(inst, 'text_size', (inst.width - dp(20), None))
+        )
+        self._apply_badges_btn_theme()
 
-        badges_layout.add_widget(self.badges_label)
-        self.add_widget(badges_layout)
+        self.badges_layout.add_widget(self.badges_btn)
+        self.add_widget(self.badges_layout)
+        self._update_badges_display()
 
         # ========== ТАБЫ ==========
         self.tab_panel = TabbedPanel(
@@ -333,11 +387,13 @@ class LessonView(BoxLayout):
         self.theory_tab = TabbedPanelItem(text=tr.get('theory', 'Theory'))
         self.task_tab = TabbedPanelItem(text=tr.get('task', 'Task'))
         self.practice_tab = TabbedPanelItem(text=tr.get('practice', 'Practice'))
+        self.quiz_tab = TabbedPanelItem(text=tr.get('quiz', 'Quiz'))
         self.hint_tab = TabbedPanelItem(text=tr.get('hint', 'Hint'))
 
         self.tab_panel.add_widget(self.theory_tab)
         self.tab_panel.add_widget(self.task_tab)
         self.tab_panel.add_widget(self.practice_tab)
+        self.tab_panel.add_widget(self.quiz_tab)
         self.tab_panel.add_widget(self.hint_tab)
 
         self._apply_tab_theme()
@@ -448,29 +504,67 @@ class LessonView(BoxLayout):
             return "✓ " + base_text
         return base_text
 
-    def _get_badges_text(self) -> str:
-        """Возвращает текст с бейджами пользователя"""
-        badges = self.lesson_manager.get_badges()
-        if not badges:
+    def _get_badge_symbol(self, badge_id: str) -> str:
+        return ACHIEVEMENT_BADGE_SYMBOLS.get(badge_id, LESSON_BADGE_SYMBOL)
+
+    def _get_badge_name(self, badge_id: str) -> str:
+        return self.app.tr.get(f'badge_{badge_id}', badge_id)
+
+    def _get_badges_summary_text(self) -> str:
+        """Компактная строка для панели бейджей."""
+        count = len(self.lesson_manager.get_badges())
+        if count == 0:
             return ""
+        tr = self.app.tr
+        count_text = tr.get('badges_count', '{} badges').format(count)
+        hint = tr.get('badges_view_hint', 'view')
+        return f"{BADGES_PANEL_SYMBOL} {count_text}  ·  {hint} ›"
 
-        badge_symbols = {
-            'first_try': '☺',
-            'week_streak': '☻',
-            'month_streak': '☯',
-            'ten_lessons': '☮',
-            'course_complete': '★',
-        }
+    def _apply_badges_btn_theme(self, pressed=False):
+        """Оформляет кнопку бейджей как кликабельный элемент."""
+        if not hasattr(self, 'badges_btn'):
+            return
+        theme = ThemeManager.get_theme()
+        btn = self.badges_btn
+        if pressed:
+            btn.background_color = (
+                theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1))[0],
+                theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1))[1],
+                theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1))[2],
+                0.45,
+            )
+            btn.color = (1, 1, 1, 1)
+        else:
+            btn.background_color = theme.get('widget_bg', (0.141, 0.145, 0.149, 1))
+            btn.color = theme['text_color']
 
-        badge_names = []
-        for badge_id in badges:
-            badge_key = f'badge_{badge_id}'
-            badge_name = self.app.tr.get(badge_key, badge_id)
-            symbol = badge_symbols.get(badge_id, '☺')
-            # Увеличиваем смайлик до 16px
-            badge_names.append(f"{symbol} {badge_name}")
+    def _on_badges_btn_state(self, btn, state):
+        self._apply_badges_btn_theme(pressed=(state == 'down'))
 
-        return "  ".join(badge_names[:5])
+    def _get_ordered_badges(self) -> list:
+        """Уроковые бейджи первыми, затем достижения."""
+        badges = self.lesson_manager.get_badges()
+        lesson_badges = [b for b in badges if not self.lesson_manager.is_achievement_badge(b)]
+        achievement_badges = [b for b in badges if self.lesson_manager.is_achievement_badge(b)]
+        return lesson_badges + achievement_badges
+
+    def _update_badges_display(self):
+        """Обновляет компактную панель бейджей."""
+        if not hasattr(self, 'badges_btn'):
+            return
+
+        count = len(self.lesson_manager.get_badges())
+        if count == 0:
+            self.badges_layout.height = 0
+            self.badges_layout.opacity = 0
+            self.badges_btn.disabled = True
+            self.badges_btn.text = ""
+        else:
+            self.badges_layout.height = dp(28)
+            self.badges_layout.opacity = 1
+            self.badges_btn.disabled = False
+            self.badges_btn.text = self._get_badges_summary_text()
+            self._apply_badges_btn_theme()
 
     def _update_stats_display(self):
         """Обновляет отображение статистики (XP, streak, badges)"""
@@ -482,8 +576,7 @@ class LessonView(BoxLayout):
             streak_days = self.lesson_manager.get_streak_days()
             self.streak_label.text = f"▲ {streak_days} {self.app.tr.get('streak_days', 'Day streak: {}').format(streak_days)}"
 
-        if hasattr(self, 'badges_label'):
-            self.badges_label.text = self._get_badges_text()
+        self._update_badges_display()
 
     def _update_progress_indicator(self):
         """Обновляет индикатор прогресса практики"""
@@ -511,6 +604,7 @@ class LessonView(BoxLayout):
             'theory': self._create_theory_tab,
             'task': self._create_task_tab,
             'practice': self._create_practice_tab,
+            'quiz': self._create_quiz_tab,
             'hint': self._create_hint_tab,
         }
         builder = builders.get(tab_key)
@@ -531,6 +625,7 @@ class LessonView(BoxLayout):
             id(self.theory_tab): 'theory',
             id(self.task_tab): 'task',
             id(self.practice_tab): 'practice',
+            id(self.quiz_tab): 'quiz',
             id(self.hint_tab): 'hint',
         }
         key = tab_map.get(id(value))
@@ -820,7 +915,9 @@ class LessonView(BoxLayout):
 
         theme = ThemeManager.get_theme()
         lang = self.app.current_language
-        theory_text = self.lesson_manager.get_lesson_theory(self.lesson, lang)
+        lesson = self.lesson
+        theory_text = self.lesson_manager.get_lesson_theory(lesson, lang)
+        tags = self.lesson_manager.get_lesson_tags(lesson)
 
         scroll = PassthroughScrollView(size_hint=(1, 1))
         content = BoxLayout(
@@ -840,6 +937,87 @@ class LessonView(BoxLayout):
             Color(*theme.get('editor_bg', (0.188, 0.204, 0.251, 1)))
             scroll.bg_rect = Rectangle(pos=scroll.pos, size=scroll.size)
         scroll.bind(pos=self._update_scroll_bg, size=self._update_scroll_bg)
+
+        # ========== ТЕГИ (в самом начале) ==========
+        if tags:
+            tags_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(30), spacing=dp(5))
+
+            # Метка "Темы:"
+            tags_label_text = Label(
+                text=self.app.tr.get('topics', 'Topics') + ":",
+                font_size=dp(12),
+                font_name='SourceBold',
+                color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+                size_hint_x=None,
+                width=dp(50),
+                halign='left'
+            )
+            tags_layout.add_widget(tags_label_text)
+
+            # Текст тегов
+            tags_text = " • ".join(tags)
+            tags_label = Label(
+                text=tags_text,
+                font_size=dp(12),
+                font_name='DejaVuSans',
+                color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+                halign='left',
+                size_hint_x=1
+            )
+            tags_label.bind(width=lambda inst, val: setattr(inst, 'text_size', (val, None)))
+            tags_layout.add_widget(tags_label)
+
+            content.add_widget(tags_layout)
+
+            # Разделитель после тегов
+            tags_sep = Label(
+                text="_" * 50,
+                font_size=dp(8),
+                color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+                size_hint_y=None,
+                height=dp(15)
+            )
+            content.add_widget(tags_sep)
+
+        # Цели обучения (learning objectives)
+        learning_objectives = self.lesson_manager.get_lesson_learning_objectives(self.lesson, lang)
+        if learning_objectives:
+            obj_title = Label(
+                text=self.app.tr.get('learning_objectives', 'Learning Objectives') + ":",
+                font_size=dp(18),
+                font_name='SourceBold',
+                color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+                halign='left',
+                size_hint_y=None,
+                height=dp(25)
+            )
+            content.add_widget(obj_title)
+
+            for obj in learning_objectives:
+                obj_label = Label(
+                    text=f"• {obj}",
+                    font_size=dp(12),
+                    color=theme['text_color'],
+                    halign='left',
+                    valign='top',
+                    size_hint_y=None,
+                )
+                obj_label.bind(
+                    width=lambda inst, val: setattr(inst, 'text_size', (val, None)),
+                    texture_size=lambda inst, sz: setattr(inst, 'height', sz[1] + dp(5))
+                )
+                content.add_widget(obj_label)
+
+            # Разделитель
+            obj_sep = Label(
+                text="_" * 50,
+                font_size=dp(8),
+                font_name='SourceBold',
+                color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+                size_hint_y=None,
+                height=dp(15)
+            )
+            content.add_widget(obj_sep)
 
         theory_markdown = MarkdownLabel(text=theory_text, font_size=dp(12))
         theory_markdown._update_background()
@@ -1004,6 +1182,7 @@ class LessonView(BoxLayout):
         theme = ThemeManager.get_theme()
         lang = self.app.current_language
         lesson = self.lesson
+        tags = self.lesson_manager.get_lesson_tags(lesson)
 
         task_text = self.lesson_manager.get_lesson_task(lesson, lang)
 
@@ -1034,10 +1213,91 @@ class LessonView(BoxLayout):
             scroll.bg_rect = Rectangle(pos=scroll.pos, size=scroll.size)
         scroll.bind(pos=self._update_scroll_bg, size=self._update_scroll_bg)
 
+        # ========== ТЕГИ (в начале задания) ==========
+        if tags:
+            tags_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(30), spacing=dp(5))
+
+            # Метка "Темы:"
+            tags_label_text = Label(
+                text=self.app.tr.get('topics', 'Topics') + ":",
+                font_size=dp(12),
+                font_name='SourceBold',
+                color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+                size_hint_x=None,
+                width=dp(50),
+                halign='left'
+            )
+            tags_layout.add_widget(tags_label_text)
+
+            # Текст тегов
+            tags_text = " • ".join(tags)
+            tags_label = Label(
+                text=tags_text,
+                font_size=dp(12),
+                font_name='DejaVuSans',
+                color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+                halign='left',
+                size_hint_x=1
+            )
+            tags_label.bind(width=lambda inst, val: setattr(inst, 'text_size', (val, None)))
+            tags_layout.add_widget(tags_label)
+
+            content.add_widget(tags_layout)
+
+            # Разделитель после тегов
+            tags_sep = Label(
+                text="_" * 50,
+                font_size=dp(8),
+                color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+                size_hint_y=None,
+                height=dp(15)
+            )
+            content.add_widget(tags_sep)
+
         # Текст задания
         task_markdown = MarkdownLabel(text=task_text, font_size=dp(12))
         task_markdown._update_background()
         content.add_widget(task_markdown)
+
+        # Частые ошибки (common mistakes) - сразу после задания
+        common_mistakes = self.lesson_manager.get_lesson_common_mistakes(lesson, lang)
+        if common_mistakes:
+            mistakes_sep = Label(
+                text="_" * 100,
+                font_size=dp(10),
+                font_name='SourceBold',
+                color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+                size_hint_y=None,
+                height=dp(20)
+            )
+            content.add_widget(mistakes_sep)
+
+            mistakes_title = Label(
+                text=self.app.tr.get('common_mistakes', 'Common Mistakes') + ":",
+                font_size=dp(14),
+                font_name='SourceBold',
+                color=(0.8, 0.4, 0.4, 1),
+                halign='left',
+                size_hint_y=None,
+                height=dp(25)
+            )
+            content.add_widget(mistakes_title)
+
+            for mistake in common_mistakes:
+                mistake_label = Label(
+                    text=f"• {mistake}",
+                    font_size=dp(12),
+                    font_name='DejaVuSans',
+                    color=(0.9, 0.6, 0.6, 1),
+                    halign='left',
+                    valign='top',
+                    size_hint_y=None,
+                )
+                mistake_label.bind(
+                    width=lambda inst, val: setattr(inst, 'text_size', (val, None)),
+                    texture_size=lambda inst, sz: setattr(inst, 'height', sz[1] + dp(5))
+                )
+                content.add_widget(mistake_label)
 
         # Разделитель
         sep_label = Label(
@@ -1163,11 +1423,383 @@ class LessonView(BoxLayout):
         scroll.add_widget(content)
         self.task_tab.add_widget(scroll)
 
-    def _create_hint_tab(self):
-        """Создаёт содержимое вкладки Подсказка"""
+    def _create_quiz_tab(self):
+        """Создаёт содержимое вкладки Quiz (викторина)"""
         theme = ThemeManager.get_theme()
         lang = self.app.current_language
-        hint_text = self.lesson_manager.get_lesson_hint(self.lesson, lang)
+        lesson = self.lesson
+        lesson_id = lesson.get('id', 0)
+
+        quiz_data = self.lesson_manager.get_lesson_quiz(lesson, lang)
+        saved_result = self.lesson_manager.get_quiz_result(lesson_id)
+        is_completed = saved_result is not None and saved_result.get('score', 0) == saved_result.get('total', 0)
+
+        scroll = PassthroughScrollView(size_hint=(1, 1))
+        content = BoxLayout(
+            orientation='vertical',
+            size_hint_y=None,
+            spacing=dp(10),
+            padding=[dp(10), dp(10), dp(10), dp(10)]
+        )
+        content.bind(minimum_height=content.setter('height'))
+
+        with content.canvas.before:
+            Color(*theme.get('editor_bg', (0.188, 0.204, 0.251, 1)))
+            content.bg_rect = Rectangle(pos=content.pos, size=content.size)
+        content.bind(pos=self._update_content_bg, size=self._update_content_bg)
+
+        with scroll.canvas.before:
+            Color(*theme.get('editor_bg', (0.188, 0.204, 0.251, 1)))
+            scroll.bg_rect = Rectangle(pos=scroll.pos, size=scroll.size)
+        scroll.bind(pos=self._update_scroll_bg, size=self._update_scroll_bg)
+
+        if not quiz_data:
+            no_quiz_label = Label(
+                text=self.app.tr.get('no_quiz', 'No quiz available for this lesson'),
+                font_size=dp(14),
+                color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+                size_hint_y=None,
+                height=dp(50)
+            )
+            content.add_widget(no_quiz_label)
+            scroll.add_widget(content)
+            self.quiz_tab.add_widget(scroll)
+            return
+
+        # Заголовок
+        quiz_title = Label(
+            text=self.app.tr.get('quiz_title', 'Test your knowledge!'),
+            font_size=dp(16),
+            font_name='SourceBold',
+            color=theme['text_color'],
+            size_hint_y=None,
+            height=dp(30)
+        )
+        content.add_widget(quiz_title)
+
+        # Статус викторины
+        if is_completed:
+            status_label = Label(
+                text="☺ " + self.app.tr.get('quiz_perfect', 'Perfect! All answers correct!'),
+                font_size=dp(14),
+                font_name='SourceBold',
+                color=(0.3, 0.7, 0.3, 1),
+                size_hint_y=None,
+                height=dp(30)
+            )
+            content.add_widget(status_label)
+
+            # Кнопка для перепрохождения
+            retry_btn = Button(
+                text=self.app.tr.get('retry_quiz', 'Retry Quiz'),
+                font_name='SourceBold',
+                size_hint_y=None,
+                height=dp(35),
+                background_color=theme.get('widget_bg', (0.141, 0.145, 0.149, 1)),
+                background_normal='', background_down='',
+                color=theme['text_color'],
+                font_size=dp(12)
+            )
+            retry_btn.bind(on_release=lambda x: self._reset_quiz_state(quiz_data))
+            content.add_widget(retry_btn)
+
+        # Сохраняем результаты в self._quiz_results
+        if not hasattr(self, '_quiz_results'):
+            self._quiz_results = {}
+
+        # Если есть сохраненные ответы - восстанавливаем
+        if saved_result and 'answers' in saved_result:
+            for key, value in saved_result['answers'].items():
+                if key in self._quiz_results:
+                    self._quiz_results[key]['selected'] = value
+
+        # Разделитель
+        sep = Label(
+            text="_" * 80,
+            font_size=dp(8),
+            color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+            size_hint_y=None,
+            height=dp(15)
+        )
+        content.add_widget(sep)
+
+        # Вопросы
+        for i, q in enumerate(quiz_data):
+            # Номер вопроса с переносом текста
+            q_label = Label(
+                text=f"{i + 1}. {q['question']}",
+                font_size=dp(14),
+                font_name='SourceBold',
+                color=theme['text_color'],
+                halign='left',
+                valign='top',
+                size_hint_y=None,
+                text_size=(self.width - dp(40), None)
+            )
+            q_label.bind(
+                width=lambda inst, val: setattr(inst, 'text_size', (val - dp(20), None)),
+                texture_size=lambda inst, sz: setattr(inst, 'height', sz[1] + dp(10))
+            )
+            content.add_widget(q_label)
+
+            # Создаем группу кнопок для вариантов ответов
+            options_layout = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(5))
+            options_layout.height = dp(len(q['options']) * 35 + 10)
+
+            # Храним выбранный ответ для этого вопроса
+            if f'q_{i}' not in self._quiz_results:
+                self._quiz_results[f'q_{i}'] = {'selected': -1, 'correct': q['answer']}
+            elif 'correct' not in self._quiz_results[f'q_{i}']:
+                self._quiz_results[f'q_{i}']['correct'] = q['answer']
+
+            # Если есть сохраненный результат, используем его
+            selected_idx = self._quiz_results[f'q_{i}'].get('selected', -1)
+
+            for j, opt in enumerate(q['options']):
+                # Опция с кнопкой выбора
+                option_row = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(30), spacing=dp(5))
+
+                # Кнопка выбора (круглая)
+                select_btn = Button(
+                    text="●" if j == selected_idx else "○",
+                    font_name='DejaVuSans',
+                    size_hint_x=None,
+                    width=dp(30),
+                    background_color=theme.get('widget_bg', (0.141, 0.145, 0.149, 1)),
+                    background_normal='', background_down='',
+                    color=theme['text_color'],
+                    font_size=dp(16)
+                )
+                select_btn.question_idx = i
+                select_btn.option_idx = j
+                select_btn.bind(on_release=self._on_quiz_option_selected)
+
+                # Текст варианта с переносом
+                opt_label = Label(
+                    text=f"{chr(97 + j)}) {opt}",
+                    font_size=dp(12),
+                    color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+                    halign='left',
+                    valign='middle',
+                    size_hint_x=1,
+                    text_size=(self.width - dp(80), None)
+                )
+                opt_label.bind(
+                    width=lambda inst, val: setattr(inst, 'text_size', (val - dp(50), None)),
+                    texture_size=lambda inst, sz: setattr(inst, 'height', sz[1] + dp(5))
+                )
+
+                option_row.add_widget(select_btn)
+                option_row.add_widget(opt_label)
+                options_layout.add_widget(option_row)
+
+            content.add_widget(options_layout)
+
+            # Разделитель между вопросами
+            if i < len(quiz_data) - 1:
+                q_sep = Label(
+                    text="-" * 80,
+                    font_size=dp(6),
+                    color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+                    size_hint_y=None,
+                    height=dp(10)
+                )
+                content.add_widget(q_sep)
+
+        # Кнопка проверки результатов - внизу
+        check_btn = Button(
+            text=self.app.tr.get('check_answers', 'Check Answers'),
+            font_name='SourceBold',
+            size_hint_y=None,
+            height=dp(40),
+            background_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1)),
+            background_normal='', background_down='',
+            color=(1, 1, 1, 1),
+            font_size=dp(14),
+            disabled=is_completed
+        )
+        check_btn.bind(on_release=lambda x: self._check_quiz_answers(quiz_data))
+        content.add_widget(check_btn)
+
+        scroll.add_widget(content)
+        self.quiz_tab.add_widget(scroll)
+
+    def _on_quiz_option_selected(self, instance):
+        """
+        Обработчик выбора варианта ответа в викторине.
+        Повторный клик по выбранному варианту снимает выделение.
+        """
+        q_idx = instance.question_idx
+        opt_idx = instance.option_idx
+        key = f'q_{q_idx}'
+
+        if key not in self._quiz_results:
+            return
+
+        # Проверяем, не завершена ли викторина
+        lesson_id = self.lesson.get('id', 0)
+        saved_result = self.lesson_manager.get_quiz_result(lesson_id)
+        if saved_result and saved_result.get('score', 0) == saved_result.get('total', 0):
+            # Викторина уже завершена, нельзя менять ответы
+            return
+
+        current_selected = self._quiz_results[key].get('selected', -1)
+
+        # Если кликнули по уже выбранному варианту - снимаем выделение
+        if current_selected == opt_idx:
+            new_selected = -1
+        else:
+            new_selected = opt_idx
+
+        self._quiz_results[key]['selected'] = new_selected
+
+        # Обновляем отображение всех кнопок для этого вопроса
+        # Находим родительский контейнер вопроса
+        parent = instance.parent
+        while parent and not (hasattr(parent, 'children') and len(parent.children) == 2):
+            parent = parent.parent
+            if parent is None:
+                break
+
+        if parent is not None:
+            # Обновляем все кнопки в этом вопросе
+            for child in parent.children:
+                if isinstance(child, Button):
+                    if child.option_idx == new_selected:
+                        child.text = "●"
+                    else:
+                        child.text = "○"
+
+    def _check_quiz_answers(self, quiz_data):
+        """Проверяет ответы на викторину и показывает результат"""
+        correct_count = 0
+        total = len(quiz_data)
+        lesson_id = self.lesson.get('id', 0)
+
+        # Проверяем, не завершена ли уже викторина
+        saved_result = self.lesson_manager.get_quiz_result(lesson_id)
+        if saved_result and saved_result.get('score', 0) == saved_result.get('total', 0):
+            self.app.show_result_popup(self.app.tr.get('quiz_already_completed', 'Quiz already completed!'))
+            return
+
+        # Проверяем все ли вопросы отвечены
+        unanswered = []
+        for i in range(total):
+            key = f'q_{i}'
+            if key in self._quiz_results:
+                if self._quiz_results[key].get('selected', -1) == -1:
+                    unanswered.append(str(i + 1))
+
+        if unanswered:
+            self.app.show_result_popup(
+                self.app.tr.get('quiz_unanswered', 'Please answer questions: {}').format(', '.join(unanswered))
+            )
+            return
+
+        # Подсчитываем правильные ответы
+        for i, q in enumerate(quiz_data):
+            key = f'q_{i}'
+            if key in self._quiz_results:
+                selected = self._quiz_results[key].get('selected', -1)
+                correct = self._quiz_results[key].get('correct', q['answer'])
+                if selected == correct:
+                    correct_count += 1
+
+        # Сохраняем результат с ответами
+        answers = {}
+        for i in range(total):
+            key = f'q_{i}'
+            if key in self._quiz_results:
+                answers[key] = self._quiz_results[key].get('selected', -1)
+
+        self.lesson_manager.save_quiz_result(lesson_id, correct_count, total, answers)
+
+        # Показываем результат
+        if correct_count == total:
+            message = self.app.tr.get('quiz_perfect', 'Perfect! All answers correct!')
+            self.app.show_result_popup(f"☺ {message} ({correct_count}/{total})")
+            # Бонусный XP за идеальный результат
+            self.lesson_manager.add_badge('quiz_master', self.app.tr.get('badge_quiz_master', 'Quiz Master'))
+
+            # Обновляем кнопку проверки (отключаем)
+            self._update_quiz_buttons_state(True)
+        else:
+            # Показываем какие вопросы были неправильные
+            wrong_questions = []
+            for i, q in enumerate(quiz_data):
+                key = f'q_{i}'
+                if key in self._quiz_results:
+                    selected = self._quiz_results[key].get('selected', -1)
+                    correct = self._quiz_results[key].get('correct', q['answer'])
+                    if selected != correct:
+                        wrong_questions.append(str(i + 1))
+
+            message = self.app.tr.get('quiz_result', 'Your result: {} out of {}')
+            if wrong_questions:
+                message += "\n" + self.app.tr.get('wrong_questions', 'Wrong: {}').format(', '.join(wrong_questions))
+
+            self.app.show_result_popup(message.format(correct_count, total))
+
+    def _reset_quiz_state(self, quiz_data):
+        """
+        Сбрасывает состояние викторины для перепрохождения.
+        """
+        lesson_id = self.lesson.get('id', 0)
+
+        # Сбрасываем результат в прогресс-файле
+        quiz_results = self.lesson_manager._progress.get('quiz_results', {})
+        key = str(lesson_id)
+        if key in quiz_results:
+            # Сохраняем только пустой результат с количеством вопросов
+            quiz_results[key] = {
+                'score': -1,
+                'total': len(quiz_data),
+                'percentage': 0,
+                'completed_at': None,
+                'answers': {}
+            }
+            self.lesson_manager._progress['quiz_results'] = quiz_results
+            self.lesson_manager._save_progress()
+
+        # Сбрасываем локальное состояние
+        self._quiz_results = {}
+        for i, q in enumerate(quiz_data):
+            self._quiz_results[f'q_{i}'] = {'selected': -1, 'correct': q['answer']}
+
+        # Перестраиваем вкладку
+        self._tabs_built.discard('quiz')
+        self.quiz_tab.clear_widgets()
+        self._create_quiz_tab()
+
+        # Показываем уведомление
+        self.app.show_result_popup(self.app.tr.get('quiz_reset', 'Quiz reset! You can try again.'))
+
+    def _update_quiz_buttons_state(self, disabled):
+        """Обновляет состояние кнопок в викторине"""
+        # Находим кнопку проверки в текущей вкладке
+        if not hasattr(self, 'quiz_tab'):
+            return
+
+        for child in self.quiz_tab.children:
+            if isinstance(child, ScrollView):
+                for content_child in child.children:
+                    if hasattr(content_child, 'children'):
+                        for widget in content_child.children:
+                            if isinstance(widget, Button) and widget.text == self.app.tr.get('check_answers',
+                                                                                             'Check Answers'):
+                                widget.disabled = disabled
+                                break
+
+    def _create_hint_tab(self):
+        """Создаёт содержимое вкладки Подсказка"""
+        from widgets.markdown_label import MarkdownLabel  #  Импорт
+
+        theme = ThemeManager.get_theme()
+        lang = self.app.current_language
+        lesson = self.lesson
+
+        hint_text = self.lesson_manager.get_lesson_hint(lesson, lang)
+        solution = self.lesson_manager.get_lesson_solution(lesson, lang)
 
         scroll = PassthroughScrollView(size_hint=(1, 1))
         content = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(10), padding=dp(10))
@@ -1183,18 +1815,55 @@ class LessonView(BoxLayout):
             scroll.bg_rect = Rectangle(pos=scroll.pos, size=scroll.size)
         scroll.bind(pos=self._update_scroll_bg, size=self._update_scroll_bg)
 
-        hint_label = Label(
-            text=hint_text if hint_text else self.app.tr.get('no_hint', 'No hint available'),
-            font_size=dp(13),
-            font_name='SourceBold',
-            color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
-            halign='left',
-            valign='top',
-            size_hint_y=None
-        )
-        hint_label.bind(width=lambda inst, val: setattr(inst, 'text_size', (val, None)))
-        hint_label.bind(texture_size=lambda inst, sz: setattr(inst, 'height', sz[1] + dp(20)))
-        content.add_widget(hint_label)
+        # Используем MarkdownLabel вместо обычного Label
+        if hint_text:
+            hint_md = MarkdownLabel(text=hint_text, font_size=dp(12))
+            hint_md._update_background()
+            content.add_widget(hint_md)
+        else:
+            no_hint = Label(
+                text=self.app.tr.get('no_hint', 'No hint available'),
+                font_size=dp(13),
+                font_name='SourceBold',
+                color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+                size_hint_y=None,
+                height=dp(30)
+            )
+            content.add_widget(no_hint)
+
+        # Разделитель
+        if hint_text and solution:
+            sep_label = Label(
+                text="_" * 80,
+                font_size=dp(8),
+                color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+                size_hint_y=None,
+                height=dp(15)
+            )
+            content.add_widget(sep_label)
+
+        # Решение (solution) — тоже через MarkdownLabel
+        if solution:
+            solution_title = Label(
+                text=self.app.tr.get('solution', 'Solution') + ":",
+                font_size=dp(18),
+                font_name='SourceBold',
+                color=(0.3, 0.7, 0.3, 1),
+                halign='left',
+                size_hint_y=None,
+                height=dp(25)
+            )
+            content.add_widget(solution_title)
+
+            if isinstance(solution, list):
+                solution_text = "\n".join([f"{i + 1}. {s}" for i, s in enumerate(solution)])
+            else:
+                solution_text = str(solution)
+
+            # Здесь тоже MarkdownLabel
+            solution_md = MarkdownLabel(text=solution_text, font_size=dp(12))
+            solution_md._update_background()
+            content.add_widget(solution_md)
 
         scroll.add_widget(content)
         self.hint_tab.add_widget(scroll)
@@ -1366,11 +2035,11 @@ class LessonView(BoxLayout):
         # Обновляем streak
         self.lesson_manager.update_streak()
 
-        # Проверяем и награждаем бейджи
+        # Проверяем и награждаем бейджи (достижения + бейдж урока из course.json)
         old_badges = set(self.lesson_manager.get_badges())
         self.lesson_manager.check_and_award_badges(lesson_id, attempts)
-        new_badges = set(self.lesson_manager.get_badges())
-        earned_badges = list(new_badges - old_badges)  # <-- ЭТА СТРОКА ОБЯЗАТЕЛЬНА!
+        self.lesson_manager.award_lesson_badge(self.lesson)
+        earned_badges = list(set(self.lesson_manager.get_badges()) - old_badges)
 
         success = self.lesson_manager.mark_lesson_completed(lesson_id, self.course_id, self.user_code)
 
@@ -1384,7 +2053,7 @@ class LessonView(BoxLayout):
             self._update_stats_display()
 
             # Показываем уведомление о новых бейджах
-            if earned_badges:  # <-- ТЕПЕРЬ earned_badges СУЩЕСТВУЕТ
+            if earned_badges:
                 self._show_badge_earned_popup(earned_badges)
 
             # Показываем сообщение о завершении урока
@@ -1396,6 +2065,109 @@ class LessonView(BoxLayout):
             self.app.show_result_popup(
                 self.app.tr.get('already_completed', 'Lesson already completed')
             )
+
+    def _show_all_badges_popup(self, instance=None):
+        """Показывает полный список бейджей пользователя."""
+        VibrationManager.vibrate(0.02)
+        theme = ThemeManager.get_theme()
+        tr = self.app.tr
+        badges = self._get_ordered_badges()
+
+        content = BoxLayout(orientation='vertical', padding=dp(15), spacing=dp(10))
+
+        count = len(badges)
+        title_text = f"< {tr.get('my_badges', 'My Badges').upper()} — {count} >"
+        title_label = Label(
+            text=title_text,
+            font_size=dp(16),
+            font_name='DejaVuSans',
+            color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1)),
+            halign='center',
+            size_hint_y=None,
+            height=dp(36),
+        )
+        title_label.bind(width=lambda inst, val: setattr(inst, 'text_size', (val, None)))
+        content.add_widget(title_label)
+
+        scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False)
+        list_layout = BoxLayout(
+            orientation='vertical',
+            size_hint_y=None,
+            spacing=dp(6),
+            padding=[dp(5), 0, dp(5), dp(5)],
+        )
+        list_layout.bind(minimum_height=list_layout.setter('height'))
+
+        for badge_id in badges:
+            symbol = self._get_badge_symbol(badge_id)
+            badge_name = self._get_badge_name(badge_id)
+            if self.lesson_manager.is_achievement_badge(badge_id):
+                badge_type = tr.get('badge_type_achievement', 'Achievement')
+            else:
+                badge_type = tr.get('badge_type_lesson', 'Lesson')
+
+            row = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(36), spacing=dp(8))
+
+            symbol_label = Label(
+                text=symbol,
+                font_size=dp(18),
+                font_name='DejaVuSans',
+                color=theme['text_color'],
+                size_hint_x=None,
+                width=dp(28),
+                halign='center',
+            )
+            name_label = Label(
+                text=badge_name,
+                font_size=dp(13),
+                font_name='DejaVuSans',
+                color=theme['text_color'],
+                halign='left',
+                size_hint_x=0.65,
+            )
+            name_label.bind(width=lambda inst, val: setattr(inst, 'text_size', (val, None)))
+
+            type_label = Label(
+                text=badge_type,
+                font_size=dp(9),
+                font_name='DejaVuSans',
+                color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+                halign='right',
+                size_hint_x=0.35,
+            )
+            type_label.bind(width=lambda inst, val: setattr(inst, 'text_size', (val, None)))
+
+            row.add_widget(symbol_label)
+            row.add_widget(name_label)
+            row.add_widget(type_label)
+            list_layout.add_widget(row)
+
+        scroll.add_widget(list_layout)
+        content.add_widget(scroll)
+
+        close_btn = Button(
+            text=tr.get('ok', 'OK'),
+            font_name='SourceBold',
+            size_hint_y=None,
+            height=dp(40),
+            background_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1)),
+            background_normal='', background_down='',
+            color=(1, 1, 1, 1),
+            font_size=dp(14),
+        )
+        popup = ThemedPopup(
+            title="",
+            title_color=theme.get('popup_title', theme['text_color']),
+            title_bg=theme.get('popup_title_bg', theme['widget_bg']),
+            popup_bg=theme.get('popup_bg', theme.get('widget_bg', (0.188, 0.204, 0.251, 1))),
+            separator_color=theme.get('popup_separator', (0.25, 0.25, 0.25, 1)),
+            content=content,
+            size_hint=(0.75, 0.6),
+            auto_dismiss=True,
+        )
+        close_btn.bind(on_release=popup.dismiss)
+        content.add_widget(close_btn)
+        popup.open()
 
     def _show_badge_earned_popup(self, earned_badges):
         """Показывает уведомление о получении новых бейджей"""
@@ -1428,19 +2200,9 @@ class LessonView(BoxLayout):
         )
         content.add_widget(sep)
 
-        # Список бейджей с увеличенным смайликом
-        badge_symbols = {
-            'first_try': '☺',
-            'week_streak': '☻',
-            'month_streak': '☯',
-            'ten_lessons': '☮',
-            'course_complete': '★',
-        }
-
         for badge_id in earned_badges:
-            badge_key = f'badge_{badge_id}'
-            badge_name = self.app.tr.get(badge_key, badge_id)
-            symbol = badge_symbols.get(badge_id, '☺')
+            badge_name = self._get_badge_name(badge_id)
+            symbol = self._get_badge_symbol(badge_id)
 
             badge_label = Label(
                 text=f"[size=70]{symbol}[/size] {badge_name}",

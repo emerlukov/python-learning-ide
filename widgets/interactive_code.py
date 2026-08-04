@@ -222,6 +222,54 @@ class InteractiveCodeWidget(BoxLayout):
     # ------------------------------------------------------------------ #
 
     def _create_line_text(self, text, theme, lh, cw):
+        comment_idx = text.find('#')
+
+        # Если есть комментарий — рисуем два Label в одном BoxLayout
+        if comment_idx != -1:
+            code_text = text[:comment_idx]
+            comment_text = text[comment_idx:]
+
+            row = BoxLayout(
+                orientation='horizontal',
+                size_hint=(None, None),
+                height=lh,
+                spacing=0,
+            )
+
+            row_w = dp(10)
+            if code_text:
+                code_w = len(code_text) * cw + dp(15)
+                code_lbl = Label(
+                    text=code_text,
+                    font_size=self.font_size,
+                    font_name='JetBrainsMono',
+                    color=theme.get('editor_text', (0.95, 0.95, 0.95, 1)),
+                    halign='left', valign='middle',
+                    size_hint=(None, None),
+                    width=code_w, height=lh,
+                    text_size=(code_w, lh),
+                )
+                row.add_widget(code_lbl)
+                row_w += code_w
+
+            comment_w = len(comment_text) * cw + dp(15)
+            comment_lbl = Label(
+                text=comment_text,
+                font_size=self.font_size,
+                font_name='JetBrainsMono',
+                color=theme.get('comment_color', (0.42, 0.55, 0.42, 1)),
+                halign='left', valign='middle',
+                size_hint=(None, None),
+                width=comment_w, height=lh,
+                text_size=(comment_w, lh),
+            )
+            row.add_widget(comment_lbl)
+            row_w += comment_w
+
+            row.width = row_w
+            return row
+
+        # --- строка без комментария (старая логика) ---
         base_w = len(text) * cw + dp(40)
         if text.startswith('#') or len(text) > 50:
             base_w = max(base_w, dp(1500))
@@ -255,21 +303,57 @@ class InteractiveCodeWidget(BoxLayout):
         row_w = 0
         for i, part in enumerate(parts):
             if part:
-                part_w = len(part) * cw + dp(15)
-                label = Label(
-                    text=part,
-                    font_size=self.font_size,
-                    font_name='JetBrainsMono',
-                    color=theme.get('editor_text', (0.95, 0.95, 0.95, 1)),
-                    halign='left',
-                    valign='middle',
-                    size_hint=(None, None),
-                    width=part_w,
-                    height=lh,
-                    text_size=(part_w, lh),
-                )
-                row.add_widget(label)
-                row_w += part_w
+                comment_idx = part.find('#')
+                if comment_idx != -1:
+                    # --- код до комментария ---
+                    code_part = part[:comment_idx]
+                    if code_part:
+                        part_w = len(code_part) * cw + dp(15)
+                        lbl = Label(
+                            text=code_part,
+                            font_size=self.font_size,
+                            font_name='JetBrainsMono',
+                            color=theme.get('editor_text', (0.95, 0.95, 0.95, 1)),
+                            halign='left', valign='middle',
+                            size_hint=(None, None),
+                            width=part_w, height=lh,
+                            text_size=(part_w, lh),
+                        )
+                        row.add_widget(lbl)
+                        row_w += part_w
+
+                    # --- сам комментарий ---
+                    comment_part = part[comment_idx:]
+                    cmt_w = len(comment_part) * cw + dp(15)
+                    cmt_lbl = Label(
+                        text=comment_part,
+                        font_size=self.font_size,
+                        font_name='JetBrainsMono',
+                        color=theme.get('comment_color', (0.42, 0.55, 0.42, 1)),
+                        halign='left', valign='middle',
+                        size_hint=(None, None),
+                        width=cmt_w, height=lh,
+                        text_size=(cmt_w, lh),
+                    )
+                    row.add_widget(cmt_lbl)
+                    row_w += cmt_w
+                else:
+                    # --- обычная часть без комментария ---
+                    part_w = len(part) * cw + dp(15)
+                    label = Label(
+                        text=part,
+                        font_size=self.font_size,
+                        font_name='JetBrainsMono',
+                        color=theme.get('editor_text', (0.95, 0.95, 0.95, 1)),
+                        halign='left',
+                        valign='middle',
+                        size_hint=(None, None),
+                        width=part_w,
+                        height=lh,
+                        text_size=(part_w, lh),
+                    )
+                    row.add_widget(label)
+                    row_w += part_w
 
             if i < len(parts) - 1:
                 field = self._make_field(theme, lh, v_pad, row)
@@ -295,7 +379,9 @@ class InteractiveCodeWidget(BoxLayout):
             cursor_color=theme.get('input_cursor', (1, 1, 1, 1)),
             background_normal='',
             background_active='',
-            keyboard_suggestions=False,
+            keyboard_suggestions=True,
+            input_type='text',
+            keyboard_mode='auto'
         )
 
         field._parent_row = parent_row
@@ -407,7 +493,11 @@ class InteractiveCodeWidget(BoxLayout):
                         child.foreground_color = theme.get('lesson_input_text', (0.95, 0.95, 0.95, 1))
                         child.cursor_color = theme.get('input_cursor', (1, 1, 1, 1))
                     elif isinstance(child, Label):
-                        child.color = theme.get('editor_text', (0.95, 0.95, 0.95, 1))
+                        # Комментарии начинаются с '#'
+                        if child.text.startswith('#'):
+                            child.color = theme.get('comment_color', (0.42, 0.55, 0.42, 1))
+                        else:
+                            child.color = theme.get('editor_text', (0.95, 0.95, 0.95, 1))
 
         for field in self.input_fields:
             field.background_color = theme.get('lesson_input_bg', (0.25, 0.30, 0.40, 1))

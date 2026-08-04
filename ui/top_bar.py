@@ -57,11 +57,25 @@ class TopBarBuilder:
 
         self.top_bar.bind(pos=self._update_bg, size=self._update_bg)
 
+        # ========== КНОПКА ИИ-ТЬЮТОРА ==========
+        from kivy.uix.button import Button
+        self.ai_tutor_btn = Button(
+            text='Ai◆',
+            font_name='DejaVuSans',
+            size_hint_x=0.08,
+            background_color=theme.get('menu_btn_bg', theme['widget_bg']),
+            background_normal='', background_down='',
+            color=theme.get('menu_btn_text', theme['text_color']),
+            font_size=menu_font,
+            bold=True
+        )
+        self.ai_tutor_btn.bind(on_release=self._on_ai_tutor_click)
+
         # ========== КНОПКА / СПИННЕР "ПРИМЕРЫ" ==========
         self.examples_spinner = ThemedSpinner(
             text=self.app.tr.get('examples', 'Examples'),
             values=self.app._get_example_titles(),
-            size_hint_x=0.4,
+            size_hint_x=0.35,  # Уменьшаем чтобы освободить место для ИИ-тьютора
             background_color=theme['spinner_bg'],
             background_normal='', background_down='',
             color=theme['spinner_text'],
@@ -78,7 +92,7 @@ class TopBarBuilder:
         self.course_btn = Button(
             text=self.app.tr.get('course', 'Py'),
             font_name='SourceBold',
-            size_hint_x=0.10,
+            size_hint_x=0.08,  # Уменьшаем
             background_color=theme.get('menu_btn_bg', theme['widget_bg']),
             background_normal='', background_down='',
             color=theme.get('menu_btn_text', theme['text_color']),
@@ -90,7 +104,7 @@ class TopBarBuilder:
 
         # ========== КНОПКА МЕНЮ (☰) ==========
         self.menu_button = Button(
-            text='☰', font_name='DejaVuSans', size_hint_x=0.10,
+            text='☰', font_name='DejaVuSans', size_hint_x=0.08,  # Уменьшаем
             background_color=theme.get('menu_btn_bg', theme['widget_bg']),
             background_normal='', background_down='',
             color=theme.get('menu_btn_text', theme['text_color']),
@@ -99,6 +113,7 @@ class TopBarBuilder:
         self.menu_button.bind(on_release=self.app.show_context_menu)
 
         # Добавляем виджеты в панель
+        self.top_bar.add_widget(self.ai_tutor_btn)
         self.top_bar.add_widget(self.examples_spinner)
         self.top_bar.add_widget(self.course_btn)
         self.top_bar.add_widget(self.menu_button)
@@ -107,6 +122,7 @@ class TopBarBuilder:
         self.app.spinner = self.examples_spinner
         self.app.course_btn = self.course_btn  # ← НОВАЯ ССЫЛКА
         self.app.menu_button = self.menu_button
+        self.app.ai_tutor_btn = self.ai_tutor_btn  # ← НОВАЯ ССЫЛКА
 
         return self.top_bar
 
@@ -121,6 +137,12 @@ class TopBarBuilder:
             course_menu.pos_hint = {'center_x': 0.5, 'center_y': 0.5}
             app.root_layout.add_widget(course_menu)
 
+    def _on_ai_tutor_click(self, instance):
+        """Открывает ИИ-тьютор"""
+        app = App.get_running_app()
+        if app and hasattr(app, 'open_ai_tutor'):
+            app.open_ai_tutor()
+
     def update_theme(self, theme):
         """Обновляет тему панели"""
         if not self.top_bar:
@@ -131,6 +153,11 @@ class TopBarBuilder:
         with self.top_bar.canvas.before:
             Color(*theme.get('top_bar_bg', theme['widget_bg']))
             self.top_bar_bg_rect = Rectangle(pos=self.top_bar.pos, size=self.top_bar.size)
+
+        # Обновляем кнопку ИИ-тьютора
+        if hasattr(self, 'ai_tutor_btn') and self.ai_tutor_btn:
+            self.ai_tutor_btn.background_color = theme.get('menu_btn_bg', theme['widget_bg'])
+            self.ai_tutor_btn.color = theme.get('menu_btn_text', theme['text_color'])
 
         # Обновляем спиннер примеров
         if self.examples_spinner:

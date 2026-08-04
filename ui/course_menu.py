@@ -35,6 +35,7 @@ class CourseMenu(BoxLayout):
         self.padding = dp(10)
         self.spacing = dp(10)
         self.current_course_id = None
+        self.current_module_id = None
         self.showing_lessons = False
 
         theme = ThemeManager.get_theme()
@@ -161,7 +162,10 @@ class CourseMenu(BoxLayout):
 
         self.back_btn.opacity = 0
         self.back_btn.disabled = True
-        self.title_label.text = self.app.tr.get('courses', 'Courses')
+        
+        # Используем заголовок из metadata если есть
+        metadata_title = self.lesson_manager.get_metadata_title(self.app.current_language)
+        self.title_label.text = metadata_title if metadata_title else self.app.tr.get('courses', 'Courses')
 
         # Общий прогресс по всем курсам
         total_completed = self.lesson_manager.get_completed_count()
@@ -169,9 +173,44 @@ class CourseMenu(BoxLayout):
         percentage = (total_completed / total_lessons * 100) if total_lessons > 0 else 0
         self.progress_label.text = f"{self.app.tr.get('progress', 'Progress')}: {total_completed}/{total_lessons} ({percentage:.0f}%)"
         self.progress_bar.value = percentage
-        self.xp_label.text = f"XP: {self.lesson_manager.get_total_xp()}"
+        
+        # Используем total_xp из metadata если есть
+        metadata_total_xp = self.lesson_manager.get_metadata_total_xp()
+        current_xp = self.lesson_manager.get_total_xp()
+        if metadata_total_xp > 0:
+            self.xp_label.text = f"XP: {current_xp}/{metadata_total_xp}"
+        else:
+            self.xp_label.text = f"XP: {current_xp}"
 
         self.items_container.clear_widgets()
+        
+        theme = ThemeManager.get_theme()
+        lang = self.app.current_language
+        
+        # Добавляем описание курса из metadata если есть
+        metadata_description = self.lesson_manager.get_metadata_description(lang)
+        if metadata_description:
+            desc_label = Label(
+                text=metadata_description,
+                font_size=dp(12),
+                color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+                halign='left',
+                size_hint_y=None,
+                height=dp(40)
+            )
+            desc_label.bind(width=lambda inst, val: setattr(inst, 'text_size', (val, None)))
+            self.items_container.add_widget(desc_label)
+            
+            desc_sep = Label(
+                text="_" * 80,
+                font_size=dp(8),
+                font_name='SourceBold',
+                color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+                size_hint_y=None,
+                height=dp(15)
+            )
+            self.items_container.add_widget(desc_sep)
+            
         courses = self.lesson_manager.get_courses()
 
         if not courses:
@@ -415,33 +454,63 @@ class CourseMenu(BoxLayout):
 
         self._update_continue_button()
 
+    def _get_continue_course_context(self):
+        """Возвращает (course_id, completed, total) для кнопки Начать/Продолжить."""
+        lm = self.lesson_manager
+
+        if self.current_course_id:
+            course_id = self.current_course_id
+        else:
+            last_id = lm._progress.get('last_course_id')
+            if last_id and lm.get_total_lessons(last_id) > 0:
+                course_id = last_id
+            else:
+                course_id = None
+                for course in lm.get_courses():
+                    cid = course.get('id')
+                    if lm.get_total_lessons(cid) > 0:
+                        course_id = cid
+                        break
+
+        if not course_id:
+            return None, 0, 0
+
+        return (
+            course_id,
+            lm.get_completed_count(course_id),
+            lm.get_total_lessons(course_id),
+        )
+
+    def _apply_continue_button_state(self, completed: int, total: int):
+        """Устанавливает текст и состояние кнопки по прогрессу курса."""
+        tr = self.app.tr
+        theme = ThemeManager.get_theme()
+
+        if completed == 0:
+            self.start_continue_btn.text = tr.get('start_course', 'Start')
+            self.start_continue_btn.background_color = theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1))
+            self.start_continue_btn.disabled = False
+        elif completed < total:
+            self.start_continue_btn.text = tr.get('continue_course', 'Continue')
+            self.start_continue_btn.background_color = theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1))
+            self.start_continue_btn.disabled = False
+        else:
+            self.start_continue_btn.text = "✓ " + tr.get('course_completed', 'Completed')
+            self.start_continue_btn.background_color = theme.get('stats_text', (0.6, 0.63, 0.65, 1))
+            self.start_continue_btn.disabled = True
+
     def _update_continue_button(self):
         """Обновляет текст и состояние кнопки продолжения"""
         tr = self.app.tr
         theme = ThemeManager.get_theme()
 
-        if self.showing_lessons and self.current_course_id:
-            completed = self.lesson_manager.get_completed_count(self.current_course_id)
-            total = self.lesson_manager.get_total_lessons(self.current_course_id)
+        course_id, completed, total = self._get_continue_course_context()
 
-            if completed == 0:
-                self.start_continue_btn.text = tr.get('start_course', 'Start Course')
-                self.start_continue_btn.background_color = theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1))
-                self.start_continue_btn.disabled = False
-            elif completed < total:
-                self.start_continue_btn.text = tr.get('continue_course', 'Continue Learning')
-                self.start_continue_btn.background_color = theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1))
-                self.start_continue_btn.disabled = False
-            else:
-                self.start_continue_btn.text = "✓ " + tr.get('course_completed', 'Completed')
-                self.start_continue_btn.background_color = theme.get('stats_text', (0.6, 0.63, 0.65, 1))
-                self.start_continue_btn.disabled = True
-        else:
-            has_available = False
-            for course in self.lesson_manager.get_courses():
-                if self.lesson_manager.get_total_lessons(course.get('id')) > 0:
-                    has_available = True
-                    break
+        if total == 0:
+            has_available = any(
+                self.lesson_manager.get_total_lessons(c.get('id')) > 0
+                for c in self.lesson_manager.get_courses()
+            )
             if has_available:
                 self.start_continue_btn.text = tr.get('start_course', 'Start')
                 self.start_continue_btn.background_color = theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1))
@@ -450,12 +519,285 @@ class CourseMenu(BoxLayout):
                 self.start_continue_btn.text = tr.get('no_courses', 'No courses')
                 self.start_continue_btn.background_color = theme.get('stats_text', (0.6, 0.63, 0.65, 1))
                 self.start_continue_btn.disabled = True
+            return
+
+        self._apply_continue_button_state(completed, total)
+
+    def _on_module_click(self, instance):
+        """Обработка клика по модулю - показывает уроки модуля"""
+        VibrationManager.vibrate(0.02)
+        module_lessons = instance.module_lessons
+        course_id = instance.course_id
+        module_id = instance.module_id
+        if module_lessons:
+            # Показываем уроки из модуля (фильтруем уроки курса)
+            self._show_module_lessons(course_id, module_id, module_lessons)
+
+    def _show_module_lessons(self, course_id: int, module_id: int, lesson_ids):
+        """Показывает уроки, относящиеся к модулю"""
+        self.showing_lessons = True
+        self.current_course_id = course_id
+        self.current_module_id = module_id
+
+        theme = ThemeManager.get_theme()
+        tr = self.app.tr
+        lang = self.app.current_language
+
+        self.back_btn.opacity = 1
+        self.back_btn.disabled = False
+        
+        # Получаем название модуля для заголовка
+        modules = self.lesson_manager.get_metadata_modules()
+        module_title = ""
+        for module in modules:
+            if module.get('id') == module_id:
+                module_title = module.get(f'title_{lang}', module.get('title_ru', ''))
+                break
+        
+        self.title_label.text = module_title if module_title else tr.get('modules', 'Modules')
+
+        self.items_container.clear_widgets()
+
+        # Получаем все уроки курса и фильтруем по ID модуля
+        course = self.lesson_manager.get_course(course_id)
+        if not course:
+            self._show_courses()
+            return
+
+        all_lessons = course.get('lessons', [])
+        module_lessons = [l for l in all_lessons if l.get('id') in lesson_ids]
+
+        if not module_lessons:
+            empty_label = Label(
+                text=tr.get('no_lessons', 'No lessons in this module'),
+                font_size=dp(13),
+                color=theme['text_color'],
+                size_hint_y=None,
+                height=dp(50)
+            )
+            self.items_container.add_widget(empty_label)
+            self._update_continue_button()
+            return
+
+        for lesson in module_lessons:
+            lesson_id = lesson.get('id')
+            title = self.lesson_manager.get_lesson_title(lesson, lang)
+            status = self.lesson_manager.get_lesson_status(lesson_id, 1)
+            xp = lesson.get('xp', 10)
+
+            lesson_row = ClickableRow(
+                orientation='horizontal',
+                size_hint_y=None,
+                height=dp(50),
+                spacing=dp(10),
+                padding=[dp(10), dp(5), dp(10), dp(5)]
+            )
+            lesson_row.lesson_id = lesson_id
+            lesson_row.lesson_status = status
+            lesson_row.lesson = lesson
+            lesson_row.course_id = 1
+            lesson_row.bind(on_release=self._on_lesson_click)
+
+            with lesson_row.canvas.before:
+                Color(*theme.get('widget_bg', (0.141, 0.145, 0.149, 1)))
+                RoundedRectangle(pos=lesson_row.pos, size=lesson_row.size, radius=[dp(8)])
+            lesson_row.bind(pos=self._update_row_bg, size=self._update_row_bg)
+
+            if status == 'completed':
+                status_text = "✓"
+                status_color = (0.3, 0.7, 0.3, 1)
+            elif status == 'current':
+                status_text = "▶"
+                status_color = (0.596, 0.486, 1.0, 1)
+            else:
+                status_text = "🔒"
+                status_color = (0.5, 0.5, 0.5, 1)
+
+            status_label = Label(
+                text=status_text,
+                font_size=dp(16),
+                font_name='SourceBold',
+                color=status_color,
+                size_hint_x=None,
+                width=dp(35),
+                halign='center'
+            )
+            lesson_row.add_widget(status_label)
+
+            title_label = Label(
+                text=title,
+                font_size=dp(13),
+                color=theme['text_color'],
+                halign='left',
+                size_hint_x=1
+            )
+            title_label.bind(width=lambda inst, val: setattr(inst, 'text_size', (val, None)))
+            lesson_row.add_widget(title_label)
+
+            xp_label = Label(
+                text=f"{xp} XP",
+                font_size=dp(10),
+                color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+                size_hint_x=None,
+                width=dp(50),
+                halign='right'
+            )
+            lesson_row.add_widget(xp_label)
+
+            if status != 'locked':
+                study_btn = Button(
+                    text=tr.get('study', 'Study'),
+                    font_name='SourceBold',
+                    font_size=dp(11),
+                    size_hint_x=None,
+                    width=dp(60),
+                    background_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1)),
+                    background_normal='', background_down='',
+                    color=(1, 1, 1, 1)
+                )
+                study_btn.lesson_id = lesson_id
+                study_btn.course_id = 1
+                study_btn.bind(on_release=self._open_lesson)
+                lesson_row.add_widget(study_btn)
+
+            self.items_container.add_widget(lesson_row)
+
+        self._update_continue_button()
 
     def _on_course_click(self, instance):
         VibrationManager.vibrate(0.02)
         course_id = instance.course_id
-        if self.lesson_manager.get_total_lessons(course_id) > 0:
+        self._show_course_modules(course_id)
+
+    def _show_course_modules(self, course_id: int):
+        """Показывает модули выбранного курса"""
+        self.showing_lessons = False
+        self.current_course_id = course_id
+        self.current_module_id = None
+
+        course = self.lesson_manager.get_course(course_id)
+        if not course:
+            self._show_courses()
+            return
+
+        theme = ThemeManager.get_theme()
+        tr = self.app.tr
+        lang = self.app.current_language
+        course_title = self.lesson_manager.get_course_title(course, lang)
+
+        self.back_btn.opacity = 1
+        self.back_btn.disabled = False
+        self.title_label.text = course_title
+
+        progress = self.lesson_manager.get_course_progress(course_id)
+        self.progress_label.text = f"{tr.get('progress', 'Progress')}: {progress['completed']}/{progress['total']} ({progress['percentage']:.0f}%)"
+        self.progress_bar.value = progress['percentage']
+        self.xp_label.text = f"XP: {self.lesson_manager.get_total_xp()}"
+
+        self.items_container.clear_widgets()
+
+        # ✅ ИСПРАВЛЕНО: модули из КУРСА, а не из metadata
+        modules = course.get('modules', [])
+
+        if not modules:
+            # Если модулей нет, показываем уроки напрямую
             self._show_lessons(course_id)
+            return
+
+        for module in modules:
+            module_id = module.get('id')
+            module_title = module.get(f'title_{lang}', module.get('title_ru', ''))
+            module_lessons = module.get('lessons', [])
+
+            # Считаем прогресс по модулю
+            module_completed = 0
+            for lesson_id in module_lessons:
+                if self.lesson_manager.is_lesson_completed(lesson_id, course_id):
+                    module_completed += 1
+
+            # Диапазон уроков (например, 1-8)
+            lesson_range = ""
+            if module_lessons:
+                min_lesson = min(module_lessons)
+                max_lesson = max(module_lessons)
+                lesson_range = f"{min_lesson}-{max_lesson}"
+
+            module_row = ClickableRow(
+                orientation='horizontal',
+                size_hint_y=None,
+                height=dp(45),
+                spacing=dp(10),
+                padding=[dp(15), dp(5), dp(10), dp(5)]
+            )
+            module_row.module_id = module_id
+            module_row.module_lessons = module_lessons
+            module_row.course_id = course_id
+            module_row.bind(on_release=self._on_module_click)
+
+            with module_row.canvas.before:
+                Color(*theme.get('widget_bg', (0.141, 0.145, 0.149, 1)))
+                RoundedRectangle(pos=module_row.pos, size=module_row.size, radius=[dp(6)])
+            module_row.bind(pos=self._update_row_bg, size=self._update_row_bg)
+
+            # Иконка модуля
+            module_icon = MDIcon(
+                icon='folder-outline',
+                font_size=dp(18),
+                theme_text_color="Custom",
+                text_color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+                size_hint_x=None,
+                width=dp(35)
+            )
+            module_row.add_widget(module_icon)
+
+            # Информация о модуле
+            module_info = BoxLayout(orientation='vertical', size_hint_x=1, spacing=dp(2))
+
+            module_title_label = Label(
+                text=module_title,
+                font_size=dp(12),
+                color=theme['text_color'],
+                halign='left',
+                size_hint_y=None,
+                height=dp(20)
+            )
+            module_title_label.bind(width=lambda inst, val: setattr(inst, 'text_size', (val, None)))
+            module_info.add_widget(module_title_label)
+
+            # Диапазон уроков (например, 1-8)
+            lessons_label = Label(
+                text=lesson_range if lesson_range else "",
+                font_size=dp(9),
+                color=theme.get('stats_text', (0.6, 0.63, 0.65, 1)),
+                halign='left',
+                size_hint_y=None,
+                height=dp(16)
+            )
+            module_info.add_widget(lessons_label)
+            module_row.add_widget(module_info)
+
+            # Статус модуля (выполнено/всего)
+            if module_completed == len(module_lessons) and len(module_lessons) > 0:
+                module_status = "✓"
+                module_status_color = (0.3, 0.7, 0.3, 1)
+            else:
+                module_status = f"{module_completed}/{len(module_lessons)}"
+                module_status_color = theme.get('stats_text', (0.6, 0.63, 0.65, 1))
+
+            module_status_label = Label(
+                text=module_status,
+                font_size=dp(11),
+                font_name='SourceBold',
+                color=module_status_color,
+                size_hint_x=None,
+                width=dp(40),
+                halign='center'
+            )
+            module_row.add_widget(module_status_label)
+
+            self.items_container.add_widget(module_row)
+
+        self._update_continue_button()
 
     def _on_lesson_click(self, instance):
         VibrationManager.vibrate(0.02)
@@ -490,37 +832,40 @@ class CourseMenu(BoxLayout):
 
     def _go_back(self, instance):
         VibrationManager.vibrate(0.02)
-        self._show_courses()
+        if self.showing_lessons and self.current_module_id is not None:
+            # Возвращаемся к модулям курса
+            self._show_course_modules(self.current_course_id)
+        elif not self.showing_lessons and self.current_course_id is not None:
+            # Возвращаемся к списку курсов
+            self._show_courses()
+        else:
+            # Уже на уровне курсов
+            self._show_courses()
 
     def _on_continue(self, instance):
         VibrationManager.vibrate(0.02)
 
-        if self.showing_lessons and self.current_course_id:
-            completed = self.lesson_manager.get_completed_count(self.current_course_id)
-            total = self.lesson_manager.get_total_lessons(self.current_course_id)
+        course_id, completed, total = self._get_continue_course_context()
 
-            if completed == 0:
-                first_lesson = self.lesson_manager.get_lesson_by_order(self.current_course_id, 1)
-                if first_lesson:
-                    self._open_lesson_by_id(first_lesson.get('id'), self.current_course_id)
-            elif completed < total:
-                next_lesson = self.lesson_manager.get_next_lesson(self.current_course_id)
-                if next_lesson:
-                    self._open_lesson_by_id(next_lesson.get('id'), self.current_course_id)
-        else:
-            for course in self.lesson_manager.get_courses():
-                completed = self.lesson_manager.get_completed_count(course.get('id'))
-                total = self.lesson_manager.get_total_lessons(course.get('id'))
-                if completed < total and total > 0:
-                    self._show_lessons(course.get('id'))
-                    first_lesson = self.lesson_manager.get_lesson_by_order(course.get('id'), 1)
-                    if first_lesson:
-                        self._open_lesson_by_id(first_lesson.get('id'), course.get('id'))
-                    return
+        if total == 0:
+            self.app.show_result_popup(
+                self.app.tr.get('no_courses', 'No courses available')
+            )
+            return
 
+        if completed >= total:
             self.app.show_result_popup(
                 self.app.tr.get('all_courses_completed_msg', 'All courses completed!')
             )
+            return
+
+        if completed == 0:
+            lesson = self.lesson_manager.get_lesson_by_order(course_id, 1)
+        else:
+            lesson = self.lesson_manager.get_next_lesson(course_id)
+
+        if lesson:
+            self._open_lesson_by_id(lesson.get('id'), course_id)
 
     def _open_lesson_by_id(self, lesson_id, course_id):
         lesson = self.lesson_manager.get_lesson(lesson_id, course_id)

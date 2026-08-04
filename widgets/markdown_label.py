@@ -11,9 +11,19 @@ from kivy.graphics import Color, Rectangle
 from kivy.core.window import Window
 from kivy.clock import Clock
 from kivy.core.text import Label as CoreLabel
+from kivy.core.text.markup import MarkupLabel as KivyMarkupLabel
+from kivy.core.clipboard import Clipboard
 import re
 
 from ide_core.themes import ThemeManager
+
+try:
+    from pygments import highlight
+    from pygments.lexers import PythonLexer, get_lexer_by_name, guess_lexer
+    from pygments.formatters import Terminal256Formatter
+    PYGMENTS_AVAILABLE = True
+except ImportError:
+    PYGMENTS_AVAILABLE = False
 
 
 def _force_defocus(widget):
@@ -315,8 +325,17 @@ class MarkdownLabel(BoxLayout):
         line_height = dp(18)
         code_height = int(max(dp(40) + lines_count * line_height, dp(80)))
 
+        # Создаем контейнер для кода и кнопки копирования
+        code_container = BoxLayout(
+            orientation="horizontal",
+            size_hint_y=None,
+            height=code_height,
+            spacing=dp(8)
+        )
+
         code_scroll = CodeScrollView(
-            size_hint=(1, None),
+            size_hint_x=1,
+            size_hint_y=None,
             height=code_height,
             do_scroll_x=True,
             do_scroll_y=False,
@@ -356,7 +375,29 @@ class MarkdownLabel(BoxLayout):
         )
 
         code_scroll.add_widget(code_input)
-        self.add_widget(code_scroll)
+        code_container.add_widget(code_scroll)
+
+        # Кнопка копирования для кодового блока
+        from kivymd.uix.button import MDIconButton
+        copy_btn = MDIconButton(
+            icon="content-copy",
+            size_hint_x=None,
+            width=dp(10),
+            height=dp(10),
+            icon_size=dp(10),  # Размер иконки внутри кнопки
+            theme_text_color="Custom",
+            text_color=theme.get('text_color', (0.95, 0.95, 0.95, 1)),
+            md_bg_color=theme.get('widget_bg', (0.3, 0.3, 0.3, 1))
+        )
+
+        # Функция копирования только кода из этого блока
+        def copy_code(instance):
+            Clipboard.copy(code)
+
+        copy_btn.bind(on_release=copy_code)
+        code_container.add_widget(copy_btn)
+
+        self.add_widget(code_container)
         self._add_spacer(dp(6))
 
         def _update_code_width(instance, value):

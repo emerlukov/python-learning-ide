@@ -1115,6 +1115,7 @@ class SettingsMenu:
             ('tune', 'editor_settings', lambda: self._open_editor_submenu(parent_button)),
             ('vibrate', 'vibration_settings', lambda: self._open_vibration_submenu(parent_button)),
             ('school', 'learning_settings', lambda: self._open_learning_submenu(parent_button)),  # Новый пункт
+            ('robot', 'ai_settings', lambda: self._open_ai_settings_submenu(parent_button)),  # AI Settings
         ]
 
         for icon_name, item_key, handler in menu_items:
@@ -1159,6 +1160,16 @@ class SettingsMenu:
             self._learning_menu = LearningMenu(self.app)
 
         self._learning_menu.show(parent_button)
+
+    def _open_ai_settings_submenu(self, parent_button):
+        """Открывает настройки ИИ"""
+        # Вибрация при открытии подменю
+        if hasattr(self.app, 'vibrate_short'):
+            self.app.vibrate_short()
+
+        # Открываем диалог настроек ИИ
+        if hasattr(self.app, 'open_ai_settings_dialog'):
+            self.app.open_ai_settings_dialog()
 
     def _open_vibration_submenu(self, parent_button):
         # Вибрация при открытии подменю

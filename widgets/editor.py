@@ -902,7 +902,10 @@ class LineNumberTextInput(BoxLayout):
                     background_active='',
                     use_bubble=False,
                     use_handles=True,
-                    write_tab=False
+                    write_tab=False,
+                    keyboard_suggestions=True,
+                    input_type='text',
+                    keyboard_mode='auto'
                 )
             else:
                 self.text_input = CodeInput(
@@ -921,7 +924,10 @@ class LineNumberTextInput(BoxLayout):
                     background_active='',
                     use_bubble=False,
                     use_handles=True,
-                    write_tab=False
+                    write_tab=False,
+                    keyboard_suggestions=True,
+                    input_type='text',
+                    keyboard_mode='auto'
                 )
         else:
             # Без подсветки - используем TextInput с ручками
@@ -939,7 +945,10 @@ class LineNumberTextInput(BoxLayout):
                 background_active='',
                 use_bubble=False,
                 use_handles=True,
-                write_tab=False
+                write_tab=False,
+                keyboard_suggestions=True,
+                input_type='text',
+                keyboard_mode='auto'
             )
 
         self._font_size = font_size
@@ -949,6 +958,16 @@ class LineNumberTextInput(BoxLayout):
         if hasattr(self.text_input, 'minimum_width'):
             self.text_input.bind(minimum_width=self.text_input.setter('width'))
         self.text_input.width = dp(400)
+        
+        # Включаем системные подсказки клавиатуры через Android API
+        if platform == 'android':
+            try:
+                from managers.ime_support import KeyboardSupport
+                keyboard_support = KeyboardSupport()
+                Clock.schedule_once(lambda dt: keyboard_support.enable_suggestions_for_textinput(self.text_input), 0.1)
+            except Exception as e:
+                log_error(f"Failed to enable keyboard suggestions: {e}")
+        
         scroll_bar_color = theme.get('scroll_bar_color', (0.4, 0.4, 0.4, 0.9))
         scroll_bar_inactive = theme.get('scroll_bar_inactive', (0.25, 0.25, 0.25, 0.6))
         self.editor_scroll = ScrollView(size_hint=(1, 1), do_scroll_x=True, do_scroll_y=True,
