@@ -431,6 +431,13 @@ class FileBrowserPopup:
             self.filename_input.line_color_normal = PURPLE
             self.filename_input.text_color = PURPLE
             self.filename_input.hint_text_color = (0.6, 0.6, 0.6, 1)
+            # Включаем системные подсказки клавиатуры
+            if platform == 'android':
+                try:
+                    self.filename_input.helper_text_mode = "on_focus"
+                    self.filename_input.input_type = "text"
+                except:
+                    pass
             content.add_widget(self.filename_input)
 
         # Панель сортировки
