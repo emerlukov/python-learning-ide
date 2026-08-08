@@ -172,7 +172,9 @@ def open_ai_settings(agent, locale="ru", on_save=None):
         height=dp(25),
     ))
 
-    provider = agent.preferred
+    # ИСПРАВЛЕНИЕ: Используем список вместо nonlocal
+    provider_state = [agent.preferred]  # Используем список для изменяемого состояния
+    
     btn_box = MDBoxLayout(size_hint_y=None, height=dp(40), spacing=dp(5))
     btn_groq = MDRaisedButton(text="Groq", on_release=lambda x: _set_provider("groq"))
     btn_gemini = MDRaisedButton(text="Gemini", on_release=lambda x: _set_provider("gemini"))
@@ -190,11 +192,11 @@ def open_ai_settings(agent, locale="ru", on_save=None):
     btn_gemini.md_bg_color = normal_color
     btn_auto.md_bg_color = normal_color
 
-    if provider == "groq":
+    if provider_state[0] == "groq":
         btn_groq.md_bg_color = selected_color
-    elif provider == "gemini":
+    elif provider_state[0] == "gemini":
         btn_gemini.md_bg_color = selected_color
-    elif provider == "auto":
+    elif provider_state[0] == "auto":
         btn_auto.md_bg_color = selected_color
 
     # Информация о ключах
@@ -229,20 +231,19 @@ def open_ai_settings(agent, locale="ru", on_save=None):
     main_box.add_widget(button_box)
 
     def _set_provider(name):
-        nonlocal provider
-        provider = name
+        provider_state[0] = name  # Обновляем значение в списке
         btn_groq.md_bg_color = normal_color
         btn_gemini.md_bg_color = normal_color
         btn_auto.md_bg_color = normal_color
-        if provider == "groq":
+        if provider_state[0] == "groq":
             btn_groq.md_bg_color = selected_color
-        elif provider == "gemini":
+        elif provider_state[0] == "gemini":
             btn_gemini.md_bg_color = selected_color
-        elif provider == "auto":
+        elif provider_state[0] == "auto":
             btn_auto.md_bg_color = selected_color
 
     def _save():
-        agent.set_keys(groq_field.text.strip(), gemini_field.text.strip(), provider)
+        agent.set_keys(groq_field.text.strip(), gemini_field.text.strip(), provider_state[0])
         if on_save:
             on_save()
         modal.dismiss()
