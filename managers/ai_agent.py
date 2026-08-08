@@ -48,7 +48,7 @@ Rules:
 
         self.groq_key = self._get("ai_groq_key", "")
         self.gemini_key = self._get("ai_gemini_key", "")
-        self.preferred = self._get("ai_provider", "auto")  # По умолчанию auto
+        self.preferred = self._get("ai_provider", "groq")  # groq | gemini | auto
 
         self.groq_model = "llama-3.3-70b-versatile"
         self.gemini_model = "gemini-2.5-flash"
@@ -300,22 +300,8 @@ Rules:
                 answer = None
                 last_error = None
 
-                # Умный выбор провайдера
+                order = ["groq", "gemini"] if self.preferred != "gemini" else ["gemini", "groq"]
                 if self.preferred == "auto":
-                    # Автоматический выбор по наличию ключей
-                    if self.groq_key and self.gemini_key:
-                        order = ["groq", "gemini"]  # Groq предпочтительнее (быстрее)
-                    elif self.groq_key:
-                        order = ["groq"]
-                    elif self.gemini_key:
-                        order = ["gemini"]
-                    else:
-                        order = []
-                elif self.preferred == "groq":
-                    order = ["groq", "gemini"] if self.gemini_key else ["groq"]
-                elif self.preferred == "gemini":
-                    order = ["gemini", "groq"] if self.groq_key else ["gemini"]
-                else:
                     order = ["groq", "gemini"]
 
                 print(f"[AI Agent] Using provider order: {order}")
