@@ -127,92 +127,53 @@ class AISettingsContent(MDBoxLayout):
 
 def open_ai_settings(agent, locale="ru", on_save=None):
     from ide_core.themes import ThemeManager
+    from kivy.utils import platform
+
     theme = ThemeManager.get_theme()
 
-    # Основной контейнер
+    # Упрощенный контейнер для Android
     main_box = MDBoxLayout(
         orientation="vertical",
-        spacing=dp(10),
-        padding=dp(12),
+        spacing=dp(8),
+        padding=dp(10),
         md_bg_color=theme.get('popup_bg', (0.1, 0.1, 0.1, 1))
     )
 
     # Заголовок
     main_box.add_widget(MDLabel(
-        text="API-ключи ИИ-тьютора" if locale == "ru" else "AI Tutor API Keys",
+        text="API Keys" if locale == "en" else "API-ключи",
         font_style="H6",
         size_hint_y=None,
-        height=dp(30),
+        height=dp(25),
     ))
 
     # Поле Groq
     groq_field = MDTextField(
-        hint_text="Groq API Key" if locale == "en" else "Groq API Key (рекомендуется)",
+        hint_text="Groq API Key",
         text=agent.groq_key,
         password=True,
         size_hint_y=None,
-        height=dp(45),
+        height=dp(40),
     )
     main_box.add_widget(groq_field)
 
     # Поле Gemini
     gemini_field = MDTextField(
-        hint_text="Gemini API Key" if locale == "en" else "Gemini API Key (запасной)",
+        hint_text="Gemini API Key",
         text=agent.gemini_key,
         password=True,
         size_hint_y=None,
-        height=dp(45),
+        height=dp(40),
     )
     main_box.add_widget(gemini_field)
-
-    # Выбор провайдера
-    main_box.add_widget(MDLabel(
-        text="Provider:" if locale == "en" else "Провайдер:",
-        size_hint_y=None,
-        height=dp(25),
-    ))
-
-    provider = agent.preferred
-    btn_box = MDBoxLayout(size_hint_y=None, height=dp(40), spacing=dp(5))
-    btn_groq = MDRaisedButton(text="Groq", on_release=lambda x: _set_provider("groq"))
-    btn_gemini = MDRaisedButton(text="Gemini", on_release=lambda x: _set_provider("gemini"))
-    btn_auto = MDRaisedButton(text="Auto", on_release=lambda x: _set_provider("auto"))
-    btn_box.add_widget(btn_groq)
-    btn_box.add_widget(btn_gemini)
-    btn_box.add_widget(btn_auto)
-    main_box.add_widget(btn_box)
-
-    # Применяем цвета
-    selected_color = theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1))
-    normal_color = theme.get('widget_bg', (0.3, 0.3, 0.3, 1))
-
-    btn_groq.md_bg_color = normal_color
-    btn_gemini.md_bg_color = normal_color
-    btn_auto.md_bg_color = normal_color
-
-    if provider == "groq":
-        btn_groq.md_bg_color = selected_color
-    elif provider == "gemini":
-        btn_gemini.md_bg_color = selected_color
-    elif provider == "auto":
-        btn_auto.md_bg_color = selected_color
-
-    # Информация о ключах
-    main_box.add_widget(MDLabel(
-        text="Get keys:\n• Groq > console.groq.com/keys\n• Gemini > aistudio.google.com/apikey" if locale == "en" else "Получить ключи:\n• Groq > console.groq.com/keys\n• Gemini > aistudio.google.com/apikey",
-        size_hint_y=None,
-        height=dp(70),
-        theme_text_color="Secondary",
-        font_name="DejaVuSans",
-    ))
 
     # Кнопки внизу
     button_box = MDBoxLayout(
         orientation="horizontal",
         size_hint_y=None,
-        height=dp(50),
+        height=dp(45),
         spacing=dp(10),
-        padding=dp(10)
+        padding=dp(5)
     )
 
     cancel_btn = MDFlatButton(
@@ -228,28 +189,18 @@ def open_ai_settings(agent, locale="ru", on_save=None):
     button_box.add_widget(save_btn)
     main_box.add_widget(button_box)
 
-    def _set_provider(name):
-        nonlocal provider
-        provider = name
-        btn_groq.md_bg_color = normal_color
-        btn_gemini.md_bg_color = normal_color
-        btn_auto.md_bg_color = normal_color
-        if provider == "groq":
-            btn_groq.md_bg_color = selected_color
-        elif provider == "gemini":
-            btn_gemini.md_bg_color = selected_color
-        elif provider == "auto":
-            btn_auto.md_bg_color = selected_color
-
     def _save():
-        agent.set_keys(groq_field.text.strip(), gemini_field.text.strip(), provider)
-        if on_save:
-            on_save()
-        modal.dismiss()
+        try:
+            agent.set_keys(groq_field.text.strip(), gemini_field.text.strip(), agent.preferred)
+            if on_save:
+                on_save()
+            modal.dismiss()
+        except Exception as e:
+            print(f"Error saving AI settings: {e}")
 
-    # Создаем модальное окно
+    # Создаем модальное окно с меньшим размером для Android
     modal = ModalView(
-        size_hint=(0.9, 0.7),
+        size_hint=(0.85, 0.5) if platform == 'android' else (0.9, 0.6),
         background_color=theme.get('popup_bg', (0.1, 0.1, 0.1, 1))
     )
     modal.add_widget(main_box)

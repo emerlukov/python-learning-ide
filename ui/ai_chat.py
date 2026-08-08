@@ -36,8 +36,10 @@ class AiChatScreen(MDBoxLayout):
         # Получаем тему динамически
         self._update_theme()
 
-        # Слушаем изменение высоты клавиатуры для автоматической прокрутки
-        Window.bind(keyboard_height=self._on_keyboard_height)
+        # Слушаем изменение высоты клавиатуры для автоматической прокрутки (только на десктопе)
+        from kivy.utils import platform
+        if platform != 'android':
+            Window.bind(keyboard_height=self._on_keyboard_height)
         
         # Layout свойства
         self.orientation = "vertical"
@@ -446,6 +448,7 @@ def open_ai_chat(agent, locale="ru", get_context_callback=None):
     print(f"[AI Chat] Opening AI chat screen...")
 
     from kivy.uix.modalview import ModalView
+    from kivy.utils import platform
 
     # Создаем экран чата
     chat_screen = AiChatScreen(agent, locale=locale, get_context_callback=get_context_callback)
@@ -470,27 +473,10 @@ def open_ai_chat(agent, locale="ru", get_context_callback=None):
     # Передаем ссылку на modal в chat_screen
     chat_screen.modal = modal
 
-    # Обработка клавиатуры - поднимаем modal при открытии клавиатуры
-    def on_keyboard_height(instance, keyboard_height):
-        if keyboard_height > 0:
-            # Клавиатура открылась - уменьшаем высоту modal
-            modal.size_hint_y = 0.6
-        else:
-            # Клавиатура закрылась - возвращаем нормальную высоту
-            modal.size_hint_y = 0.85
-
-    Window.bind(keyboard_height=on_keyboard_height)
-
     modal.add_widget(chat_screen)
 
     print(f"[AI Chat] Modal created, opening...")
     modal.open()
     print(f"[AI Chat] Modal opened")
-
-    # Отвязываем слушатель при закрытии
-    def on_dismiss(instance):
-        Window.unbind(keyboard_height=on_keyboard_height)
-
-    modal.bind(on_dismiss=on_dismiss)
 
     return modal
