@@ -43,8 +43,6 @@ class AISettingsContent(MDBoxLayout):
             font_style="H6",
             size_hint_y=None,
             height=dp(30),
-            theme_text_color="Custom",
-            text_color=self.theme.get('text_color', (0.85, 0.88, 0.9, 1))
         ))
 
         self.groq_field = MDTextField(
@@ -53,10 +51,6 @@ class AISettingsContent(MDBoxLayout):
             password=False,  # password=True вызывает проблемы на Android
             size_hint_y=None,
             height=dp(45),
-            hint_text_color=self.theme.get('hint_text', (0.45, 0.48, 0.5, 1)),
-            mode="fill",
-            line_color_normal=self.theme.get('widget_bg', (0.141, 0.145, 0.149, 1)),
-            line_color_focus=self.theme.get('accent', (0.95, 0.95, 1.0, 1)),
         )
         self.add_widget(self.groq_field)
 
@@ -66,10 +60,6 @@ class AISettingsContent(MDBoxLayout):
             password=False,  # password=True вызывает проблемы на Android
             size_hint_y=None,
             height=dp(45),
-            hint_text_color=self.theme.get('hint_text', (0.45, 0.48, 0.5, 1)),
-            mode="fill",
-            line_color_normal=self.theme.get('widget_bg', (0.141, 0.145, 0.149, 1)),
-            line_color_focus=self.theme.get('accent', (0.95, 0.95, 1.0, 1)),
         )
         self.add_widget(self.gemini_field)
 
@@ -77,8 +67,6 @@ class AISettingsContent(MDBoxLayout):
             text="Provider:" if locale == "en" else "Провайдер:",
             size_hint_y=None,
             height=dp(25),
-            theme_text_color="Custom",
-            text_color=self.theme.get('text_color', (0.85, 0.88, 0.9, 1))
         ))
 
         # Простой выбор через кнопки
@@ -99,8 +87,6 @@ class AISettingsContent(MDBoxLayout):
             text="Get keys:\n• Groq > console.groq.com/keys\n• Gemini > aistudio.google.com/apikey" if locale == "en" else "Получить ключи:\n• Groq > console.groq.com/keys\n• Gemini > aistudio.google.com/apikey",
             size_hint_y=None,
             height=dp(70),
-            theme_text_color="Custom",
-            text_color=self.theme.get('text_color', (0.85, 0.88, 0.9, 1))
         ))
 
     def _apply_colors(self, dt):
@@ -110,22 +96,15 @@ class AISettingsContent(MDBoxLayout):
             theme = ThemeManager.get_theme()
             selected_color = theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1))
             normal_color = theme.get('widget_bg', (0.141, 0.145, 0.149, 1))
-            text_color = theme.get('text_color', (0.85, 0.88, 0.9, 1))
         except Exception as e:
             # Дефолтные цвета если ThemeManager не работает
             selected_color = (0.2, 0.5, 0.2, 1)
             normal_color = (0.141, 0.145, 0.149, 1)
-            text_color = (0.85, 0.88, 0.9, 1)
 
         # Применяем цвета фона кнопок
         self.btn_groq.background_color = normal_color
         self.btn_gemini.background_color = normal_color
         self.btn_auto.background_color = normal_color
-
-        # Применяем цвета текста кнопок
-        self.btn_groq.text_color = text_color
-        self.btn_gemini.text_color = text_color
-        self.btn_auto.text_color = text_color
 
         # Выделяем выбранную кнопку
         if self.provider == "groq":
@@ -150,21 +129,14 @@ class AISettingsContent(MDBoxLayout):
             theme = ThemeManager.get_theme()
             selected_color = theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1))
             normal_color = theme.get('widget_bg', (0.141, 0.145, 0.149, 1))
-            text_color = theme.get('text_color', (0.85, 0.88, 0.9, 1))
         except Exception as e:
             selected_color = (0.2, 0.5, 0.2, 1)
             normal_color = (0.141, 0.145, 0.149, 1)
-            text_color = (0.85, 0.88, 0.9, 1)
 
         # Сбрасываем все кнопки на обычный цвет
         self.btn_groq.background_color = normal_color
         self.btn_gemini.background_color = normal_color
         self.btn_auto.background_color = normal_color
-
-        # Применяем цвета текста кнопок
-        self.btn_groq.text_color = text_color
-        self.btn_gemini.text_color = text_color
-        self.btn_auto.text_color = text_color
 
         # Выделяем выбранную кнопку
         if self.provider == "groq":
@@ -209,15 +181,11 @@ def open_ai_settings(agent, locale="ru", on_save=None):
 
     cancel_btn = MDFlatButton(
         text="Cancel" if locale == "en" else "Отмена",
-        on_release=lambda x: modal.dismiss(),
-        theme_text_color="Custom",
-        text_color=theme.get('text_color', (0.85, 0.88, 0.9, 1))
+        on_release=lambda x: modal.dismiss()
     )
     save_btn = MDRaisedButton(
         text="Save" if locale == "en" else "Сохранить",
-        on_release=lambda x: _save(),
-        md_bg_color=theme.get('btn_success_bg', (0.2, 0.5, 0.2, 1)),
-        text_color=(1, 1, 1, 1)
+        on_release=lambda x: _save()
     )
 
     button_box.add_widget(cancel_btn)
