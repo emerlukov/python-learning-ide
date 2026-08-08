@@ -10,6 +10,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.modalview import ModalView
 from kivy.metrics import dp
 from kivy.utils import platform
+from kivy.graphics import Color, Rectangle
 
 
 def open_ai_settings(agent, locale="ru", on_save=None):
@@ -32,15 +33,27 @@ def open_ai_settings(agent, locale="ru", on_save=None):
         orientation="vertical",
         spacing=dp(10),
         padding=dp(12),
-        size_hint_y=None
+        size_hint=(1, 1)
     )
+
+    # Добавляем фон к контейнеру
+    with main_box.canvas.before:
+        Color(*theme.get('popup_bg', (0.188, 0.204, 0.251, 1)))
+        main_box.bg_rect = Rectangle(pos=main_box.pos, size=main_box.size)
+
+    def update_bg_rect(instance, value):
+        main_box.bg_rect.pos = instance.pos
+        main_box.bg_rect.size = instance.size
+
+    main_box.bind(pos=update_bg_rect, size=update_bg_rect)
 
     # Заголовок
     main_box.add_widget(Label(
         text="API-ключи ИИ-тьютора" if locale == "ru" else "AI Tutor API Keys",
         font_size=dp(18),
         size_hint_y=None,
-        height=dp(30)
+        height=dp(30),
+        color=theme.get('text_color', (0.85, 0.88, 0.9, 1))
     ))
 
     # Поле Groq
@@ -50,6 +63,9 @@ def open_ai_settings(agent, locale="ru", on_save=None):
         password=False,  # password=True вызывает проблемы на Android
         size_hint_y=None,
         height=dp(45),
+        background_color=theme.get('input_bg', (0.188, 0.204, 0.251, 1)),
+        foreground_color=theme.get('input_text', (1.0, 1.0, 1.0, 1)),
+        hint_text_color=(0.5, 0.5, 0.5, 1),
         padding=[dp(10), dp(10), dp(10), dp(10)],
         multiline=False
     )
@@ -62,6 +78,9 @@ def open_ai_settings(agent, locale="ru", on_save=None):
         password=False,  # password=True вызывает проблемы на Android
         size_hint_y=None,
         height=dp(45),
+        background_color=theme.get('input_bg', (0.188, 0.204, 0.251, 1)),
+        foreground_color=theme.get('input_text', (1.0, 1.0, 1.0, 1)),
+        hint_text_color=(0.5, 0.5, 0.5, 1),
         padding=[dp(10), dp(10), dp(10), dp(10)],
         multiline=False
     )
@@ -71,13 +90,14 @@ def open_ai_settings(agent, locale="ru", on_save=None):
     main_box.add_widget(Label(
         text="Provider:" if locale == "en" else "Провайдер:",
         size_hint_y=None,
-        height=dp(25)
+        height=dp(25),
+        color=theme.get('text_color', (0.85, 0.88, 0.9, 1))
     ))
 
     # Кнопки провайдера
     provider_state = [agent.preferred]  # Используем список для изменяемого состояния
 
-    btn_box = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(5))
+    btn_box = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(5), padding=dp(5))
 
     def set_provider(name):
         provider_state[0] = name
@@ -102,19 +122,19 @@ def open_ai_settings(agent, locale="ru", on_save=None):
         text="Groq",
         on_release=lambda x: set_provider("groq"),
         background_normal='', background_down='',
-        size_hint_y=None, height=dp(35)
+        color=theme.get('text_color', (0.85, 0.88, 0.9, 1))
     )
     btn_gemini = Button(
         text="Gemini",
         on_release=lambda x: set_provider("gemini"),
         background_normal='', background_down='',
-        size_hint_y=None, height=dp(35)
+        color=theme.get('text_color', (0.85, 0.88, 0.9, 1))
     )
     btn_auto = Button(
         text="Auto",
         on_release=lambda x: set_provider("auto"),
         background_normal='', background_down='',
-        size_hint_y=None, height=dp(35)
+        color=theme.get('text_color', (0.85, 0.88, 0.9, 1))
     )
 
     btn_box.add_widget(btn_groq)
@@ -143,7 +163,8 @@ def open_ai_settings(agent, locale="ru", on_save=None):
     main_box.add_widget(Label(
         text="Get keys:\n• Groq > console.groq.com/keys\n• Gemini > aistudio.google.com/apikey" if locale == "en" else "Получить ключи:\n• Groq > console.groq.com/keys\n• Gemini > aistudio.google.com/apikey",
         size_hint_y=None,
-        height=dp(70)
+        height=dp(70),
+        color=theme.get('text_color', (0.85, 0.88, 0.9, 1))
     ))
 
     # Кнопки внизу
@@ -169,13 +190,13 @@ def open_ai_settings(agent, locale="ru", on_save=None):
         text="Cancel" if locale == "en" else "Отмена",
         on_release=lambda x: modal.dismiss(),
         background_normal='', background_down='',
-        size_hint_y=None, height=dp(35)
+        color=theme.get('text_color', (0.85, 0.88, 0.9, 1))
     )
     save_btn = Button(
         text="Save" if locale == "en" else "Сохранить",
         on_release=lambda x: _save(),
         background_normal='', background_down='',
-        size_hint_y=None, height=dp(35)
+        color=(1, 1, 1, 1)
     )
 
     # Применяем цвета кнопок
@@ -186,14 +207,6 @@ def open_ai_settings(agent, locale="ru", on_save=None):
     button_box.add_widget(save_btn)
     main_box.add_widget(button_box)
 
-    # Оборачиваем в ScrollView для прокрутки если контент не помещается
-    scroll = ScrollView(
-        do_scroll_x=False,
-        do_scroll_y=True,
-        size_hint=(1, 1)
-    )
-    scroll.add_widget(main_box)
-
     # Адаптивный размер для Android
     if platform == 'android':
         size_hint = (0.9, 0.5)
@@ -202,8 +215,9 @@ def open_ai_settings(agent, locale="ru", on_save=None):
 
     modal = ModalView(
         size_hint=size_hint,
-        background_color=theme.get('popup_bg', (0.188, 0.204, 0.251, 1))
+        background_color=(0, 0, 0, 0),  # Прозрачный фон
+        overlay_color=(0, 0, 0, 0.5)  # Полупрозрачная затемненная область
     )
-    modal.add_widget(scroll)
+    modal.add_widget(main_box)
     modal.open()
     return modal
