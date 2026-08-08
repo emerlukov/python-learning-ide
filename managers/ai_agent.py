@@ -8,6 +8,8 @@ import json
 import os
 from typing import Optional, Callable, List, Dict
 from kivy.clock import Clock
+from kivy.utils import platform
+from threading import Thread
 
 try:
     import requests
@@ -43,7 +45,7 @@ Rules:
         self.history: List[Dict] = []
         self.max_history = 20
         self._lock = threading.Lock()
-        self._stop_generation = False  # Флаг для остановки генерации
+        self._stop_event = threading.Event()  # Event для остановки генерации
         self._stream_callback = None  # Callback для потоковой передачи
 
         self.groq_key = self._get("ai_groq_key", "")
@@ -70,10 +72,14 @@ Rules:
     def set_keys(self, groq_key: str = None, gemini_key: str = None, provider: str = None):
         data = self.settings.load() if self.settings else {}
         if groq_key is not None:
-            self.groq_key = groq_key.strip()
+            groq_key = groq_key.strip()
+            if groq_key and not groq_key.startswith('gsk_'):
+                print("[AI Agent] Warning: Groq key may be invalid (should start with 'gsk_')")
+            self.groq_key = groq_key
             data["ai_groq_key"] = self.groq_key
         if gemini_key is not None:
-            self.gemini_key = gemini_key.strip()
+            gemini_key = gemini_key.strip()
+            self.gemini_key = gemini_key
             data["ai_gemini_key"] = self.gemini_key
         if provider in ("groq", "gemini", "auto"):
             self.preferred = provider
@@ -84,12 +90,18 @@ Rules:
     def clear_history(self):
         with self._lock:
             self.history.clear()
-        self._save_history()
+        self._save_history_async()
 
     def _get_history_file(self):
         """Возвращает путь к файлу истории"""
-        # Сохраняем в директории приложения
-        base_dir = os.path.dirname(os.path.dirname(__file__))
+        if platform == 'android':
+            try:
+                from android.storage import primary_external_storage_path
+                base_dir = primary_external_storage_path()
+            except ImportError:
+                base_dir = os.path.dirname(os.path.dirname(__file__))
+        else:
+            base_dir = os.path.dirname(os.path.dirname(__file__))
         return os.path.join(base_dir, "ai_chat_history.json")
 
     def _load_history(self):
@@ -114,9 +126,13 @@ Rules:
         except Exception as e:
             print(f"[AI Agent] Error saving history: {e}")
 
+    def _save_history_async(self):
+        """Асинхронно сохраняет историю в файл"""
+        threading.Thread(target=self._save_history, daemon=True).start()
+
     def stop_generation(self):
         """Останавливает текущую генерацию"""
-        self._stop_generation = True
+        self._stop_event.set()
         print("[AI Agent] Generation stopped by user")
 
     def _build_messages(self, user_message: str, context: str = "", locale: str = "ru") -> List[Dict]:
@@ -143,14 +159,21 @@ Rules:
             "model": self.groq_model,
             "messages": messages,
             "temperature": 0.6,
-            "max_tokens": 4096,  # Увеличено с 1024 до 4096 для более полных ответов
+            "max_tokens": 4096,
         }
-        resp = requests.post(url, headers=headers, json=payload, timeout=35)
-        resp.raise_for_status()
+
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=10)
+            resp.raise_for_status()
+        except requests.exceptions.Timeout:
+            raise ValueError("Request timeout - API server took too long to respond")
+        except requests.exceptions.ConnectionError:
+            raise ValueError("Connection error - check your internet connection")
+        except requests.exceptions.RequestException as e:
+            raise ValueError(f"Request failed: {e}")
 
         data = resp.json()
 
-        # Улучшенная обработка ответа с логированием
         try:
             if "choices" in data and len(data["choices"]) > 0:
                 choice = data["choices"][0]
@@ -161,7 +184,6 @@ Rules:
             elif "text" in data:
                 return data["text"].strip()
 
-            # Если ничего не сработало, возвращаем весь ответ для отладки
             print(f"Groq response structure: {data}")
             return str(data)
 
@@ -184,43 +206,56 @@ Rules:
             "messages": messages,
             "temperature": 0.6,
             "max_tokens": 4096,
-            "stream": True  # Включаем потоковую передачу
+            "stream": True
         }
 
         full_response = ""
-        self._stop_generation = False
+        self._stop_event.clear()
 
         try:
-            resp = requests.post(url, headers=headers, json=payload, stream=True, timeout=35)
+            resp = requests.post(url, headers=headers, json=payload, stream=True, timeout=10)
             resp.raise_for_status()
 
             for line in resp.iter_lines():
-                if self._stop_generation:
-                    print("[AI Agent] Streaming stopped")
+                if self._stop_event.is_set():
+                    print("[AI Agent] Streaming stopped by user")
                     break
 
                 if line:
-                    line = line.decode('utf-8')
-                    if line.startswith('data: '):
-                        data_str = line[6:]  # Убираем 'data: '
-                        if data_str == '[DONE]':
-                            break
+                    try:
+                        line = line.decode('utf-8')
+                        if line.startswith('data: '):
+                            data_str = line[6:]
+                            if data_str == '[DONE]':
+                                break
 
-                        try:
-                            data = json.loads(data_str)
-                            if 'choices' in data and len(data['choices']) > 0:
-                                delta = data['choices'][0].get('delta', {})
-                                content = delta.get('content', '')
-                                if content:
-                                    full_response += content
-                                    # Вызываем callback для каждого кусочка текста
-                                    if stream_callback:
-                                        stream_callback(content)
-                        except json.JSONDecodeError:
-                            continue
+                            try:
+                                data = json.loads(data_str)
+                                if 'choices' in data and len(data['choices']) > 0:
+                                    delta = data['choices'][0].get('delta', {})
+                                    content = delta.get('content', '')
+                                    if content:
+                                        full_response += content
+                                        if stream_callback:
+                                            stream_callback(content)
+                            except json.JSONDecodeError:
+                                continue
+                    except Exception as e:
+                        print(f"[AI Agent] Stream decode error: {e}")
+                        continue
 
+        except requests.exceptions.Timeout:
+            if not self._stop_event.is_set():
+                raise ValueError("Request timeout - API server took too long to respond")
+        except requests.exceptions.ConnectionError:
+            if not self._stop_event.is_set():
+                raise ValueError("Connection error - check your internet connection")
+        except requests.exceptions.RequestException as e:
+            if not self._stop_event.is_set():
+                raise ValueError(f"Request failed: {e}")
         except Exception as e:
-            if not self._stop_generation:
+            if not self._stop_event.is_set():
+                print(f"[AI Agent] Streaming error: {e}")
                 raise e
 
         return full_response
@@ -337,8 +372,8 @@ Rules:
                 with self._lock:
                     self.history.append({"role": "user", "content": user_message})
                     self.history.append({"role": "assistant", "content": answer})
-                    # Сохраняем историю в файл
-                    self._save_history()
+                    # Сохраняем историю в файл асинхронно
+                    self._save_history_async()
 
                 if on_success:
                     print(f"[AI Agent] Calling on_success with answer length: {len(answer) if answer else 0}")
