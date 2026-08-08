@@ -36,10 +36,8 @@ class AiChatScreen(MDBoxLayout):
         # Получаем тему динамически
         self._update_theme()
 
-        # Слушаем изменение высоты клавиатуры для автоматической прокрутки (только на десктопе)
-        from kivy.utils import platform
-        if platform != 'android':
-            Window.bind(keyboard_height=self._on_keyboard_height)
+        # Слушаем изменение высоты клавиатуры для автоматической прокрутки
+        Window.bind(keyboard_height=self._on_keyboard_height)
         
         # Layout свойства
         self.orientation = "vertical"
@@ -439,7 +437,8 @@ class AiChatScreen(MDBoxLayout):
             )
         elif action == "review":
             if not context.strip():
-                self.messages_box.remove_widget(thinking)
+                if thinking is not None:
+                    self.messages_box.remove_widget(thinking)
                 self._add_bot("Нет кода для проверки." if self.locale == "ru" else "No code to check.")
                 return
             self.agent.review_code(context, locale=self.locale, on_success=ok, on_error=err)
@@ -448,7 +447,6 @@ def open_ai_chat(agent, locale="ru", get_context_callback=None):
     print(f"[AI Chat] Opening AI chat screen...")
 
     from kivy.uix.modalview import ModalView
-    from kivy.utils import platform
 
     # Создаем экран чата
     chat_screen = AiChatScreen(agent, locale=locale, get_context_callback=get_context_callback)
@@ -473,10 +471,38 @@ def open_ai_chat(agent, locale="ru", get_context_callback=None):
     # Передаем ссылку на modal в chat_screen
     chat_screen.modal = modal
 
+    # Устанавливаем режим клавиатуры для корректного отображения
+    Window.softinput_mode = 'pan'
+
+    # Сохраняем оригинальный размер
+    original_size_hint_y = modal.size_hint_y
+
+    # Обработка клавиатуры - адаптируем modal под клавиатуру
+    def on_keyboard_height(instance, keyboard_height):
+        if keyboard_height > 0:
+            # Клавиатура открылась - уменьшаем высоту modal
+            # Учитываем высоту клавиатуры в пикселях
+            window_height = Window.height
+            available_height = window_height - keyboard_height
+            # Устанавливаем высоту modal так, чтобы она помещалась с клавиатурой
+            modal.size_hint_y = min(0.85, available_height / window_height)
+        else:
+            # Клавиатура закрылась - возвращаем нормальную высоту
+            modal.size_hint_y = original_size_hint_y
+
+    Window.bind(keyboard_height=on_keyboard_height)
+
     modal.add_widget(chat_screen)
 
     print(f"[AI Chat] Modal created, opening...")
     modal.open()
     print(f"[AI Chat] Modal opened")
+
+    # Отвязываем слушатель при закрытии и возвращаем оригинальный режим клавиатуры
+    def on_dismiss(instance):
+        Window.unbind(keyboard_height=on_keyboard_height)
+        Window.softinput_mode = 'below_target'  # Возвращаем дефолтный режим
+
+    modal.bind(on_dismiss=on_dismiss)
 
     return modal
