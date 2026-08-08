@@ -3,20 +3,18 @@
 """
 
 from kivymd.uix.boxlayout import MDBoxLayout
-from kivymd.uix.button import MDIconButton, MDRaisedButton, MDFlatButton
+from kivymd.uix.button import MDIconButton
 from kivymd.uix.label import MDLabel
+from kivymd.uix.card import MDCard 
 from kivymd.uix.scrollview import MDScrollView
-from kivymd.uix.card import MDCard
-from kivymd.uix.dialog import MDDialog
-from kivymd.uix.snackbar import Snackbar
-from kivy.uix.screenmanager import Screen
 from kivy.uix.modalview import ModalView
-from kivy.uix.button import Button  # Добавляем обычный Button
+from kivy.uix.button import Button
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.scrollview import ScrollView
 from kivy.metrics import dp
 from kivy.clock import Clock
-from kivy.uix.label import Label  # Добавляем обычный Label
-from kivy.uix.textinput import TextInput  # Добавляем обычный TextInput
-from kivy.core.clipboard import Clipboard
+from kivy.uix.label import Label
+from kivy.uix.textinput import TextInput
 from kivy.core.window import Window
 from ide_core.themes import DARK_THEME, LIGHT_THEME, ThemeManager
 from widgets.markdown_label import MarkdownLabel
@@ -28,29 +26,30 @@ class AiChatScreen(MDBoxLayout):
         self.agent = agent
         self.locale = locale
         self.get_context = get_context_callback or (lambda: "")
-        self.modal = None  # Ссылка на modal для закрытия
-        self._is_generating = False  # Флаг генерации
-        self._current_bot_card = None  # Текущая карточка бота для streaming
-        self._current_bot_label = None  # Текущий label бота для streaming
+        self.modal = None
+        self._is_generating = False
+        self._current_bot_card = None
+        self._current_bot_label = None
+        self._user_scrolled = False  # Флаг, чтобы определить, скроллил ли пользователь
 
-        # Получаем тему динамически
+        # Получаем тему
         self._update_theme()
 
-        # Слушаем изменение высоты клавиатуры для автоматической прокрутки
-        Window.bind(keyboard_height=self._on_keyboard_height)
+        # НЕ слушаем клавиатуру для скролла
+        # Window.bind(keyboard_height=self._on_keyboard_height)  # УБИРАЕМ!
         
-        # Layout свойства
+        # Layout
         self.orientation = "vertical"
         self.spacing = dp(10)
         self.padding = dp(16)
         self.md_bg_color = self.theme['popup_bg']
         
-        # Верхняя панель с заголовком и кнопкой закрытия
+        # Верхняя панель
         header_box = MDBoxLayout(
             orientation="horizontal",
             size_hint_y=None,
             height=dp(50),
-            spacing=dp(0),  # Убираем отступы
+            spacing=dp(0),
             padding=dp(10)
         )
         
@@ -64,7 +63,6 @@ class AiChatScreen(MDBoxLayout):
         
         close_btn = Button(
             text='X',
-            font_name='DejaVuSans',
             size_hint_x=None,
             width=dp(40),
             background_color=self.theme.get('btn_danger_bg', (0.5, 0.2, 0.2, 1)),
@@ -79,26 +77,28 @@ class AiChatScreen(MDBoxLayout):
         header_box.add_widget(close_btn)
         self.add_widget(header_box)
         
-        # Создаем контейнер для ScrollView и нижних элементов
+        # Контейнер
         content_box = MDBoxLayout(
             orientation="vertical",
-            size_hint_y=1  # Занимает всё оставшееся пространство
+            size_hint_y=1
         )
         
         # ScrollView с сообщениями
-        self.scroll = MDScrollView(
+        self.scroll = ScrollView(
             do_scroll_x=False,
             do_scroll_y=True,
-            size_hint_y=1  # Занимает всё доступное пространство в content_box
+            size_hint_y=1
         )
         
-        self.messages_box = MDBoxLayout(
+        self.messages_box = BoxLayout(
             orientation="vertical",
             spacing=dp(10),
             size_hint_y=None,
             padding=dp(8)
         )
-        self.messages_box.bind(minimum_height=self.messages_box.setter('height'))
+        
+        # ВАЖНО: НЕ привязываем minimum_height к высоте!
+        # Вместо этого устанавливаем высоту вручную при добавлении виджетов
         self.scroll.add_widget(self.messages_box)
         content_box.add_widget(self.scroll)
 
@@ -135,7 +135,6 @@ class AiChatScreen(MDBoxLayout):
             text_color=self.theme['text_color']
         )
 
-        # Кнопка остановки генерации
         self.stop_btn = MDIconButton(
             icon="stop",
             size_hint_x=None,
@@ -146,7 +145,7 @@ class AiChatScreen(MDBoxLayout):
             md_bg_color=self.theme['widget_bg'],
             on_release=self._stop_generation
         )
-        self.stop_btn.disabled = True  # Сначала отключена
+        self.stop_btn.disabled = True
 
         actions_box.add_widget(btn_clear)
         actions_box.add_widget(btn_error)
@@ -166,11 +165,12 @@ class AiChatScreen(MDBoxLayout):
             hint_text="Спроси что-нибудь..." if locale == "ru" else "Ask something...",
             size_hint_x=1,
             multiline=True,
-            foreground_color=self.theme['text_color'],  # Вместо text_color
+            foreground_color=self.theme['text_color'],
             hint_text_color=self.theme['text_color'],
             background_color=self.theme['widget_bg'],
             cursor_color=self.theme['text_color'],
             padding=[dp(10), dp(10)],
+            input_type='text'
         )
 
         send_btn = MDIconButton(
@@ -180,7 +180,7 @@ class AiChatScreen(MDBoxLayout):
             height=dp(30),
             icon_size=dp(16),
             theme_text_color="Custom",
-            text_color=(0, 0, 0, 1),  # Черный цвет иконки для контраста
+            text_color=(0, 0, 0, 1),
             md_bg_color=self.theme.get('run_btn_bg', (0.596, 0.486, 1.0, 1)),
             on_release=self._send
         )
@@ -191,33 +191,30 @@ class AiChatScreen(MDBoxLayout):
 
         self.add_widget(content_box)
 
-        # Загружаем историю при открытии
-        Clock.schedule_once(lambda dt: self._load_history(), 0.2)
+        # Загружаем историю
+        Clock.schedule_once(lambda dt: self._load_history(), 0.05)
 
     def _load_history(self):
-        """Загружает и отображает историю чата"""
+        """Загружает историю без автоскролла"""
         with self.agent._lock:
             history = self.agent.history.copy()
 
-        # Если история пуста, показываем приветствие
         if not history:
             self._add_bot(
                 "Привет! Я ИИ-тьютор по Python. Задавай вопросы о коде, ошибках или уроках!" if self.locale == "ru"
-                else "Hi! I'm an AI Python tutor. Ask about code, errors, or lessons!"
+                else "Hi! I'm an AI Python tutor. Ask about code, errors or lessons!"
             )
             return
 
-        # Отображаем историю
         for msg in history:
             if msg["role"] == "user":
                 self._add_user(msg["content"])
             elif msg["role"] == "assistant":
                 self._add_bot(msg["content"])
 
-        self._scroll_to_bottom()
+        # НЕ скроллим вниз - оставляем наверху
     
     def _update_theme(self):
-        """Получает текущую тему динамически"""
         try:
             if ThemeManager:
                 theme = ThemeManager.get_theme()
@@ -233,23 +230,22 @@ class AiChatScreen(MDBoxLayout):
             self.modal.dismiss()
     
     def _add_user(self, text):
-        self._update_theme()  # Обновляем тему перед добавлением
+        self._update_theme()
         
         card = MDCard(
             size_hint_y=None,
             padding=dp(10),
             radius=[12],
             pos_hint={"right": 1},
-            md_bg_color=self.theme['widget_bg'],  # Фон карточки из темы
+            md_bg_color=self.theme['widget_bg'],
         )
         
-        # Используем обычный Label с динамическим text_size
         label = Label(
             text=text,
             size_hint_y=None,
             valign='top',
             halign='right',
-            text_size=(None, None),  # Сначала без ограничений
+            text_size=(None, None),
             color=self.theme['text_color'],
             font_size=dp(14)
         )
@@ -257,37 +253,35 @@ class AiChatScreen(MDBoxLayout):
         card.add_widget(label)
         self.messages_box.add_widget(card)
         
-        def update_layout(dt):
-            # Сначала устанавливаем text_size для автопереноса
-            if card.width > 0:
+        # ОБНОВЛЯЕМ ВЫСОТУ ВРУЧНУЮ
+        def update_height(dt):
+            if hasattr(label, 'texture_size') and label.texture_size:
                 label.text_size = (card.width - dp(24), None)
+                label.height = label.texture_size[1]
+                card.height = label.height + dp(20)
                 
-                # Ждем пересчета texture_size с новым text_size
-                def update_height(dt2):
-                    if label.texture_size:
-                        label.height = label.texture_size[1]
-                        card.height = label.height + dp(20)
-                
-                Clock.schedule_once(update_height, 0.05)
-            else:
-                # Если ширина еще не известна, используем фиксированную ширину
-                label.text_size = (dp(350), None)
-                
-                def update_height_fallback(dt2):
-                    if label.texture_size:
-                        label.height = label.texture_size[1]
-                        card.height = label.height + dp(20)
-                
-                Clock.schedule_once(update_height_fallback, 0.05)
+                # ОБНОВЛЯЕМ ОБЩУЮ ВЫСОТУ КОНТЕЙНЕРА
+                self._update_messages_height()
         
-        Clock.schedule_once(update_layout, 0.1)
-        self._scroll_to_bottom()
+        Clock.schedule_once(update_height, 0.1)
+    
+    def _update_messages_height(self):
+        """Обновляет общую высоту контейнера сообщений"""
+        total_height = dp(8)  # padding
+        for child in self.messages_box.children:
+            if hasattr(child, 'height'):
+                total_height += child.height + dp(10)  # spacing
+        
+        # Устанавливаем высоту контейнера
+        self.messages_box.height = total_height
+        
+        # НЕ скроллим автоматически!
     
     def _add_bot(self, text, is_streaming=False):
-        self._update_theme()  # Обновляем тему перед добавлением
+        self._update_theme()
 
         if is_streaming and self._current_bot_card:
-            # Обновляем существующую карточку при streaming
+            # Обновляем существующую карточку
             self._current_bot_label.set_text(text)
             self._update_bot_height()
             return
@@ -296,10 +290,9 @@ class AiChatScreen(MDBoxLayout):
             size_hint_y=None,
             padding=dp(10),
             radius=[12],
-            md_bg_color=self.theme['widget_bg'],  # Фон карточки из темы
+            md_bg_color=self.theme['widget_bg'],
         )
 
-        # Используем MarkdownLabel для поддержки кодовых блоков с копированием
         label = MarkdownLabel(
             text=text,
             font_size=dp(14)
@@ -308,40 +301,34 @@ class AiChatScreen(MDBoxLayout):
         card.add_widget(label)
         self.messages_box.add_widget(card)
 
-        # Сохраняем ссылки для streaming
         self._current_bot_card = card
         self._current_bot_label = label
 
-        # Многократное обновление высоты карточки для корректного рендеринга
+        # Устанавливаем высоту
         def update_height(dt):
-            if label.height > 0:
+            if hasattr(label, 'height') and label.height > 0:
                 card.height = label.height + dp(20)
             else:
-                # Если высота еще не рассчитана, используем минимальную
                 card.height = dp(60)
-            self._scroll_to_bottom()
-
-        # Обновляем высоту несколько раз с разной задержкой
-        Clock.schedule_once(update_height, 0.05)
+            
+            # ОБНОВЛЯЕМ ОБЩУЮ ВЫСОТУ КОНТЕЙНЕРА
+            self._update_messages_height()
+        
         Clock.schedule_once(update_height, 0.1)
-        Clock.schedule_once(update_height, 0.2)
-        Clock.schedule_once(update_height, 0.3)
 
     def _update_bot_height(self):
-        """Обновляет высоту текущей карточки бота"""
+        """Обновляет высоту карточки бота"""
         if self._current_bot_card and self._current_bot_label:
             def update_height(dt):
-                if self._current_bot_label and self._current_bot_label.height > 0:
+                if hasattr(self._current_bot_label, 'height') and self._current_bot_label.height > 0:
                     self._current_bot_card.height = self._current_bot_label.height + dp(20)
-                self._scroll_to_bottom()
+                else:
+                    self._current_bot_card.height = dp(60)
+                
+                # ОБНОВЛЯЕМ ОБЩУЮ ВЫСОТУ
+                self._update_messages_height()
+            
             Clock.schedule_once(update_height, 0.05)
-    
-    def _scroll_to_bottom(self):
-        Clock.schedule_once(lambda dt: setattr(self.scroll, 'scroll_y', 0), 0.1)
-    
-    def _add_thinking(self):
-        # Убираем индикатор "Думаю..." - не нужен
-        return None
     
     def _send(self, *args):
         text = self.text_input.text.strip()
@@ -350,31 +337,30 @@ class AiChatScreen(MDBoxLayout):
         self.text_input.text = ""
         self._add_user(text)
 
-        # Блокируем ввод и включаем кнопку остановки
         self._is_generating = True
         self.text_input.disabled = True
         self.stop_btn.disabled = False
 
-        # Создаем пустую карточку для streaming
         self._add_bot("", is_streaming=True)
 
         def stream_callback(chunk):
-            """Callback для потоковой передачи"""
             if not self._is_generating:
                 return
-            # Получаем текущий текст и добавляем новый кусочек
-            current_text = self._current_bot_label.text if self._current_bot_label else ""
-            new_text = current_text + chunk
-            self._add_bot(new_text, is_streaming=True)
+            try:
+                current_text = self._current_bot_label.text if self._current_bot_label else ""
+                new_text = current_text + chunk
+                self._add_bot(new_text, is_streaming=True)
+            except Exception as e:
+                print(f"[AI Chat] Stream callback error: {e}")
 
         def ok(answer):
             self._is_generating = False
             self.text_input.disabled = False
             self.stop_btn.disabled = True
-            # Финальное обновление
             self._add_bot(answer, is_streaming=True)
             self._current_bot_card = None
             self._current_bot_label = None
+            # НЕ скроллим
 
         def err(e):
             self._is_generating = False
@@ -396,7 +382,6 @@ class AiChatScreen(MDBoxLayout):
         )
 
     def _stop_generation(self, *args):
-        """Останавливает генерацию"""
         if self._is_generating:
             self._is_generating = False
             self.agent.stop_generation()
@@ -405,24 +390,19 @@ class AiChatScreen(MDBoxLayout):
             self._current_bot_card = None
             self._current_bot_label = None
 
-    def _on_keyboard_height(self, instance, keyboard_height):
-        """Обработка изменения высоты клавиатуры"""
-        if keyboard_height > 0:
-            # Клавиатура открылась - прокручиваем к низу
-            Clock.schedule_once(lambda dt: self._scroll_to_bottom(), 0.1)
-    
     def _quick(self, action):
         if action == "clear":
             self.agent.clear_history()
             self.messages_box.clear_widgets()
+            self.text_input.text = ""
             self._add_bot("Чат очищен." if self.locale == "ru" else "Chat cleared.")
             return
         
         context = self.get_context()
-        thinking = self._add_thinking()
         
         def ok(answer):
             self._add_bot(answer)
+            # НЕ скроллим
         
         def err(e):
             self._add_bot(f"Ошибка: {e}")
@@ -437,22 +417,17 @@ class AiChatScreen(MDBoxLayout):
             )
         elif action == "review":
             if not context.strip():
-                if thinking is not None:
-                    self.messages_box.remove_widget(thinking)
                 self._add_bot("Нет кода для проверки." if self.locale == "ru" else "No code to check.")
                 return
             self.agent.review_code(context, locale=self.locale, on_success=ok, on_error=err)
 
+
 def open_ai_chat(agent, locale="ru", get_context_callback=None):
     print(f"[AI Chat] Opening AI chat screen...")
 
-    from kivy.uix.modalview import ModalView
-
-    # Создаем экран чата
     chat_screen = AiChatScreen(agent, locale=locale, get_context_callback=get_context_callback)
     chat_screen.name = "ai_chat_screen"
 
-    # Получаем тему для background_color modal
     try:
         if ThemeManager:
             theme = ThemeManager.get_theme()
@@ -462,46 +437,32 @@ def open_ai_chat(agent, locale="ru", get_context_callback=None):
     except:
         bg_color = (0.15, 0.15, 0.2, 0.95)
 
-    # Создаем ModalView (подобие popup)
     modal = ModalView(
         size_hint=(0.95, 0.85),
         background_color=bg_color,
     )
 
-    # Передаем ссылку на modal в chat_screen
     chat_screen.modal = modal
 
-    # Устанавливаем режим клавиатуры для корректного отображения
     Window.softinput_mode = 'pan'
-
-    # Сохраняем оригинальный размер
     original_size_hint_y = modal.size_hint_y
 
-    # Обработка клавиатуры - адаптируем modal под клавиатуру
     def on_keyboard_height(instance, keyboard_height):
         if keyboard_height > 0:
-            # Клавиатура открылась - уменьшаем высоту modal
-            # Учитываем высоту клавиатуры в пикселях
             window_height = Window.height
             available_height = window_height - keyboard_height
-            # Устанавливаем высоту modal так, чтобы она помещалась с клавиатурой
             modal.size_hint_y = min(0.85, available_height / window_height)
         else:
-            # Клавиатура закрылась - возвращаем нормальную высоту
             modal.size_hint_y = original_size_hint_y
 
     Window.bind(keyboard_height=on_keyboard_height)
 
     modal.add_widget(chat_screen)
-
-    print(f"[AI Chat] Modal created, opening...")
     modal.open()
-    print(f"[AI Chat] Modal opened")
 
-    # Отвязываем слушатель при закрытии и возвращаем оригинальный режим клавиатуры
     def on_dismiss(instance):
         Window.unbind(keyboard_height=on_keyboard_height)
-        Window.softinput_mode = 'below_target'  # Возвращаем дефолтный режим
+        Window.softinput_mode = 'below_target'
 
     modal.bind(on_dismiss=on_dismiss)
 

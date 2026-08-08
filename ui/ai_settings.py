@@ -178,7 +178,20 @@ def open_ai_settings(agent, locale="ru", on_save=None):
 
     def _save():
         try:
-            agent.set_keys(groq_field.text.strip(), gemini_field.text.strip(), provider_state[0])
+            groq_key = groq_field.text.strip()
+            gemini_key = gemini_field.text.strip()
+
+            # Валидация: нужен хотя бы один ключ
+            if not groq_key and not gemini_key:
+                print("[AI Settings] Error: At least one API key is required")
+                # Можно добавить визуальное уведомление
+                return
+
+            # Валидация формата Groq ключа
+            if groq_key and not groq_key.startswith('gsk_'):
+                print("[AI Settings] Warning: Groq key may be invalid (should start with 'gsk_')")
+
+            agent.set_keys(groq_key, gemini_key, provider_state[0])
             if on_save:
                 on_save()
             modal.dismiss()
@@ -215,8 +228,7 @@ def open_ai_settings(agent, locale="ru", on_save=None):
 
     modal = ModalView(
         size_hint=size_hint,
-        background_color=(0, 0, 0, 0),  # Прозрачный фон
-        overlay_color=(0, 0, 0, 0.5)  # Полупрозрачная затемненная область
+        background_color=theme.get('popup_bg', (0.188, 0.204, 0.251, 1))
     )
     modal.add_widget(main_box)
     modal.open()
