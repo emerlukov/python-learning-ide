@@ -12,7 +12,7 @@ version = 1.0.0
 
 # ========== ТРЕБОВАНИЯ ==========
 # ВОЗВРАЩАЕМ kivymd==1.1.1 (она существует)
-requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0,kivymd==1.1.1,pygments,autopep8,pycodestyle,plyer,requests,androidstorage4kivy
+requirements = python3==3.10.7,hostpython3==3.10.7,kivy==2.3.0,kivymd==1.1.1,pygments,autopep8,pycodestyle,plyer,requests,androidstorage4kivy,urllib3,certifi
 
 # ========== ЗАСТАВКИ ==========
 presplash.filename = splash.png
