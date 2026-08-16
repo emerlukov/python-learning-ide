@@ -1,26 +1,360 @@
 """
-Окно чата с ИИ-тьютором
+Окно чата с ИИ-тьютором.
+
+Современный мессенджер-стиль:
+  * пузыри сообщений с «хвостиками» по сторонам и временем отправки;
+  * плавный автоскролл вниз + кнопка «к последнему сообщению»;
+  * индикатор набора текста, стриминг ответа;
+  * поле ввода, растущее по мере набора (1..5 строк);
+  * Enter — отправить, Shift+Enter — новая строка;
+  * копирование текста сообщения;
+  * чат строго прилипает к верхней границе экранной клавиатуры.
 """
+
+from datetime import datetime
+
+from kivy.animation import Animation
+from kivy.clock import Clock
+from kivy.core.clipboard import Clipboard
+from kivy.core.window import Window
+from kivy.metrics import dp, sp
+from kivy.properties import NumericProperty
+from kivy.uix.anchorlayout import AnchorLayout
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.label import Label
+from kivy.uix.modalview import ModalView
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.textinput import TextInput
+from kivy.uix.widget import Widget
 
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.button import MDIconButton
+from kivymd.uix.card import MDCard
 from kivymd.uix.label import MDLabel
-from kivymd.uix.card import MDCard 
-from kivymd.uix.scrollview import MDScrollView
-from kivy.uix.modalview import ModalView
-from kivy.uix.button import Button
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.scrollview import ScrollView
-from kivy.metrics import dp
-from kivy.clock import Clock
-from kivy.uix.label import Label
-from kivy.uix.textinput import TextInput
-from kivy.core.window import Window
-from ide_core.themes import DARK_THEME, LIGHT_THEME, ThemeManager
-from widgets.markdown_label import MarkdownLabel
+
+try:
+    from ide_core.themes import DARK_THEME, LIGHT_THEME, ThemeManager
+except Exception:  # pragma: no cover - автономный запуск
+    ThemeManager = None
+    DARK_THEME = {
+        "popup_bg": (0.09, 0.09, 0.12, 1),
+        "window_bg": (0.07, 0.07, 0.09, 1),
+        "widget_bg": (0.16, 0.16, 0.20, 1),
+        "text_color": (0.93, 0.93, 0.96, 1),
+        "run_btn_bg": (0.596, 0.486, 1.0, 1),
+        "btn_danger_bg": (0.85, 0.30, 0.35, 1),
+    }
+    LIGHT_THEME = {
+        "popup_bg": (0.97, 0.97, 0.98, 1),
+        "window_bg": (1, 1, 1, 1),
+        "widget_bg": (0.90, 0.90, 0.93, 1),
+        "text_color": (0.10, 0.10, 0.14, 1),
+        "run_btn_bg": (0.44, 0.35, 0.92, 1),
+        "btn_danger_bg": (0.85, 0.30, 0.35, 1),
+    }
+
+MarkdownLabel = None
+for _md_path in (
+    "widgets.markdown_label",
+    "ui.widgets.markdown_label",
+    "ui.markdown_label",
+    "markdown_label",
+):
+    try:
+        MarkdownLabel = __import__(_md_path, fromlist=["MarkdownLabel"]).MarkdownLabel
+        break
+    except Exception:
+        continue
+
+
+if MarkdownLabel is not None:
+
+    class BubbleMarkdownLabel(MarkdownLabel):
+        """MarkdownLabel без собственного фона — фон рисует пузырь."""
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.padding = [0, 0, 0, 0]
+            self.spacing = dp(2)
+
+        def _update_background(self, *args):
+            self.canvas.before.clear()
+
+        def set_text(self, text):
+            super().set_text(text)
+            Clock.schedule_once(self._fix_code_blocks, 0)
+            Clock.schedule_once(self._fix_code_blocks, 0.15)
+
+        def _fix_code_blocks(self, *args):
+            """Код-блок должен показывать все строки с первой, а не скроллиться."""
+            for ti in _iter_text_inputs(self):
+                ti.cursor = (0, 0)
+                ti.scroll_y = 0
+                ti.scroll_x = 0
+
+else:  # pragma: no cover - автономный запуск
+    BubbleMarkdownLabel = None
+
+
+def _iter_text_inputs(widget):
+    for child in widget.children:
+        if isinstance(child, TextInput):
+            yield child
+        else:
+            for sub in _iter_text_inputs(child):
+                yield sub
+
+
+MAX_BUBBLE_RATIO = 0.82          # максимальная ширина пузыря от ширины чата
+MAX_MD_BUBBLE_RATIO = 0.97       # markdown-ответ занимает почти всю ширину
+INPUT_MIN_HEIGHT = dp(44)
+INPUT_MAX_HEIGHT = dp(132)
+BUBBLE_RADIUS = dp(16)
+BUBBLE_TAIL_RADIUS = dp(4)
+
+
+def _mix(color, other, k):
+    """Линейная интерполяция цветов."""
+    return tuple(c + (o - c) * k for c, o in zip(color[:4], other[:4]))
+
+
+def _now():
+    return datetime.now().strftime("%H:%M")
+
+
+class ChatTextInput(TextInput):
+    """TextInput с отправкой по Enter и переносом по Shift+Enter."""
+
+    def __init__(self, on_submit=None, **kwargs):
+        super().__init__(**kwargs)
+        self.on_submit = on_submit
+
+    def keyboard_on_key_down(self, window, keycode, text, modifiers):
+        if keycode[1] in ("enter", "numpadenter") and "shift" not in (modifiers or []):
+            if self.on_submit:
+                self.on_submit()
+            return True
+        return super().keyboard_on_key_down(window, keycode, text, modifiers)
+
+
+class MessageRow(BoxLayout):
+    """Строка сообщения: пузырь + распорка, прижимающая его к нужному краю."""
+
+    def __init__(self, theme, text, side="left", markdown=False, **kwargs):
+        super().__init__(
+            orientation="horizontal",
+            size_hint_y=None,
+            spacing=dp(6),
+            **kwargs,
+        )
+        self.theme = theme
+        self.side = side
+        self.markdown = markdown and BubbleMarkdownLabel is not None
+
+        is_user = side == "right"
+        base = theme["widget_bg"]
+        accent = theme.get("run_btn_bg", (0.596, 0.486, 1.0, 1))
+        bubble_bg = _mix(base, accent, 0.55) if is_user else base
+        text_color = (1, 1, 1, 1) if is_user else theme["text_color"]
+
+        radius = (
+            [BUBBLE_RADIUS, BUBBLE_RADIUS, BUBBLE_TAIL_RADIUS, BUBBLE_RADIUS]
+            if is_user
+            else [BUBBLE_RADIUS, BUBBLE_RADIUS, BUBBLE_RADIUS, BUBBLE_TAIL_RADIUS]
+        )
+
+        self.bubble = MDCard(
+            orientation="vertical",
+            size_hint=(None, None),
+            padding=[dp(12), dp(8), dp(12), dp(6)],
+            spacing=dp(2),
+            radius=radius,
+            md_bg_color=bubble_bg,
+            elevation=0,
+            ripple_behavior=False,
+        )
+
+        self._raw_text = text
+        self._pending_text = None
+        self._render_ev = None
+
+        if markdown and BubbleMarkdownLabel is not None:
+            self.label = BubbleMarkdownLabel(text=text, font_size=sp(15))
+            self.label.bind(height=lambda *_: self._resize())
+        else:
+            self.label = Label(
+                text=text,
+                markup=False,
+                size_hint=(None, None),
+                halign="left",
+                valign="top",
+                color=text_color,
+                font_size=sp(15),
+                line_height=1.15,
+            )
+            self.label.bind(texture_size=lambda *_: self._resize())
+
+        self.meta = Label(
+            text=_now(),
+            size_hint=(1, None),
+            height=dp(13),
+            halign="right",
+            valign="middle",
+            font_size=sp(10),
+            color=_mix(text_color, (0.5, 0.5, 0.5, 1), 0.45),
+        )
+        self.meta.bind(size=lambda inst, val: setattr(inst, "text_size", val))
+
+        self.bubble.add_widget(self.label)
+        self.bubble.add_widget(self.meta)
+
+        spacer = Widget(size_hint_x=1)
+        if is_user:
+            self.add_widget(spacer)
+            self.add_widget(self.bubble)
+        else:
+            self.add_widget(self.bubble)
+            self.add_widget(spacer)
+
+        self._long_press_ev = None
+        self._bubble_bg = bubble_bg
+
+        self.bind(width=lambda *_: self._resize())
+        Clock.schedule_once(lambda dt: self._resize(), 0)
+
+    # -- копирование ------------------------------------------------------
+    def on_touch_down(self, touch):
+        if self.bubble.collide_point(*touch.pos):
+            if touch.button == "right":
+                self.copy_to_clipboard()
+                return True
+            self._long_press_ev = Clock.schedule_once(
+                lambda dt: self.copy_to_clipboard(), 0.45
+            )
+        return super().on_touch_down(touch)
+
+    def on_touch_up(self, touch):
+        self._cancel_long_press()
+        return super().on_touch_up(touch)
+
+    def on_touch_move(self, touch):
+        self._cancel_long_press()
+        return super().on_touch_move(touch)
+
+    def _cancel_long_press(self):
+        if self._long_press_ev is not None:
+            self._long_press_ev.cancel()
+            self._long_press_ev = None
+
+    def copy_to_clipboard(self, *args):
+        self._long_press_ev = None
+        if not self._raw_text:
+            return
+        try:
+            Clipboard.copy(self._raw_text)
+        except Exception as e:
+            print(f"[AI Chat] clipboard error: {e}")
+            return
+        flash = _mix(self._bubble_bg, (1, 1, 1, 1), 0.25)
+        self.bubble.md_bg_color = flash
+        Animation(md_bg_color=self._bubble_bg, d=0.35).start(self.bubble)
+
+    # -- публичный API ----------------------------------------------------
+    def set_text(self, text):
+        """Markdown перерисовывается пачками, иначе стриминг тормозит."""
+        self._raw_text = text
+        if not self.markdown:
+            self.label.text = text
+            self._resize()
+            return
+
+        self._pending_text = text
+        if self._render_ev is None:
+            self._render_ev = Clock.schedule_once(self._render_pending, 0.12)
+
+    def flush_text(self):
+        if self._render_ev is not None:
+            self._render_ev.cancel()
+            self._render_ev = None
+        self._render_pending()
+
+    def get_text(self):
+        return self._raw_text
+
+    def _render_pending(self, *args):
+        self._render_ev = None
+        if self._pending_text is None:
+            return
+        text, self._pending_text = self._pending_text, None
+        self.label.set_text(text)
+        self._resize()
+
+    # -- внутреннее -------------------------------------------------------
+    def _resize(self, *args):
+        if self.width <= 1:
+            return
+        ratio = MAX_MD_BUBBLE_RATIO if self.markdown else MAX_BUBBLE_RATIO
+        max_w = max(dp(120), self.width * ratio)
+        inner_w = max_w - dp(24)
+
+        if isinstance(self.label, Label):
+            self.label.text_size = (inner_w, None)
+            self.label.texture_update()
+            text_w = min(inner_w, self.label.texture_size[0])
+            text_w = max(text_w, dp(60))
+            self.label.width = text_w
+            self.label.height = self.label.texture_size[1]
+            bubble_w = text_w + dp(24)
+        else:
+            self.label.width = inner_w
+            bubble_w = max_w
+
+        content_h = max(getattr(self.label, "height", 0) or 0, dp(20))
+        self.bubble.width = bubble_w
+        self.bubble.height = content_h + self.meta.height + dp(18)
+        self.height = self.bubble.height
+
+
+class TypingRow(BoxLayout):
+    """Анимированный индикатор «печатает…»."""
+
+    def __init__(self, theme, **kwargs):
+        super().__init__(orientation="horizontal", size_hint_y=None, height=dp(38), **kwargs)
+        self.bubble = MDCard(
+            size_hint=(None, None),
+            size=(dp(64), dp(34)),
+            padding=dp(8),
+            radius=[BUBBLE_RADIUS, BUBBLE_RADIUS, BUBBLE_RADIUS, BUBBLE_TAIL_RADIUS],
+            md_bg_color=theme["widget_bg"],
+            elevation=0,
+        )
+        self.dots = Label(
+            text="•  •  •",
+            color=_mix(theme["text_color"], (0.5, 0.5, 0.5, 1), 0.3),
+            font_size=sp(18),
+        )
+        self.bubble.add_widget(self.dots)
+        self.add_widget(self.bubble)
+        self.add_widget(Widget(size_hint_x=1))
+        self._step = 0
+        self._ev = Clock.schedule_interval(self._tick, 0.35)
+
+    def _tick(self, dt):
+        self._step = (self._step + 1) % 3
+        self.dots.text = ("•  ", "•  •  ", "•  •  •")[self._step]
+
+    def stop(self):
+        if self._ev:
+            self._ev.cancel()
+            self._ev = None
 
 
 class AiChatScreen(MDBoxLayout):
+    """Экран чата. Прилипает к клавиатуре через свойство keyboard_height."""
+
+    keyboard_height = NumericProperty(0)
+
     def __init__(self, agent, locale="ru", get_context_callback=None, **kwargs):
         super().__init__(**kwargs)
         self.agent = agent
@@ -28,385 +362,443 @@ class AiChatScreen(MDBoxLayout):
         self.get_context = get_context_callback or (lambda: "")
         self.modal = None
         self._is_generating = False
-        self._current_bot_card = None
-        self._current_bot_label = None
-        self._user_scrolled = False  # Флаг, чтобы определить, скроллил ли пользователь
+        self._current_row = None
+        self._typing = None
+        self._stick_to_bottom = True
 
-        # Получаем тему
         self._update_theme()
 
-        # НЕ слушаем клавиатуру для скролла
-        # Window.bind(keyboard_height=self._on_keyboard_height)  # УБИРАЕМ!
-        
-        # Layout
         self.orientation = "vertical"
-        self.spacing = dp(10)
-        self.padding = dp(16)
-        self.md_bg_color = self.theme['popup_bg']
-        
-        # Верхняя панель
-        header_box = MDBoxLayout(
+        self.spacing = 0
+        self.padding = 0
+        self.md_bg_color = self.theme["popup_bg"]
+
+        self._build_header()
+        self._build_messages()
+        self._build_composer()
+
+        self.bind(keyboard_height=self._apply_keyboard_height)
+        Clock.schedule_once(lambda dt: self._load_history(), 0.05)
+
+    # ------------------------------------------------------------------ UI
+    def _build_header(self):
+        header = MDBoxLayout(
             orientation="horizontal",
             size_hint_y=None,
-            height=dp(50),
-            spacing=dp(0),
-            padding=dp(10)
+            height=dp(56),
+            padding=[dp(16), 0, dp(8), 0],
+            spacing=dp(8),
+            md_bg_color=_mix(self.theme["popup_bg"], self.theme["widget_bg"], 0.6),
         )
-        
-        title_label = MDLabel(
-            text="ИИ-тьютор" if locale == "ru" else "AI Tutor",
-            size_hint_x=0.8,
+        title = MDLabel(
+            text="ИИ-тьютор" if self.locale == "ru" else "AI Tutor",
             font_style="H6",
             theme_text_color="Custom",
-            text_color=self.theme['text_color']
+            text_color=self.theme["text_color"],
+            shorten=True,
         )
-        
-        close_btn = Button(
-            text='X',
+        self.subtitle = MDLabel(
+            text="онлайн" if self.locale == "ru" else "online",
+            font_style="Caption",
+            theme_text_color="Custom",
             size_hint_x=None,
-            width=dp(40),
-            background_color=self.theme.get('btn_danger_bg', (0.5, 0.2, 0.2, 1)),
-            background_normal='', background_down='',
-            color=(1, 1, 1, 1),
-            font_size=dp(16),
-            bold=True
+            width=dp(90),
+            halign="right",
+            text_color=_mix(self.theme["text_color"], (0.5, 0.5, 0.5, 1), 0.4),
         )
-        close_btn.bind(on_release=self.close_modal)
-        
-        header_box.add_widget(title_label)
-        header_box.add_widget(close_btn)
-        self.add_widget(header_box)
-        
-        # Контейнер
-        content_box = MDBoxLayout(
-            orientation="vertical",
-            size_hint_y=1
+        close_btn = MDIconButton(
+            icon="close",
+            theme_text_color="Custom",
+            text_color=self.theme["text_color"],
+            on_release=self.close_modal,
         )
-        
-        # ScrollView с сообщениями
+        header.add_widget(title)
+        header.add_widget(self.subtitle)
+        header.add_widget(close_btn)
+        self.add_widget(header)
+
+    def _build_messages(self):
+        holder = FloatLayout(size_hint_y=1)
+
         self.scroll = ScrollView(
             do_scroll_x=False,
             do_scroll_y=True,
-            size_hint_y=1
+            bar_width=dp(2),
+            scroll_type=["bars", "content"],
+            size_hint=(1, 1),
+            pos_hint={"x": 0, "y": 0},
         )
-        
         self.messages_box = BoxLayout(
             orientation="vertical",
-            spacing=dp(10),
+            spacing=dp(8),
             size_hint_y=None,
-            padding=dp(8)
+            padding=[dp(12), dp(12), dp(12), dp(12)],
         )
-        
-        # ВАЖНО: НЕ привязываем minimum_height к высоте!
-        # Вместо этого устанавливаем высоту вручную при добавлении виджетов
+        self.messages_box.bind(minimum_height=self.messages_box.setter("height"))
+        self.messages_box.bind(height=lambda *_: self._maybe_autoscroll())
+        self.scroll.bind(scroll_y=self._on_scroll)
         self.scroll.add_widget(self.messages_box)
-        content_box.add_widget(self.scroll)
+        holder.add_widget(self.scroll)
+
+        self.jump_btn = MDIconButton(
+            icon="chevron-down",
+            theme_text_color="Custom",
+            text_color=self.theme["text_color"],
+            md_bg_color=_mix(self.theme["widget_bg"], (0, 0, 0, 1), 0.15),
+            icon_size=sp(16),
+            size_hint=(None, None),
+            size=(dp(28), dp(28)),
+            pos_hint={"right": 0.99, "y": 0.01},
+            opacity=0,
+            disabled=True,
+            on_release=lambda *_: self.scroll_to_bottom(force=True),
+        )
+        holder.add_widget(self.jump_btn)
+        self.add_widget(holder)
+
+    def _build_composer(self):
+        self.composer = MDBoxLayout(
+            orientation="vertical",
+            size_hint_y=None,
+            height=dp(96),
+            padding=[dp(10), dp(6), dp(10), dp(8)],
+            spacing=dp(6),
+            md_bg_color=_mix(self.theme["popup_bg"], self.theme["widget_bg"], 0.45),
+        )
 
         # Быстрые действия
-        actions_box = MDBoxLayout(
+        actions = MDBoxLayout(
             orientation="horizontal",
             size_hint_y=None,
-            height=dp(40),
-            spacing=dp(8)
+            height=dp(32),
+            spacing=dp(4),
         )
-        
-        btn_clear = MDIconButton(
-            icon="delete",
-            on_release=lambda x: self._quick("clear"),
-            size_hint_x=None,
-            width=dp(40),
-            theme_text_color="Custom",
-            text_color=self.theme['text_color']
-        )
-        btn_error = MDIconButton(
-            icon="alert-circle",
-            on_release=lambda x: self._quick("error"),
-            size_hint_x=None,
-            width=dp(40),
-            theme_text_color="Custom",
-            text_color=self.theme['text_color']
-        )
-        btn_review = MDIconButton(
-            icon="code-tags",
-            on_release=lambda x: self._quick("review"),
-            size_hint_x=None,
-            width=dp(40),
-            theme_text_color="Custom",
-            text_color=self.theme['text_color']
-        )
+        for icon, action, tip in (
+            ("delete-outline", "clear", "Очистить"),
+            ("alert-circle-outline", "error", "Объяснить ошибку"),
+            ("code-tags", "review", "Разбор кода"),
+        ):
+            actions.add_widget(
+                MDIconButton(
+                    icon=icon,
+                    size_hint=(None, None),
+                    size=(dp(32), dp(32)),
+                    theme_text_color="Custom",
+                    text_color=_mix(self.theme["text_color"], (0.5, 0.5, 0.5, 1), 0.3),
+                    on_release=lambda _w, a=action: self._quick(a),
+                )
+            )
+        actions.add_widget(Widget())
+        self.composer.add_widget(actions)
 
-        self.stop_btn = MDIconButton(
-            icon="stop",
-            size_hint_x=None,
-            width=dp(40),
-            height=dp(40),
-            theme_text_color="Custom",
-            text_color=self.theme['text_color'],
-            md_bg_color=self.theme['widget_bg'],
-            on_release=self._stop_generation
-        )
-        self.stop_btn.disabled = True
-
-        actions_box.add_widget(btn_clear)
-        actions_box.add_widget(btn_error)
-        actions_box.add_widget(btn_review)
-        actions_box.add_widget(self.stop_btn)
-        content_box.add_widget(actions_box)
-
-        # Поле ввода
-        input_box = MDBoxLayout(
+        row = MDBoxLayout(
             orientation="horizontal",
             size_hint_y=None,
-            height=dp(80),
-            spacing=dp(10)
+            height=INPUT_MIN_HEIGHT,
+            spacing=dp(8),
         )
-        
-        self.text_input = TextInput(
-            hint_text="Спроси что-нибудь..." if locale == "ru" else "Ask something...",
-            size_hint_x=1,
+
+        field = MDCard(
+            size_hint=(1, None),
+            height=INPUT_MIN_HEIGHT,
+            radius=[dp(22)],
+            md_bg_color=self.theme["widget_bg"],
+            elevation=0,
+            padding=[dp(6), dp(2), dp(6), dp(2)],
+        )
+        self.text_input = ChatTextInput(
+            on_submit=self._send,
+            hint_text="Сообщение…" if self.locale == "ru" else "Message…",
             multiline=True,
-            foreground_color=self.theme['text_color'],
-            hint_text_color=self.theme['text_color'],
-            background_color=self.theme['widget_bg'],
-            cursor_color=self.theme['text_color'],
-            padding=[dp(10), dp(10)],
-            input_type='text'
+            size_hint_y=None,
+            height=INPUT_MIN_HEIGHT - dp(4),
+            foreground_color=self.theme["text_color"],
+            hint_text_color=_mix(self.theme["text_color"], (0.5, 0.5, 0.5, 1), 0.5),
+            background_color=(0, 0, 0, 0),
+            cursor_color=self.theme.get("run_btn_bg", (0.6, 0.5, 1, 1)),
+            padding=[dp(10), dp(10), dp(10), dp(10)],
+            font_size=sp(15),
+            input_type="text",
+            use_bubble=True,
+            use_handles=True,
+            selection_color=(0.3, 0.6, 1.0, 0.35),
         )
+        self.text_input.bind(minimum_height=lambda *_: self._grow_input())
+        self.text_input.bind(text=lambda *_: self._grow_input())
+        field.add_widget(self.text_input)
+        self.field = field
 
-        send_btn = MDIconButton(
+        self.send_btn = MDIconButton(
             icon="send",
-            size_hint_x=None,
-            width=dp(30),
-            height=dp(30),
-            icon_size=dp(16),
+            size_hint=(None, None),
+            size=(dp(44), dp(44)),
+            icon_size=sp(20),
             theme_text_color="Custom",
-            text_color=(0, 0, 0, 1),
-            md_bg_color=self.theme.get('run_btn_bg', (0.596, 0.486, 1.0, 1)),
-            on_release=self._send
+            text_color=(1, 1, 1, 1),
+            md_bg_color=self.theme.get("run_btn_bg", (0.596, 0.486, 1.0, 1)),
+            on_release=self._on_send_pressed,
         )
 
-        input_box.add_widget(self.text_input)
-        input_box.add_widget(send_btn)
-        content_box.add_widget(input_box)
+        send_holder = AnchorLayout(
+            anchor_y="bottom",
+            anchor_x="center",
+            size_hint=(None, 1),
+            width=dp(44),
+        )
+        send_holder.add_widget(self.send_btn)
 
-        self.add_widget(content_box)
+        row.add_widget(field)
+        row.add_widget(send_holder)
+        self.input_row = row
+        self.composer.add_widget(row)
+        self.add_widget(self.composer)
 
-        # Загружаем историю
-        Clock.schedule_once(lambda dt: self._load_history(), 0.05)
+    # ------------------------------------------------------- клавиатура
+    def _apply_keyboard_height(self, *args):
+        """Поднимает чат ровно на высоту клавиатуры (впритык, без зазора)."""
+        self.padding = [0, 0, 0, max(0, self.keyboard_height)]
+        Clock.schedule_once(lambda dt: self.scroll_to_bottom(force=True), 0)
+
+    def set_keyboard_height(self, height, animated=True):
+        height = max(0, float(height))
+        Animation.cancel_all(self, "keyboard_height")
+        if animated and abs(height - self.keyboard_height) > dp(1):
+            Animation(keyboard_height=height, d=0.16, t="out_quad").start(self)
+        else:
+            self.keyboard_height = height
+
+    # ------------------------------------------------------------ скролл
+    def _on_scroll(self, *args):
+        if self.messages_box.height <= self.scroll.height:
+            self._stick_to_bottom = True
+        else:
+            self._stick_to_bottom = self.scroll.scroll_y <= 0.02
+        self._update_jump_btn()
+
+    def _update_jump_btn(self):
+        visible = not self._stick_to_bottom
+        self.jump_btn.disabled = not visible
+        Animation.cancel_all(self.jump_btn, "opacity")
+        Animation(opacity=1 if visible else 0, d=0.15).start(self.jump_btn)
+
+    def _maybe_autoscroll(self):
+        if self._stick_to_bottom:
+            self.scroll_to_bottom()
+
+    def scroll_to_bottom(self, force=False, animated=True):
+        if not force and not self._stick_to_bottom:
+            return
+
+        def _do(dt):
+            self._stick_to_bottom = True
+            Animation.cancel_all(self.scroll, "scroll_y")
+            if animated:
+                Animation(scroll_y=0, d=0.18, t="out_quad").start(self.scroll)
+            else:
+                self.scroll.scroll_y = 0
+            self._update_jump_btn()
+
+        Clock.schedule_once(_do, 0)
+
+    # ------------------------------------------------------------- ввод
+    def _grow_input(self):
+        needed = self.text_input.minimum_height + dp(4)
+        height = max(INPUT_MIN_HEIGHT, min(INPUT_MAX_HEIGHT, needed))
+        self.text_input.height = height - dp(4)
+        self.field.height = height
+        self.input_row.height = height
+        self.composer.height = height + dp(32) + dp(20)
+
+    def _on_send_pressed(self, *args):
+        if self._is_generating:
+            self._stop_generation()
+        else:
+            self._send()
+
+    def _set_generating(self, value):
+        self._is_generating = value
+        self.send_btn.icon = "stop" if value else "send"
+        self.send_btn.md_bg_color = (
+            self.theme.get("btn_danger_bg", (0.85, 0.3, 0.35, 1))
+            if value
+            else self.theme.get("run_btn_bg", (0.596, 0.486, 1.0, 1))
+        )
+        self.subtitle.text = (
+            ("печатает…" if self.locale == "ru" else "typing…")
+            if value
+            else ("онлайн" if self.locale == "ru" else "online")
+        )
+
+    # --------------------------------------------------------- сообщения
+    def _add_row(self, text, side, markdown=False):
+        row = MessageRow(self.theme, text, side=side, markdown=markdown)
+        self.messages_box.add_widget(row)
+        self.scroll_to_bottom()
+        return row
+
+    def _add_user(self, text):
+        self._update_theme()
+        return self._add_row(text, side="right")
+
+    def _add_bot(self, text):
+        self._update_theme()
+        return self._add_row(text, side="left", markdown=True)
+
+    def _show_typing(self):
+        if self._typing:
+            return
+        self._typing = TypingRow(self.theme)
+        self.messages_box.add_widget(self._typing)
+        self.scroll_to_bottom()
+
+    def _hide_typing(self):
+        if self._typing:
+            self._typing.stop()
+            self.messages_box.remove_widget(self._typing)
+            self._typing = None
 
     def _load_history(self):
-        """Загружает историю без автоскролла"""
         with self.agent._lock:
             history = self.agent.history.copy()
 
         if not history:
             self._add_bot(
-                "Привет! Я ИИ-тьютор по Python. Задавай вопросы о коде, ошибках или уроках!" if self.locale == "ru"
+                "Привет! Я ИИ-тьютор по Python. Задавай вопросы о коде, ошибках или уроках!"
+                if self.locale == "ru"
                 else "Hi! I'm an AI Python tutor. Ask about code, errors or lessons!"
             )
-            return
+        else:
+            for msg in history:
+                if msg["role"] == "user":
+                    self._add_user(msg["content"])
+                elif msg["role"] == "assistant":
+                    self._add_bot(msg["content"])
 
-        for msg in history:
-            if msg["role"] == "user":
-                self._add_user(msg["content"])
-            elif msg["role"] == "assistant":
-                self._add_bot(msg["content"])
+        self.scroll_to_bottom(force=True, animated=False)
 
-        # НЕ скроллим вниз - оставляем наверху
-    
+    # -------------------------------------------------------------- тема
     def _update_theme(self):
         try:
             if ThemeManager:
                 theme = ThemeManager.get_theme()
-                if theme and theme.get('name') == 'light':
-                    self.theme = LIGHT_THEME
-                else:
-                    self.theme = DARK_THEME
-        except:
+                self.theme = LIGHT_THEME if theme and theme.get("name") == "light" else DARK_THEME
+            else:
+                self.theme = DARK_THEME
+        except Exception:
             self.theme = DARK_THEME
-    
+
     def close_modal(self, *args):
         if self.modal:
             self.modal.dismiss()
-    
-    def _add_user(self, text):
-        self._update_theme()
-        
-        card = MDCard(
-            size_hint_y=None,
-            padding=dp(10),
-            radius=[12],
-            pos_hint={"right": 1},
-            md_bg_color=self.theme['widget_bg'],
-        )
-        
-        label = Label(
-            text=text,
-            size_hint_y=None,
-            valign='top',
-            halign='right',
-            text_size=(None, None),
-            color=self.theme['text_color'],
-            font_size=dp(14)
-        )
-        
-        card.add_widget(label)
-        self.messages_box.add_widget(card)
-        
-        # ОБНОВЛЯЕМ ВЫСОТУ ВРУЧНУЮ
-        def update_height(dt):
-            if hasattr(label, 'texture_size') and label.texture_size:
-                label.text_size = (card.width - dp(24), None)
-                label.height = label.texture_size[1]
-                card.height = label.height + dp(20)
-                
-                # ОБНОВЛЯЕМ ОБЩУЮ ВЫСОТУ КОНТЕЙНЕРА
-                self._update_messages_height()
-        
-        Clock.schedule_once(update_height, 0.1)
-    
-    def _update_messages_height(self):
-        """Обновляет общую высоту контейнера сообщений"""
-        total_height = dp(8)  # padding
+
+    def copy_last_answer(self, *args):
         for child in self.messages_box.children:
-            if hasattr(child, 'height'):
-                total_height += child.height + dp(10)  # spacing
-        
-        # Устанавливаем высоту контейнера
-        self.messages_box.height = total_height
-        
-        # НЕ скроллим автоматически!
-    
-    def _add_bot(self, text, is_streaming=False):
-        self._update_theme()
+            if isinstance(child, MessageRow) and child.side == "left":
+                Clipboard.copy(child.get_text())
+                return
 
-        if is_streaming and self._current_bot_card:
-            # Обновляем существующую карточку
-            self._current_bot_label.set_text(text)
-            self._update_bot_height()
-            return
-
-        card = MDCard(
-            size_hint_y=None,
-            padding=dp(10),
-            radius=[12],
-            md_bg_color=self.theme['widget_bg'],
-        )
-
-        label = MarkdownLabel(
-            text=text,
-            font_size=dp(14)
-        )
-
-        card.add_widget(label)
-        self.messages_box.add_widget(card)
-
-        self._current_bot_card = card
-        self._current_bot_label = label
-
-        # Устанавливаем высоту
-        def update_height(dt):
-            if hasattr(label, 'height') and label.height > 0:
-                card.height = label.height + dp(20)
-            else:
-                card.height = dp(60)
-            
-            # ОБНОВЛЯЕМ ОБЩУЮ ВЫСОТУ КОНТЕЙНЕРА
-            self._update_messages_height()
-        
-        Clock.schedule_once(update_height, 0.1)
-
-    def _update_bot_height(self):
-        """Обновляет высоту карточки бота"""
-        if self._current_bot_card and self._current_bot_label:
-            def update_height(dt):
-                if hasattr(self._current_bot_label, 'height') and self._current_bot_label.height > 0:
-                    self._current_bot_card.height = self._current_bot_label.height + dp(20)
-                else:
-                    self._current_bot_card.height = dp(60)
-                
-                # ОБНОВЛЯЕМ ОБЩУЮ ВЫСОТУ
-                self._update_messages_height()
-            
-            Clock.schedule_once(update_height, 0.05)
-    
+    # ------------------------------------------------------------ логика
     def _send(self, *args):
         text = self.text_input.text.strip()
-        if not text:
+        if not text or self._is_generating:
             return
         self.text_input.text = ""
+        self._grow_input()
         self._add_user(text)
 
-        self._is_generating = True
-        self.text_input.disabled = True
-        self.stop_btn.disabled = False
-
-        self._add_bot("", is_streaming=True)
+        self._set_generating(True)
+        self._show_typing()
 
         def stream_callback(chunk):
             if not self._is_generating:
                 return
-            try:
-                current_text = self._current_bot_label.text if self._current_bot_label else ""
-                new_text = current_text + chunk
-                self._add_bot(new_text, is_streaming=True)
-            except Exception as e:
-                print(f"[AI Chat] Stream callback error: {e}")
+
+            def apply(dt):
+                if not self._is_generating:
+                    return
+                self._hide_typing()
+                if self._current_row is None:
+                    self._current_row = self._add_bot(chunk)
+                else:
+                    self._current_row.set_text(self._current_row.get_text() + chunk)
+                self.scroll_to_bottom()
+
+            Clock.schedule_once(apply, 0)
 
         def ok(answer):
-            self._is_generating = False
-            self.text_input.disabled = False
-            self.stop_btn.disabled = True
-            self._add_bot(answer, is_streaming=True)
-            self._current_bot_card = None
-            self._current_bot_label = None
-            # НЕ скроллим
+            def apply(dt):
+                self._hide_typing()
+                if self._current_row is None:
+                    self._add_bot(answer)
+                else:
+                    self._current_row.set_text(answer)
+                    self._current_row.flush_text()
+                self._current_row = None
+                self._set_generating(False)
+                self.scroll_to_bottom()
+
+            Clock.schedule_once(apply, 0)
 
         def err(e):
-            self._is_generating = False
-            self.text_input.disabled = False
-            self.stop_btn.disabled = True
-            self._add_bot(f"Ошибка: {e}")
-            self._current_bot_card = None
-            self._current_bot_label = None
+            def apply(dt):
+                self._hide_typing()
+                self._current_row = None
+                self._set_generating(False)
+                self._add_bot(f"⚠️ Ошибка: {e}")
 
-        context = self.get_context()
+            Clock.schedule_once(apply, 0)
+
         self.agent.ask(
             text,
-            context=context,
+            context=self.get_context(),
             locale=self.locale,
             on_success=ok,
             on_error=err,
             stream=True,
-            stream_callback=stream_callback
+            stream_callback=stream_callback,
         )
 
     def _stop_generation(self, *args):
-        if self._is_generating:
-            self._is_generating = False
+        if not self._is_generating:
+            return
+        self._set_generating(False)
+        self._hide_typing()
+        try:
             self.agent.stop_generation()
-            self.text_input.disabled = False
-            self.stop_btn.disabled = True
-            self._current_bot_card = None
-            self._current_bot_label = None
+        except Exception as e:
+            print(f"[AI Chat] stop_generation error: {e}")
+        self._current_row = None
 
     def _quick(self, action):
         if action == "clear":
             self.agent.clear_history()
             self.messages_box.clear_widgets()
+            self._typing = None
             self.text_input.text = ""
+            self._grow_input()
             self._add_bot("Чат очищен." if self.locale == "ru" else "Chat cleared.")
             return
-        
+
         context = self.get_context()
-        
+        self._show_typing()
+        self._set_generating(True)
+
         def ok(answer):
-            self._add_bot(answer)
-            # НЕ скроллим
-        
+            def apply(dt):
+                self._hide_typing()
+                self._set_generating(False)
+                self._add_bot(answer)
+
+            Clock.schedule_once(apply, 0)
+
         def err(e):
-            self._add_bot(f"Ошибка: {e}")
-        
+            def apply(dt):
+                self._hide_typing()
+                self._set_generating(False)
+                self._add_bot(f"⚠️ Ошибка: {e}")
+
+            Clock.schedule_once(apply, 0)
+
         if action == "error":
             self.agent.explain_error(
                 "Последняя ошибка выполнения (если была)",
@@ -417,53 +809,55 @@ class AiChatScreen(MDBoxLayout):
             )
         elif action == "review":
             if not context.strip():
-                self._add_bot("Нет кода для проверки." if self.locale == "ru" else "No code to check.")
+                self._hide_typing()
+                self._set_generating(False)
+                self._add_bot(
+                    "Нет кода для проверки." if self.locale == "ru" else "No code to check."
+                )
                 return
             self.agent.review_code(context, locale=self.locale, on_success=ok, on_error=err)
 
 
 def open_ai_chat(agent, locale="ru", get_context_callback=None):
-    print(f"[AI Chat] Opening AI chat screen...")
-
+    """Открывает чат на весь экран; контент прижимается к клавиатуре."""
     chat_screen = AiChatScreen(agent, locale=locale, get_context_callback=get_context_callback)
     chat_screen.name = "ai_chat_screen"
 
     try:
         if ThemeManager:
             theme = ThemeManager.get_theme()
-            bg_color = theme.get('window_bg', (0.15, 0.15, 0.2, 0.95))
+            bg_color = theme.get("window_bg", (0.08, 0.08, 0.11, 1))
         else:
-            bg_color = (0.15, 0.15, 0.2, 0.95)
-    except:
-        bg_color = (0.15, 0.15, 0.2, 0.95)
+            bg_color = (0.08, 0.08, 0.11, 1)
+    except Exception:
+        bg_color = (0.08, 0.08, 0.11, 1)
 
     modal = ModalView(
-        size_hint=(0.95, 0.85),
+        size_hint=(1, 1),
         background_color=bg_color,
+        auto_dismiss=False,
+        padding=0,
     )
-
     chat_screen.modal = modal
 
-    Window.softinput_mode = 'pan'
-    original_size_hint_y = modal.size_hint_y
+    # Клавиатуру двигаем сами: никакого pan/scale от Kivy,
+    # иначе окно уезжает и между полем ввода и клавиатурой остаётся зазор.
+    previous_softinput = Window.softinput_mode
+    Window.softinput_mode = ""
 
-    def on_keyboard_height(instance, keyboard_height):
-        if keyboard_height > 0:
-            window_height = Window.height
-            available_height = window_height - keyboard_height
-            modal.size_hint_y = min(0.85, available_height / window_height)
-        else:
-            modal.size_hint_y = original_size_hint_y
+    def on_keyboard_height(_window, height):
+        chat_screen.set_keyboard_height(height)
 
     Window.bind(keyboard_height=on_keyboard_height)
+    chat_screen.set_keyboard_height(Window.keyboard_height, animated=False)
 
     modal.add_widget(chat_screen)
     modal.open()
 
-    def on_dismiss(instance):
+    def on_dismiss(_instance):
         Window.unbind(keyboard_height=on_keyboard_height)
-        Window.softinput_mode = 'below_target'
+        Window.softinput_mode = previous_softinput
+        chat_screen._hide_typing()
 
     modal.bind(on_dismiss=on_dismiss)
-
     return modal
