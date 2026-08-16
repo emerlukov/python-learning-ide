@@ -19,6 +19,7 @@ from kivy.core.clipboard import Clipboard
 from kivy.core.window import Window
 from kivy.metrics import dp, sp
 from kivy.properties import NumericProperty
+from kivy.utils import platform
 from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
@@ -556,16 +557,41 @@ class AiChatScreen(MDBoxLayout):
     # ------------------------------------------------------- клавиатура
     def _apply_keyboard_height(self, *args):
         """Поднимает чат ровно на высоту клавиатуры (впритык, без зазора)."""
-        self.padding = [0, 0, 0, max(0, self.keyboard_height)]
-        Clock.schedule_once(lambda dt: self.scroll_to_bottom(force=True), 0)
+        try:
+            # Защита от некорректных значений
+            safe_height = max(0, float(self.keyboard_height or 0))
+            # Ограничиваем максимальную высоту для безопасности на Android
+            if platform == 'android':
+                safe_height = min(safe_height, Window.height * 0.7)  # Не более 70% высоты экрана
+
+            self.padding = [0, 0, 0, safe_height]
+            Clock.schedule_once(lambda dt: self.scroll_to_bottom(force=True), 0)
+        except Exception as e:
+            print(f"[AI Chat] _apply_keyboard_height error: {e}")
+            # В случае ошибки сбрасываем padding
+            self.padding = [0, 0, 0, 0]
 
     def set_keyboard_height(self, height, animated=True):
-        height = max(0, float(height))
-        Animation.cancel_all(self, "keyboard_height")
-        if animated and abs(height - self.keyboard_height) > dp(1):
-            Animation(keyboard_height=height, d=0.16, t="out_quad").start(self)
-        else:
-            self.keyboard_height = height
+        try:
+            # Безопасное преобразование высоты
+            safe_height = max(0, float(height or 0))
+
+            # Дополнительная защита на Android
+            if platform == 'android':
+                # Ограничиваем максимальную высоту
+                safe_height = min(safe_height, Window.height * 0.7)
+                # Фильтруем слишком маленькие изменения (шум)
+                if abs(safe_height - self.keyboard_height) < dp(2) and self.keyboard_height > 0:
+                    return
+
+            Animation.cancel_all(self, "keyboard_height")
+            if animated and abs(safe_height - self.keyboard_height) > dp(1):
+                Animation(keyboard_height=safe_height, d=0.16, t="out_quad").start(self)
+            else:
+                self.keyboard_height = safe_height
+        except Exception as e:
+            print(f"[AI Chat] set_keyboard_height error: {e}")
+            # В случае ошибки оставляем текущее значение
 
     # ------------------------------------------------------------ скролл
     def _on_scroll(self, *args):
@@ -602,12 +628,33 @@ class AiChatScreen(MDBoxLayout):
 
     # ------------------------------------------------------------- ввод
     def _grow_input(self):
-        needed = self.text_input.minimum_height + dp(4)
-        height = max(INPUT_MIN_HEIGHT, min(INPUT_MAX_HEIGHT, needed))
-        self.text_input.height = height - dp(4)
-        self.field.height = height
-        self.input_row.height = height
-        self.composer.height = height + dp(32) + dp(20)
+        try:
+            # Защита от некорректных значений minimum_height
+            min_h = getattr(self.text_input, 'minimum_height', INPUT_MIN_HEIGHT) or INPUT_MIN_HEIGHT
+            needed = min_h + dp(4)
+
+            # Ограничиваем высоту для безопасности
+            height = max(INPUT_MIN_HEIGHT, min(INPUT_MAX_HEIGHT, needed))
+
+            # Дополнительная защита на Android от слишком больших значений
+            if platform == 'android':
+                max_safe_height = Window.height * 0.4  # Не более 40% высоты экрана
+                height = min(height, max_safe_height)
+
+            self.text_input.height = max(dp(20), height - dp(4))  # Минимальная защита
+            self.field.height = height
+            self.input_row.height = height
+            self.composer.height = height + dp(32) + dp(20)
+        except Exception as e:
+            print(f"[AI Chat] _grow_input error: {e}")
+            # В случае ошибки устанавливаем безопасные значения по умолчанию
+            try:
+                self.text_input.height = INPUT_MIN_HEIGHT - dp(4)
+                self.field.height = INPUT_MIN_HEIGHT
+                self.input_row.height = INPUT_MIN_HEIGHT
+                self.composer.height = INPUT_MIN_HEIGHT + dp(32) + dp(20)
+            except:
+                pass
 
     def _on_send_pressed(self, *args):
         if self._is_generating:
@@ -840,24 +887,68 @@ def open_ai_chat(agent, locale="ru", get_context_callback=None):
     )
     chat_screen.modal = modal
 
-    # Клавиатуру двигаем сами: никакого pan/scale от Kivy,
-    # иначе окно уезжает и между полем ввода и клавиатурой остаётся зазор.
-    previous_softinput = Window.softinput_mode
-    Window.softinput_mode = ""
+    # Безопасная работа с клавиатурой на Android
+    previous_softinput = None
+    keyboard_bound = False
 
-    def on_keyboard_height(_window, height):
-        chat_screen.set_keyboard_height(height)
+    try:
+        if platform == 'android':
+            # Сохраняем текущий режим только если он отличается
+            previous_softinput = Window.softinput_mode
+            # На Android 15 нужно быть осторожным с softinput_mode
+            # Используем 'below_target' вместо '' для совместимости
+            if previous_softinput != 'below_target':
+                Window.softinput_mode = 'below_target'
 
-    Window.bind(keyboard_height=on_keyboard_height)
-    chat_screen.set_keyboard_height(Window.keyboard_height, animated=False)
+        def on_keyboard_height(_window, height):
+            try:
+                # Безопасно обрабатываем изменения высоты клавиатуры
+                if height is not None:
+                    chat_screen.set_keyboard_height(height)
+            except Exception as e:
+                print(f"[AI Chat] keyboard_height error: {e}")
+
+        # Привязываем обработчик только если платформа поддерживает keyboard_height
+        if hasattr(Window, 'keyboard_height'):
+            try:
+                Window.bind(keyboard_height=on_keyboard_height)
+                keyboard_bound = True
+                # Устанавливаем начальную высоту с защитой от ошибок
+                initial_height = getattr(Window, 'keyboard_height', 0) or 0
+                chat_screen.set_keyboard_height(initial_height, animated=False)
+            except Exception as e:
+                print(f"[AI Chat] Failed to bind keyboard_height: {e}")
+                keyboard_bound = False
+
+    except Exception as e:
+        print(f"[AI Chat] Keyboard setup error: {e}")
+        previous_softinput = None
+        keyboard_bound = False
 
     modal.add_widget(chat_screen)
     modal.open()
 
     def on_dismiss(_instance):
-        Window.unbind(keyboard_height=on_keyboard_height)
-        Window.softinput_mode = previous_softinput
-        chat_screen._hide_typing()
+        try:
+            # Безопасно отвязываем обработчик
+            if keyboard_bound:
+                try:
+                    Window.unbind(keyboard_height=on_keyboard_height)
+                except Exception as e:
+                    print(f"[AI Chat] Unbind keyboard_height error: {e}")
+
+            # Безопасно восстанавливаем режим клавиатуры
+            if platform == 'android' and previous_softinput is not None:
+                try:
+                    # Восстанавливаем только если значение действительно отличается
+                    if Window.softinput_mode != previous_softinput:
+                        Window.softinput_mode = previous_softinput
+                except Exception as e:
+                    print(f"[AI Chat] Restore softinput_mode error: {e}")
+
+            chat_screen._hide_typing()
+        except Exception as e:
+            print(f"[AI Chat] Dismiss error: {e}")
 
     modal.bind(on_dismiss=on_dismiss)
     return modal
