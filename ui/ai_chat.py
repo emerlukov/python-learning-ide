@@ -143,86 +143,113 @@ class MessageRow(BoxLayout):
     """Строка сообщения: пузырь + распорка, прижимающая его к нужному краю."""
 
     def __init__(self, theme, text, side="left", markdown=False, **kwargs):
-        super().__init__(
-            orientation="horizontal",
-            size_hint_y=None,
-            spacing=dp(6),
-            **kwargs,
-        )
-        self.theme = theme
-        self.side = side
-        self.markdown = markdown and BubbleMarkdownLabel is not None
-
-        is_user = side == "right"
-        base = theme["widget_bg"]
-        accent = theme.get("run_btn_bg", (0.596, 0.486, 1.0, 1))
-        bubble_bg = _mix(base, accent, 0.55) if is_user else base
-        text_color = (1, 1, 1, 1) if is_user else theme["text_color"]
-
-        radius = (
-            [BUBBLE_RADIUS, BUBBLE_RADIUS, BUBBLE_TAIL_RADIUS, BUBBLE_RADIUS]
-            if is_user
-            else [BUBBLE_RADIUS, BUBBLE_RADIUS, BUBBLE_RADIUS, BUBBLE_TAIL_RADIUS]
-        )
-
-        self.bubble = MDCard(
-            orientation="vertical",
-            size_hint=(None, None),
-            padding=[dp(12), dp(8), dp(12), dp(6)],
-            spacing=dp(2),
-            radius=radius,
-            md_bg_color=bubble_bg,
-            elevation=0,
-            ripple_behavior=False,
-        )
-
-        self._raw_text = text
-        self._pending_text = None
-        self._render_ev = None
-
-        if markdown and BubbleMarkdownLabel is not None:
-            self.label = BubbleMarkdownLabel(text=text, font_size=sp(15))
-            self.label.bind(height=lambda *_: self._resize())
-        else:
-            self.label = Label(
-                text=text,
-                markup=False,
-                size_hint=(None, None),
-                halign="left",
-                valign="top",
-                color=text_color,
-                font_size=sp(15),
-                line_height=1.15,
+        try:
+            super().__init__(
+                orientation="horizontal",
+                size_hint_y=None,
+                spacing=dp(6),
+                **kwargs,
             )
-            self.label.bind(texture_size=lambda *_: self._resize())
+            self.theme = theme
+            self.side = side
+            self.markdown = markdown and BubbleMarkdownLabel is not None
 
-        self.meta = Label(
-            text=_now(),
-            size_hint=(1, None),
-            height=dp(13),
-            halign="right",
-            valign="middle",
-            font_size=sp(10),
-            color=_mix(text_color, (0.5, 0.5, 0.5, 1), 0.45),
-        )
-        self.meta.bind(size=lambda inst, val: setattr(inst, "text_size", val))
+            # Защита от некорректных данных
+            if text is None:
+                text = ""
+            if not isinstance(text, str):
+                text = str(text)
 
-        self.bubble.add_widget(self.label)
-        self.bubble.add_widget(self.meta)
+            is_user = side == "right"
+            base = theme["widget_bg"]
+            accent = theme.get("run_btn_bg", (0.596, 0.486, 1.0, 1))
+            bubble_bg = _mix(base, accent, 0.55) if is_user else base
+            text_color = (1, 1, 1, 1) if is_user else theme["text_color"]
 
-        spacer = Widget(size_hint_x=1)
-        if is_user:
-            self.add_widget(spacer)
-            self.add_widget(self.bubble)
-        else:
-            self.add_widget(self.bubble)
-            self.add_widget(spacer)
+            radius = (
+                [BUBBLE_RADIUS, BUBBLE_RADIUS, BUBBLE_TAIL_RADIUS, BUBBLE_RADIUS]
+                if is_user
+                else [BUBBLE_RADIUS, BUBBLE_RADIUS, BUBBLE_RADIUS, BUBBLE_TAIL_RADIUS]
+            )
 
-        self._long_press_ev = None
-        self._bubble_bg = bubble_bg
+            self.bubble = MDCard(
+                orientation="vertical",
+                size_hint=(None, None),
+                padding=[dp(12), dp(8), dp(12), dp(6)],
+                spacing=dp(2),
+                radius=radius,
+                md_bg_color=bubble_bg,
+                elevation=0,
+                ripple_behavior=False,
+            )
 
-        self.bind(width=lambda *_: self._resize())
-        Clock.schedule_once(lambda dt: self._resize(), 0)
+            self._raw_text = text
+            self._pending_text = None
+            self._render_ev = None
+
+            if markdown and BubbleMarkdownLabel is not None:
+                try:
+                    self.label = BubbleMarkdownLabel(text=text, font_size=sp(15))
+                    self.label.bind(height=lambda *_: self._resize())
+                except Exception as e:
+                    print(f"[AI Chat] BubbleMarkdownLabel creation error: {e}")
+                    # Fallback to regular label
+                    self.label = Label(
+                        text=text,
+                        markup=False,
+                        size_hint=(None, None),
+                        halign="left",
+                        valign="top",
+                        color=text_color,
+                        font_size=sp(15),
+                        line_height=1.15,
+                    )
+                    self.label.bind(texture_size=lambda *_: self._resize())
+            else:
+                self.label = Label(
+                    text=text,
+                    markup=False,
+                    size_hint=(None, None),
+                    halign="left",
+                    valign="top",
+                    color=text_color,
+                    font_size=sp(15),
+                    line_height=1.15,
+                )
+                self.label.bind(texture_size=lambda *_: self._resize())
+
+            self.meta = Label(
+                text=_now(),
+                size_hint=(1, None),
+                height=dp(13),
+                halign="right",
+                valign="middle",
+                font_size=sp(10),
+                color=_mix(text_color, (0.5, 0.5, 0.5, 1), 0.45),
+            )
+            self.meta.bind(size=lambda inst, val: setattr(inst, "text_size", val))
+
+            self.bubble.add_widget(self.label)
+            self.bubble.add_widget(self.meta)
+
+            spacer = Widget(size_hint_x=1)
+            if is_user:
+                self.add_widget(spacer)
+                self.add_widget(self.bubble)
+            else:
+                self.add_widget(self.bubble)
+                self.add_widget(spacer)
+
+            self._long_press_ev = None
+            self._bubble_bg = bubble_bg
+
+            self.bind(width=lambda *_: self._resize())
+            Clock.schedule_once(lambda dt: self._resize(), 0)
+        except Exception as e:
+            print(f"[AI Chat] MessageRow __init__ error: {e}")
+            # Создаем минимальный виджет в случае ошибки
+            self.label = Label(text="Error")
+            self.add_widget(self.label)
 
     # -- копирование ------------------------------------------------------
     def on_touch_down(self, touch):
@@ -264,15 +291,27 @@ class MessageRow(BoxLayout):
     # -- публичный API ----------------------------------------------------
     def set_text(self, text):
         """Markdown перерисовывается пачками, иначе стриминг тормозит."""
-        self._raw_text = text
-        if not self.markdown:
-            self.label.text = text
-            self._resize()
-            return
+        try:
+            # Защита от некорректных данных
+            if text is None:
+                text = ""
+            if not isinstance(text, str):
+                text = str(text)
 
-        self._pending_text = text
-        if self._render_ev is None:
-            self._render_ev = Clock.schedule_once(self._render_pending, 0.12)
+            self._raw_text = text
+            if not self.markdown:
+                try:
+                    self.label.text = text
+                    self._resize()
+                except Exception as e:
+                    print(f"[AI Chat] set_text label error: {e}")
+                return
+
+            self._pending_text = text
+            if self._render_ev is None:
+                self._render_ev = Clock.schedule_once(self._render_pending, 0.12)
+        except Exception as e:
+            print(f"[AI Chat] set_text error: {e}")
 
     def flush_text(self):
         if self._render_ev is not None:
@@ -284,37 +323,67 @@ class MessageRow(BoxLayout):
         return self._raw_text
 
     def _render_pending(self, *args):
-        self._render_ev = None
-        if self._pending_text is None:
-            return
-        text, self._pending_text = self._pending_text, None
-        self.label.set_text(text)
-        self._resize()
+        try:
+            self._render_ev = None
+            if self._pending_text is None:
+                return
+            text, self._pending_text = self._pending_text, None
+            try:
+                self.label.set_text(text)
+                self._resize()
+            except Exception as e:
+                print(f"[AI Chat] _render_pending error: {e}")
+        except Exception as e:
+            print(f"[AI Chat] _render_pending wrapper error: {e}")
+            self._render_ev = None
 
     # -- внутреннее -------------------------------------------------------
     def _resize(self, *args):
-        if self.width <= 1:
-            return
-        ratio = MAX_MD_BUBBLE_RATIO if self.markdown else MAX_BUBBLE_RATIO
-        max_w = max(dp(120), self.width * ratio)
-        inner_w = max_w - dp(24)
+        try:
+            if self.width <= 1:
+                return
+            ratio = MAX_MD_BUBBLE_RATIO if self.markdown else MAX_BUBBLE_RATIO
+            max_w = max(dp(120), self.width * ratio)
+            inner_w = max_w - dp(24)
 
-        if isinstance(self.label, Label):
-            self.label.text_size = (inner_w, None)
-            self.label.texture_update()
-            text_w = min(inner_w, self.label.texture_size[0])
-            text_w = max(text_w, dp(60))
-            self.label.width = text_w
-            self.label.height = self.label.texture_size[1]
-            bubble_w = text_w + dp(24)
-        else:
-            self.label.width = inner_w
-            bubble_w = max_w
+            if isinstance(self.label, Label):
+                try:
+                    self.label.text_size = (inner_w, None)
+                    self.label.texture_update()
+                    text_w = min(inner_w, self.label.texture_size[0])
+                    text_w = max(text_w, dp(60))
+                    self.label.width = text_w
+                    self.label.height = self.label.texture_size[1]
+                    bubble_w = text_w + dp(24)
+                except Exception as e:
+                    print(f"[AI Chat] _resize Label error: {e}")
+                    # Fallback размеры
+                    self.label.width = inner_w
+                    bubble_w = max_w
+            else:
+                try:
+                    self.label.width = inner_w
+                    bubble_w = max_w
+                except Exception as e:
+                    print(f"[AI Chat] _resize MarkdownLabel error: {e}")
+                    bubble_w = max_w
 
-        content_h = max(getattr(self.label, "height", 0) or 0, dp(20))
-        self.bubble.width = bubble_w
-        self.bubble.height = content_h + self.meta.height + dp(18)
-        self.height = self.bubble.height
+            content_h = max(getattr(self.label, "height", 0) or 0, dp(20))
+            try:
+                self.bubble.width = bubble_w
+                self.bubble.height = content_h + self.meta.height + dp(18)
+                self.height = self.bubble.height
+            except Exception as e:
+                print(f"[AI Chat] _resize bubble error: {e}")
+                # Fallback высота
+                self.height = dp(60)
+        except Exception as e:
+            print(f"[AI Chat] _resize error: {e}")
+            # Минимальная высота в случае ошибки
+            try:
+                self.height = dp(60)
+            except:
+                pass
 
 
 class TypingRow(BoxLayout):
@@ -612,19 +681,26 @@ class AiChatScreen(MDBoxLayout):
             self.scroll_to_bottom()
 
     def scroll_to_bottom(self, force=False, animated=True):
-        if not force and not self._stick_to_bottom:
-            return
+        try:
+            if not force and not self._stick_to_bottom:
+                return
 
-        def _do(dt):
-            self._stick_to_bottom = True
-            Animation.cancel_all(self.scroll, "scroll_y")
-            if animated:
-                Animation(scroll_y=0, d=0.18, t="out_quad").start(self.scroll)
-            else:
-                self.scroll.scroll_y = 0
-            self._update_jump_btn()
+            def _do(dt):
+                try:
+                    self._stick_to_bottom = True
+                    if hasattr(self, 'scroll') and self.scroll is not None:
+                        Animation.cancel_all(self.scroll, "scroll_y")
+                        if animated:
+                            Animation(scroll_y=0, d=0.18, t="out_quad").start(self.scroll)
+                        else:
+                            self.scroll.scroll_y = 0
+                    self._update_jump_btn()
+                except Exception as e:
+                    print(f"[AI Chat] scroll_to_bottom _do error: {e}")
 
-        Clock.schedule_once(_do, 0)
+            Clock.schedule_once(_do, 0)
+        except Exception as e:
+            print(f"[AI Chat] scroll_to_bottom error: {e}")
 
     # ------------------------------------------------------------- ввод
     def _grow_input(self):
@@ -678,50 +754,100 @@ class AiChatScreen(MDBoxLayout):
 
     # --------------------------------------------------------- сообщения
     def _add_row(self, text, side, markdown=False):
-        row = MessageRow(self.theme, text, side=side, markdown=markdown)
-        self.messages_box.add_widget(row)
-        self.scroll_to_bottom()
-        return row
+        try:
+            # Защита от некорректных данных
+            if text is None:
+                text = ""
+            if not isinstance(text, str):
+                text = str(text)
+
+            row = MessageRow(self.theme, text, side=side, markdown=markdown)
+            self.messages_box.add_widget(row)
+            self.scroll_to_bottom()
+            return row
+        except Exception as e:
+            print(f"[AI Chat] _add_row error: {e}")
+            # Возвращаем None в случае ошибки
+            return None
 
     def _add_user(self, text):
-        self._update_theme()
-        return self._add_row(text, side="right")
+        try:
+            self._update_theme()
+            return self._add_row(text, side="right")
+        except Exception as e:
+            print(f"[AI Chat] _add_user error: {e}")
+            return None
 
     def _add_bot(self, text):
-        self._update_theme()
-        return self._add_row(text, side="left", markdown=True)
+        try:
+            self._update_theme()
+            return self._add_row(text, side="left", markdown=True)
+        except Exception as e:
+            print(f"[AI Chat] _add_bot error: {e}")
+            return None
 
     def _show_typing(self):
-        if self._typing:
-            return
-        self._typing = TypingRow(self.theme)
-        self.messages_box.add_widget(self._typing)
-        self.scroll_to_bottom()
+        try:
+            if self._typing:
+                return
+            self._typing = TypingRow(self.theme)
+            self.messages_box.add_widget(self._typing)
+            self.scroll_to_bottom()
+        except Exception as e:
+            print(f"[AI Chat] _show_typing error: {e}")
+            self._typing = None
 
     def _hide_typing(self):
-        if self._typing:
-            self._typing.stop()
-            self.messages_box.remove_widget(self._typing)
+        try:
+            if self._typing:
+                self._typing.stop()
+                if hasattr(self, 'messages_box') and self.messages_box is not None:
+                    self.messages_box.remove_widget(self._typing)
+                self._typing = None
+        except Exception as e:
+            print(f"[AI Chat] _hide_typing error: {e}")
             self._typing = None
 
     def _load_history(self):
-        with self.agent._lock:
-            history = self.agent.history.copy()
+        try:
+            history = []
+            try:
+                if hasattr(self, 'agent') and self.agent is not None and hasattr(self.agent, '_lock'):
+                    with self.agent._lock:
+                        history = self.agent.history.copy() if hasattr(self.agent, 'history') else []
+            except Exception as e:
+                print(f"[AI Chat] Error loading history: {e}")
+                history = []
 
-        if not history:
-            self._add_bot(
-                "Привет! Я ИИ-тьютор по Python. Задавай вопросы о коде, ошибках или уроках!"
-                if self.locale == "ru"
-                else "Hi! I'm an AI Python tutor. Ask about code, errors or lessons!"
-            )
-        else:
-            for msg in history:
-                if msg["role"] == "user":
-                    self._add_user(msg["content"])
-                elif msg["role"] == "assistant":
-                    self._add_bot(msg["content"])
+            if not history:
+                self._add_bot(
+                    "Привет! Я ИИ-тьютор по Python. Задавай вопросы о коде, ошибках или уроках!"
+                    if self.locale == "ru"
+                    else "Hi! I'm an AI Python tutor. Ask about code, errors or lessons!"
+                )
+            else:
+                for msg in history:
+                    try:
+                        if isinstance(msg, dict):
+                            if msg.get("role") == "user":
+                                self._add_user(msg.get("content", ""))
+                            elif msg.get("role") == "assistant":
+                                self._add_bot(msg.get("content", ""))
+                    except Exception as e:
+                        print(f"[AI Chat] Error processing history message: {e}")
 
-        self.scroll_to_bottom(force=True, animated=False)
+            self.scroll_to_bottom(force=True, animated=False)
+        except Exception as e:
+            print(f"[AI Chat] _load_history error: {e}")
+            # Показываем приветствие в случае ошибки
+            try:
+                self._add_bot(
+                    "Привет! Я ИИ-тьютор по Python. Задавай вопросы о коде, ошибках или уроках!"
+                    if self.locale == "ru"
+                    else "Hi! I'm an AI Python tutor. Ask about code, errors or lessons!"
+                )
+            except:
+                pass
 
     # -------------------------------------------------------------- тема
     def _update_theme(self):
@@ -746,123 +872,243 @@ class AiChatScreen(MDBoxLayout):
 
     # ------------------------------------------------------------ логика
     def _send(self, *args):
-        text = self.text_input.text.strip()
-        if not text or self._is_generating:
-            return
-        self.text_input.text = ""
-        self._grow_input()
-        self._add_user(text)
-
-        self._set_generating(True)
-        self._show_typing()
-
-        def stream_callback(chunk):
-            if not self._is_generating:
+        try:
+            # Безопасное получение текста на Android
+            if not hasattr(self, 'text_input') or self.text_input is None:
+                print("[AI Chat] text_input not available")
                 return
 
-            def apply(dt):
-                if not self._is_generating:
-                    return
+            text = ""
+            try:
+                text = self.text_input.text.strip() if self.text_input.text else ""
+            except Exception as e:
+                print(f"[AI Chat] Error reading text_input: {e}")
+                return
+
+            if not text or self._is_generating:
+                return
+
+            # Безопасная очистка поля ввода
+            try:
+                self.text_input.text = ""
+                self._grow_input()
+            except Exception as e:
+                print(f"[AI Chat] Error clearing text_input: {e}")
+
+            # Безопасное добавление сообщения пользователя
+            try:
+                self._add_user(text)
+            except Exception as e:
+                print(f"[AI Chat] Error adding user message: {e}")
+                return
+
+            self._set_generating(True)
+            self._show_typing()
+
+            def stream_callback(chunk):
+                try:
+                    if not self._is_generating:
+                        return
+
+                    # Защита от некорректных данных
+                    if chunk is None:
+                        chunk = ""
+                    if not isinstance(chunk, str):
+                        chunk = str(chunk)
+
+                    def apply(dt):
+                        try:
+                            if not self._is_generating:
+                                return
+                            self._hide_typing()
+                            if self._current_row is None:
+                                self._current_row = self._add_bot(chunk)
+                            else:
+                                current_text = self._current_row.get_text() or ""
+                                self._current_row.set_text(current_text + chunk)
+                            self.scroll_to_bottom()
+                        except Exception as e:
+                            print(f"[AI Chat] Stream apply error: {e}")
+                            # В случае ошибки останавливаем генерацию
+                            self._set_generating(False)
+                            self._current_row = None
+
+                    Clock.schedule_once(apply, 0)
+                except Exception as e:
+                    print(f"[AI Chat] Stream callback error: {e}")
+
+            def ok(answer):
+                def apply(dt):
+                    try:
+                        self._hide_typing()
+                        if self._current_row is None:
+                            self._add_bot(answer)
+                        else:
+                            self._current_row.set_text(answer)
+                            self._current_row.flush_text()
+                        self._current_row = None
+                        self._set_generating(False)
+                        self.scroll_to_bottom()
+                    except Exception as e:
+                        print(f"[AI Chat] OK callback error: {e}")
+                        self._current_row = None
+                        self._set_generating(False)
+
+                Clock.schedule_once(apply, 0)
+
+            def err(e):
+                def apply(dt):
+                    try:
+                        self._hide_typing()
+                        self._current_row = None
+                        self._set_generating(False)
+                        error_msg = f"⚠️ Ошибка: {e}" if e else "⚠️ Неизвестная ошибка"
+                        self._add_bot(error_msg)
+                    except Exception as e2:
+                        print(f"[AI Chat] Error callback error: {e2}")
+                        self._current_row = None
+                        self._set_generating(False)
+
+                Clock.schedule_once(apply, 0)
+
+            # Безопасный вызов агента
+            try:
+                if not hasattr(self, 'agent') or self.agent is None:
+                    raise Exception("Agent not available")
+
+                context = ""
+                try:
+                    context = self.get_context() if self.get_context else ""
+                except Exception as e:
+                    print(f"[AI Chat] Error getting context: {e}")
+                    context = ""
+
+                self.agent.ask(
+                    text,
+                    context=context,
+                    locale=self.locale,
+                    on_success=ok,
+                    on_error=err,
+                    stream=True,
+                    stream_callback=stream_callback,
+                )
+            except Exception as e:
+                print(f"[AI Chat] Agent.ask error: {e}")
+                # В случае ошибки с агентом сразу показываем ошибку
+                err(e)
+
+        except Exception as e:
+            print(f"[AI Chat] _send error: {e}")
+            self._set_generating(False)
+            self._current_row = None
+            try:
                 self._hide_typing()
-                if self._current_row is None:
-                    self._current_row = self._add_bot(chunk)
-                else:
-                    self._current_row.set_text(self._current_row.get_text() + chunk)
-                self.scroll_to_bottom()
-
-            Clock.schedule_once(apply, 0)
-
-        def ok(answer):
-            def apply(dt):
-                self._hide_typing()
-                if self._current_row is None:
-                    self._add_bot(answer)
-                else:
-                    self._current_row.set_text(answer)
-                    self._current_row.flush_text()
-                self._current_row = None
-                self._set_generating(False)
-                self.scroll_to_bottom()
-
-            Clock.schedule_once(apply, 0)
-
-        def err(e):
-            def apply(dt):
-                self._hide_typing()
-                self._current_row = None
-                self._set_generating(False)
-                self._add_bot(f"⚠️ Ошибка: {e}")
-
-            Clock.schedule_once(apply, 0)
-
-        self.agent.ask(
-            text,
-            context=self.get_context(),
-            locale=self.locale,
-            on_success=ok,
-            on_error=err,
-            stream=True,
-            stream_callback=stream_callback,
-        )
+            except:
+                pass
 
     def _stop_generation(self, *args):
-        if not self._is_generating:
-            return
-        self._set_generating(False)
-        self._hide_typing()
         try:
-            self.agent.stop_generation()
+            if not self._is_generating:
+                return
+            self._set_generating(False)
+            self._hide_typing()
+            try:
+                if hasattr(self, 'agent') and self.agent is not None:
+                    self.agent.stop_generation()
+            except Exception as e:
+                print(f"[AI Chat] stop_generation error: {e}")
+            self._current_row = None
         except Exception as e:
-            print(f"[AI Chat] stop_generation error: {e}")
-        self._current_row = None
+            print(f"[AI Chat] _stop_generation error: {e}")
+            self._current_row = None
+            self._set_generating(False)
 
     def _quick(self, action):
-        if action == "clear":
-            self.agent.clear_history()
-            self.messages_box.clear_widgets()
-            self._typing = None
-            self.text_input.text = ""
-            self._grow_input()
-            self._add_bot("Чат очищен." if self.locale == "ru" else "Chat cleared.")
-            return
-
-        context = self.get_context()
-        self._show_typing()
-        self._set_generating(True)
-
-        def ok(answer):
-            def apply(dt):
-                self._hide_typing()
-                self._set_generating(False)
-                self._add_bot(answer)
-
-            Clock.schedule_once(apply, 0)
-
-        def err(e):
-            def apply(dt):
-                self._hide_typing()
-                self._set_generating(False)
-                self._add_bot(f"⚠️ Ошибка: {e}")
-
-            Clock.schedule_once(apply, 0)
-
-        if action == "error":
-            self.agent.explain_error(
-                "Последняя ошибка выполнения (если была)",
-                code=context,
-                locale=self.locale,
-                on_success=ok,
-                on_error=err,
-            )
-        elif action == "review":
-            if not context.strip():
-                self._hide_typing()
-                self._set_generating(False)
-                self._add_bot(
-                    "Нет кода для проверки." if self.locale == "ru" else "No code to check."
-                )
+        try:
+            if action == "clear":
+                try:
+                    if hasattr(self, 'agent') and self.agent is not None:
+                        self.agent.clear_history()
+                    self.messages_box.clear_widgets()
+                    self._typing = None
+                    if hasattr(self, 'text_input') and self.text_input is not None:
+                        self.text_input.text = ""
+                        self._grow_input()
+                    self._add_bot("Чат очищен." if self.locale == "ru" else "Chat cleared.")
+                except Exception as e:
+                    print(f"[AI Chat] Clear action error: {e}")
                 return
-            self.agent.review_code(context, locale=self.locale, on_success=ok, on_error=err)
+
+            context = ""
+            try:
+                context = self.get_context() if self.get_context else ""
+            except Exception as e:
+                print(f"[AI Chat] Error getting context in _quick: {e}")
+                context = ""
+
+            self._show_typing()
+            self._set_generating(True)
+
+            def ok(answer):
+                def apply(dt):
+                    try:
+                        self._hide_typing()
+                        self._set_generating(False)
+                        self._add_bot(answer)
+                    except Exception as e:
+                        print(f"[AI Chat] Quick OK callback error: {e}")
+                        self._set_generating(False)
+
+                Clock.schedule_once(apply, 0)
+
+            def err(e):
+                def apply(dt):
+                    try:
+                        self._hide_typing()
+                        self._set_generating(False)
+                        error_msg = f"⚠️ Ошибка: {e}" if e else "⚠️ Неизвестная ошибка"
+                        self._add_bot(error_msg)
+                    except Exception as e2:
+                        print(f"[AI Chat] Quick error callback error: {e2}")
+                        self._set_generating(False)
+
+                Clock.schedule_once(apply, 0)
+
+            try:
+                if action == "error":
+                    if hasattr(self, 'agent') and self.agent is not None:
+                        self.agent.explain_error(
+                            "Последняя ошибка выполнения (если была)",
+                            code=context,
+                            locale=self.locale,
+                            on_success=ok,
+                            on_error=err,
+                        )
+                    else:
+                        err("Agent not available")
+                elif action == "review":
+                    if not context or not context.strip():
+                        self._hide_typing()
+                        self._set_generating(False)
+                        self._add_bot(
+                            "Нет кода для проверки." if self.locale == "ru" else "No code to check."
+                        )
+                        return
+                    if hasattr(self, 'agent') and self.agent is not None:
+                        self.agent.review_code(context, locale=self.locale, on_success=ok, on_error=err)
+                    else:
+                        err("Agent not available")
+            except Exception as e:
+                print(f"[AI Chat] Quick action error: {e}")
+                err(e)
+
+        except Exception as e:
+            print(f"[AI Chat] _quick error: {e}")
+            self._set_generating(False)
+            try:
+                self._hide_typing()
+            except:
+                pass
 
 
 def open_ai_chat(agent, locale="ru", get_context_callback=None):
