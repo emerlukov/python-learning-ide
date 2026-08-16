@@ -44,6 +44,7 @@ from utils.hotkeys import HotkeyManager
 from utils.vibration_manager import VibrationManager, wrap_all_buttons, auto_wrap_on_build
 from utils.paths import user_data_path, ensure_user_data_dir, migrate_legacy_data
 from utils.keyboard_tracker import get_keyboard_tracker
+from utils.crash_logger import install_crash_handler, log_error as crash_log_error
 
 
 class PythonLearningApp(MDApp):
@@ -51,6 +52,13 @@ class PythonLearningApp(MDApp):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+
+        # Устанавливаем обработчик крашей как можно раньше
+        try:
+            install_crash_handler()
+            print("[App] Crash logger installed successfully")
+        except Exception as e:
+            print(f"[App] Failed to install crash logger: {e}")
 
         migrate_legacy_data()
 
@@ -162,6 +170,16 @@ class PythonLearningApp(MDApp):
         Clock.schedule_once(lambda dt: self.check_and_request_manage_storage(), 1)
         # Применяем язык после загрузки UI
         Clock.schedule_once(lambda dt: self._apply_language_to_ui(), 0.5)
+
+        # Логируем успешный запуск приложения
+        try:
+            crash_log_error("Application started successfully", {
+                'language': self.current_language,
+                'theme': self.current_theme_name,
+                'platform': platform
+            })
+        except Exception as e:
+            print(f"[App] Failed to log startup: {e}")
 
         # ДОБАВЛЯЕМ: автоматическая обёртка кнопок (безопасно)
         try:
