@@ -390,34 +390,123 @@ class TypingRow(BoxLayout):
     """Анимированный индикатор «печатает…»."""
 
     def __init__(self, theme, **kwargs):
-        super().__init__(orientation="horizontal", size_hint_y=None, height=dp(38), **kwargs)
-        self.bubble = MDCard(
-            size_hint=(None, None),
-            size=(dp(64), dp(34)),
-            padding=dp(8),
-            radius=[BUBBLE_RADIUS, BUBBLE_RADIUS, BUBBLE_RADIUS, BUBBLE_TAIL_RADIUS],
-            md_bg_color=theme["widget_bg"],
-            elevation=0,
-        )
-        self.dots = Label(
-            text="•  •  •",
-            color=_mix(theme["text_color"], (0.5, 0.5, 0.5, 1), 0.3),
-            font_size=sp(18),
-        )
-        self.bubble.add_widget(self.dots)
-        self.add_widget(self.bubble)
-        self.add_widget(Widget(size_hint_x=1))
-        self._step = 0
-        self._ev = Clock.schedule_interval(self._tick, 0.35)
+        try:
+            super().__init__(orientation="horizontal", size_hint_y=None, height=dp(38), **kwargs)
+
+            # Защита от некорректных данных темы
+            safe_theme = theme if isinstance(theme, dict) else {}
+            widget_bg = safe_theme.get("widget_bg", (0.16, 0.16, 0.20, 1))
+            text_color = safe_theme.get("text_color", (0.93, 0.93, 0.96, 1))
+
+            # Адаптивные размеры для Android
+            bubble_width = dp(64)
+            bubble_height = dp(34)
+            if platform == 'android':
+                # На Android используем немного большие размеры для надежности
+                bubble_width = dp(72)
+                bubble_height = dp(38)
+
+            self.bubble = MDCard(
+                size_hint=(None, None),
+                size=(bubble_width, bubble_height),
+                padding=dp(8),
+                radius=[BUBBLE_RADIUS, BUBBLE_RADIUS, BUBBLE_RADIUS, BUBBLE_TAIL_RADIUS],
+                md_bg_color=widget_bg,
+                elevation=0,
+            )
+
+            # Используем AnchorLayout для правильного центрирования точек внутри пузыря
+            from kivy.uix.anchorlayout import AnchorLayout
+
+            bubble_content = AnchorLayout(
+                size_hint=(1, 1),
+                anchor_x='center',
+                anchor_y='center'
+            )
+
+            # Используем более простые символы для Android 15
+            # Unicode символы могут вызывать проблемы на некоторых версиях Android
+            if platform == 'android':
+                dot_char = "."  # Простая точка вместо Unicode
+            else:
+                dot_char = "•"  # Unicode точка для десктопа
+
+            self.dots = Label(
+                text=f"{dot_char}  {dot_char}  {dot_char}",
+                color=_mix(text_color, (0.5, 0.5, 0.5, 1), 0.3),
+                font_size=sp(18),
+                markup=False,  # Отключаем markup для безопасности
+                size_hint=(None, None),
+                text_size=(None, None),
+                halign='center',
+                valign='middle'
+            )
+
+            # Добавляем точки в AnchorLayout, а затем в пузырь
+            bubble_content.add_widget(self.dots)
+            self.bubble.add_widget(bubble_content)
+
+            self.add_widget(self.bubble)
+            self.add_widget(Widget(size_hint_x=1))
+
+            self._step = 0
+            self._dot_char = dot_char
+            self._ev = None
+            self._running = False
+
+            # Безопасный запуск анимации
+            try:
+                # На Android используем более длинный интервал для стабильности
+                interval = 0.5 if platform == 'android' else 0.35
+                self._ev = Clock.schedule_interval(self._tick, interval)
+                self._running = True
+            except Exception as e:
+                print(f"[AI Chat] TypingRow animation start error: {e}")
+                self._ev = None
+                self._running = False
+
+        except Exception as e:
+            print(f"[AI Chat] TypingRow __init__ error: {e}")
+            # Создаем минимальный виджет в случае ошибки
+            self._ev = None
+            self._running = False
+            try:
+                error_label = Label(text="...", font_size=sp(16))
+                self.add_widget(error_label)
+            except:
+                pass
 
     def _tick(self, dt):
-        self._step = (self._step + 1) % 3
-        self.dots.text = ("•  ", "•  •  ", "•  •  •")[self._step]
+        try:
+            if not self._running:
+                return
+
+            self._step = (self._step + 1) % 3
+
+            # Безопасное обновление текста
+            try:
+                if hasattr(self, 'dots') and self.dots is not None:
+                    dot_char = getattr(self, '_dot_char', '•')
+                    self.dots.text = (f"{dot_char}  ", f"{dot_char}  {dot_char}  ", f"{dot_char}  {dot_char}  {dot_char}")[self._step]
+            except Exception as e:
+                print(f"[AI Chat] TypingRow text update error: {e}")
+                # В случае ошибки останавливаем анимацию
+                self.stop()
+
+        except Exception as e:
+            print(f"[AI Chat] TypingRow _tick error: {e}")
+            self.stop()
 
     def stop(self):
-        if self._ev:
-            self._ev.cancel()
+        try:
+            if self._ev:
+                self._ev.cancel()
+                self._ev = None
+            self._running = False
+        except Exception as e:
+            print(f"[AI Chat] TypingRow stop error: {e}")
             self._ev = None
+            self._running = False
 
 
 class AiChatScreen(MDBoxLayout):
@@ -790,9 +879,25 @@ class AiChatScreen(MDBoxLayout):
         try:
             if self._typing:
                 return
-            self._typing = TypingRow(self.theme)
-            self.messages_box.add_widget(self._typing)
-            self.scroll_to_bottom()
+
+            # Проверяем, что messages_box доступен
+            if not hasattr(self, 'messages_box') or self.messages_box is None:
+                print("[AI Chat] messages_box not available for typing indicator")
+                return
+
+            # Создаем индикатор с защитой от ошибок
+            try:
+                self._typing = TypingRow(self.theme)
+                self.messages_box.add_widget(self._typing)
+                # Скроллим вниз с защитой
+                try:
+                    self.scroll_to_bottom()
+                except Exception as scroll_error:
+                    print(f"[AI Chat] Scroll to bottom error in _show_typing: {scroll_error}")
+            except Exception as e:
+                print(f"[AI Chat] TypingRow creation error: {e}")
+                self._typing = None
+
         except Exception as e:
             print(f"[AI Chat] _show_typing error: {e}")
             self._typing = None
@@ -800,9 +905,19 @@ class AiChatScreen(MDBoxLayout):
     def _hide_typing(self):
         try:
             if self._typing:
-                self._typing.stop()
+                # Сначала останавливаем анимацию
+                try:
+                    self._typing.stop()
+                except Exception as stop_error:
+                    print(f"[AI Chat] TypingRow stop error: {stop_error}")
+
+                # Затем удаляем виджет
                 if hasattr(self, 'messages_box') and self.messages_box is not None:
-                    self.messages_box.remove_widget(self._typing)
+                    try:
+                        self.messages_box.remove_widget(self._typing)
+                    except Exception as remove_error:
+                        print(f"[AI Chat] TypingRow remove error: {remove_error}")
+
                 self._typing = None
         except Exception as e:
             print(f"[AI Chat] _hide_typing error: {e}")
