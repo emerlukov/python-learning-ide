@@ -57,16 +57,17 @@ except Exception:  # pragma: no cover - автономный запуск
 
 MarkdownLabel = None
 for _md_path in (
-        "widgets.markdown_label",
-        "ui.widgets.markdown_label",
-        "ui.markdown_label",
-        "markdown_label",
+    "widgets.markdown_label",
+    "ui.widgets.markdown_label",
+    "ui.markdown_label",
+    "markdown_label",
 ):
     try:
         MarkdownLabel = __import__(_md_path, fromlist=["MarkdownLabel"]).MarkdownLabel
         break
     except Exception:
         continue
+
 
 if MarkdownLabel is not None:
 
@@ -106,8 +107,8 @@ def _iter_text_inputs(widget):
                 yield sub
 
 
-MAX_BUBBLE_RATIO = 0.82  # максимальная ширина пузыря от ширины чата
-MAX_MD_BUBBLE_RATIO = 0.97  # markdown-ответ занимает почти всю ширину
+MAX_BUBBLE_RATIO = 0.82          # максимальная ширина пузыря от ширины чата
+MAX_MD_BUBBLE_RATIO = 0.97       # markdown-ответ занимает почти всю ширину
 INPUT_MIN_HEIGHT = dp(44)
 INPUT_MAX_HEIGHT = dp(132)
 BUBBLE_RADIUS = dp(16)
@@ -397,36 +398,67 @@ class TypingRow(BoxLayout):
             widget_bg = safe_theme.get("widget_bg", (0.16, 0.16, 0.20, 1))
             text_color = safe_theme.get("text_color", (0.93, 0.93, 0.96, 1))
 
+            # Адаптивные размеры для Android
+            bubble_width = dp(64)
+            bubble_height = dp(34)
+            if platform == 'android':
+                # На Android используем немного большие размеры для надежности
+                bubble_width = dp(72)
+                bubble_height = dp(38)
+
             self.bubble = MDCard(
                 size_hint=(None, None),
-                size=(dp(64), dp(34)),
+                size=(bubble_width, bubble_height),
                 padding=dp(8),
                 radius=[BUBBLE_RADIUS, BUBBLE_RADIUS, BUBBLE_RADIUS, BUBBLE_TAIL_RADIUS],
                 md_bg_color=widget_bg,
                 elevation=0,
             )
 
-            # Простой Label для совместимости с Android
+            # Используем AnchorLayout для правильного центрирования точек внутри пузыря
+            from kivy.uix.anchorlayout import AnchorLayout
+
+            bubble_content = AnchorLayout(
+                size_hint=(1, 1),
+                anchor_x='center',
+                anchor_y='center'
+            )
+
+            # Используем более простые символы для Android 15
+            # Unicode символы могут вызывать проблемы на некоторых версиях Android
+            if platform == 'android':
+                dot_char = "."  # Простая точка вместо Unicode
+            else:
+                dot_char = "•"  # Unicode точка для десктопа
+
             self.dots = Label(
-                text="•  •  •",
+                text=f"{dot_char}  {dot_char}  {dot_char}",
                 color=_mix(text_color, (0.5, 0.5, 0.5, 1), 0.3),
-                font_size=sp(16),
-                markup=False,
+                font_size=sp(18),
+                markup=False,  # Отключаем markup для безопасности
+                size_hint=(None, None),
+                text_size=(None, None),
                 halign='center',
                 valign='middle'
             )
 
-            self.bubble.add_widget(self.dots)
+            # Добавляем точки в AnchorLayout, а затем в пузырь
+            bubble_content.add_widget(self.dots)
+            self.bubble.add_widget(bubble_content)
+
             self.add_widget(self.bubble)
             self.add_widget(Widget(size_hint_x=1))
 
             self._step = 0
+            self._dot_char = dot_char
             self._ev = None
             self._running = False
 
             # Безопасный запуск анимации
             try:
-                self._ev = Clock.schedule_interval(self._tick, 0.4)
+                # На Android используем более длинный интервал для стабильности
+                interval = 0.5 if platform == 'android' else 0.35
+                self._ev = Clock.schedule_interval(self._tick, interval)
                 self._running = True
             except Exception as e:
                 print(f"[AI Chat] TypingRow animation start error: {e}")
@@ -435,6 +467,7 @@ class TypingRow(BoxLayout):
 
         except Exception as e:
             print(f"[AI Chat] TypingRow __init__ error: {e}")
+            # Создаем минимальный виджет в случае ошибки
             self._ev = None
             self._running = False
             try:
@@ -445,14 +478,20 @@ class TypingRow(BoxLayout):
 
     def _tick(self, dt):
         try:
-            if not self._running or not hasattr(self, 'dots') or self.dots is None:
+            if not self._running:
                 return
 
             self._step = (self._step + 1) % 3
 
-            # Простая анимация с точками
-            dot_states = ["•", "•  •", "•  •  •"]
-            self.dots.text = dot_states[self._step]
+            # Безопасное обновление текста
+            try:
+                if hasattr(self, 'dots') and self.dots is not None:
+                    dot_char = getattr(self, '_dot_char', '•')
+                    self.dots.text = (f"{dot_char}  ", f"{dot_char}  {dot_char}  ", f"{dot_char}  {dot_char}  {dot_char}")[self._step]
+            except Exception as e:
+                print(f"[AI Chat] TypingRow text update error: {e}")
+                # В случае ошибки останавливаем анимацию
+                self.stop()
 
         except Exception as e:
             print(f"[AI Chat] TypingRow _tick error: {e}")
@@ -594,9 +633,9 @@ class AiChatScreen(MDBoxLayout):
             spacing=dp(4),
         )
         for icon, action, tip in (
-                ("delete-outline", "clear", "Очистить"),
-                ("alert-circle-outline", "error", "Объяснить ошибку"),
-                ("code-tags", "review", "Разбор кода"),
+            ("delete-outline", "clear", "Очистить"),
+            ("alert-circle-outline", "error", "Объяснить ошибку"),
+            ("code-tags", "review", "Разбор кода"),
         ):
             actions.add_widget(
                 MDIconButton(
@@ -974,7 +1013,6 @@ class AiChatScreen(MDBoxLayout):
             # Безопасное добавление сообщения пользователя
             try:
                 self._add_user(text)
-                self.scroll_to_bottom()
             except Exception as e:
                 print(f"[AI Chat] Error adding user message: {e}")
                 return
@@ -1132,7 +1170,6 @@ class AiChatScreen(MDBoxLayout):
                         self._hide_typing()
                         self._set_generating(False)
                         self._add_bot(answer)
-                        self.scroll_to_bottom()
                     except Exception as e:
                         print(f"[AI Chat] Quick OK callback error: {e}")
                         self._set_generating(False)
@@ -1146,7 +1183,6 @@ class AiChatScreen(MDBoxLayout):
                         self._set_generating(False)
                         error_msg = f"⚠️ Ошибка: {e}" if e else "⚠️ Неизвестная ошибка"
                         self._add_bot(error_msg)
-                        self.scroll_to_bottom()
                     except Exception as e2:
                         print(f"[AI Chat] Quick error callback error: {e2}")
                         self._set_generating(False)
