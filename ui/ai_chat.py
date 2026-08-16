@@ -20,6 +20,11 @@ from kivy.core.window import Window
 from kivy.metrics import dp, sp
 from kivy.properties import NumericProperty
 from kivy.utils import platform
+
+try:
+    from utils.crash_logger import log_error as crash_log_error
+except ImportError:
+    crash_log_error = None
 from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
@@ -392,6 +397,14 @@ class TypingRow(BoxLayout):
     def __init__(self, theme, **kwargs):
         try:
             super().__init__(orientation="horizontal", size_hint_y=None, height=dp(38), **kwargs)
+        except Exception as e:
+            print(f"[AI Chat] TypingRow super().__init__ error: {e}")
+            if crash_log_error:
+                try:
+                    crash_log_error(f"TypingRow init error: {e}")
+                except:
+                    pass
+            raise
 
             # Защита от некорректных данных темы
             safe_theme = theme if isinstance(theme, dict) else {}
@@ -1114,6 +1127,16 @@ class AiChatScreen(MDBoxLayout):
 
         except Exception as e:
             print(f"[AI Chat] _send error: {e}")
+            # Логируем ошибку в файл крашей
+            if crash_log_error:
+                try:
+                    crash_log_error(f"AI Chat send error: {e}", {
+                        'text_length': len(text) if 'text' in locals() else 0,
+                        'is_generating': self._is_generating,
+                        'locale': self.locale
+                    })
+                except:
+                    pass
             self._set_generating(False)
             self._current_row = None
             try:
