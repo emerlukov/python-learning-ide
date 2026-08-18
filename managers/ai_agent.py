@@ -102,7 +102,20 @@ Rules:
                 base_dir = os.path.dirname(os.path.dirname(__file__))
         else:
             base_dir = os.path.dirname(os.path.dirname(__file__))
-        return os.path.join(base_dir, "ai_chat_history.json")
+        
+        # Добавляем папку data
+        data_dir = os.path.join(base_dir, "data")
+        
+        # Создаем папку data, если она не существует
+        if not os.path.exists(data_dir):
+            try:
+                os.makedirs(data_dir)
+            except Exception as e:
+                print(f"[AI Agent] Error creating data directory: {e}")
+                # Если не удалось создать папку data, используем базовую директорию
+                data_dir = base_dir
+        
+        return os.path.join(data_dir, "ai_chat_history.json")
 
     def _load_history(self):
         """Загружает историю из файла"""
@@ -149,7 +162,7 @@ Rules:
 
     def _call_groq(self, messages: List[Dict]) -> str:
         if not self.groq_key:
-            raise ValueError("Groq API key is not set")
+            raise ValueError("Groq API key is not set")  # Technical error, kept in English
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.groq_key}",
@@ -166,11 +179,11 @@ Rules:
             resp = requests.post(url, headers=headers, json=payload, timeout=10)
             resp.raise_for_status()
         except requests.exceptions.Timeout:
-            raise ValueError("Request timeout - API server took too long to respond")
+            raise ValueError("Request timeout - API server took too long to respond")  # Technical error, kept in English
         except requests.exceptions.ConnectionError:
-            raise ValueError("Connection error - check your internet connection")
+            raise ValueError("Connection error - check your internet connection")  # Technical error, kept in English
         except requests.exceptions.RequestException as e:
-            raise ValueError(f"Request failed: {e}")
+            raise ValueError(f"Request failed: {e}")  # Technical error, kept in English
 
         data = resp.json()
 
@@ -192,10 +205,10 @@ Rules:
             print(f"Response data: {data}")
             raise ValueError(f"Could not parse Groq response: {e}")
 
-    def _call_groq_stream(self, messages: List[Dict], stream_callback: Callable[[str], None]) -> str:
+    def _call_groq_stream(self, messages: List[Dict], stream_callback: Callable[[str], None], locale: str = "ru") -> str:
         """Потоковая передача от Groq"""
         if not self.groq_key:
-            raise ValueError("Groq API key is not set")
+            raise ValueError("Groq API key is not set")  # Technical error, kept in English
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.groq_key}",
@@ -246,13 +259,13 @@ Rules:
 
         except requests.exceptions.Timeout:
             if not self._stop_event.is_set():
-                raise ValueError("Request timeout - API server took too long to respond")
+                raise ValueError("Request timeout - API server took too long to respond")  # Technical error, kept in English
         except requests.exceptions.ConnectionError:
             if not self._stop_event.is_set():
-                raise ValueError("Connection error - check your internet connection")
+                raise ValueError("Connection error - check your internet connection")  # Technical error, kept in English
         except requests.exceptions.RequestException as e:
             if not self._stop_event.is_set():
-                raise ValueError(f"Request failed: {e}")
+                raise ValueError(f"Request failed: {e}")  # Technical error, kept in English
         except Exception as e:
             if not self._stop_event.is_set():
                 print(f"[AI Agent] Streaming error: {e}")
@@ -329,7 +342,8 @@ Rules:
         def worker():
             try:
                 if not requests:
-                    raise RuntimeError("Библиотека requests не установлена")
+                    error_msg = "Библиотека requests не установлена" if locale == "ru" else "Requests library is not installed"
+                    raise RuntimeError(error_msg)
 
                 messages = self._build_messages(user_message, context, locale)
                 answer = None
@@ -348,7 +362,7 @@ Rules:
                         if provider == "groq" and self.groq_key:
                             if stream and stream_callback:
                                 # Используем потоковую передачу
-                                answer = self._call_groq_stream(messages, stream_callback)
+                                answer = self._call_groq_stream(messages, stream_callback, locale)
                             else:
                                 answer = self._call_groq(messages)
                             print(f"[AI Agent] Groq answer received: {answer[:100] if answer else 'None'}...")
@@ -363,8 +377,9 @@ Rules:
                         continue
 
                 if answer is None:
+                    error_msg = "Нет API-ключей или оба провайдера недоступны" if locale == "ru" else "No API keys or both providers unavailable"
                     raise RuntimeError(
-                        last_error or "Нет API-ключей или оба провайдера недоступны"
+                        last_error or error_msg
                     )
 
                 print(f"[AI Agent] Final answer: {answer[:100] if answer else 'None'}...")
@@ -390,20 +405,36 @@ Rules:
         threading.Thread(target=worker, daemon=True).start()
 
     def explain_error(self, error_text: str, code: str = "", locale: str = "ru", **kwargs):
-        prompt = (
-            f"Объясни эту ошибку Python простым языком и скажи, как её исправить:\n\n{error_text}"
-        )
-        context = f"Код пользователя:\n```python\n{code}\n```" if code else ""
+        if locale == "ru":
+            prompt = (
+                f"Объясни эту ошибку Python простым языком и скажи, как её исправить:\n\n{error_text}"
+            )
+            context = f"Код пользователя:\n```python\n{code}\n```" if code else ""
+        else:
+            prompt = (
+                f"Explain this Python error in simple terms and tell how to fix it:\n\n{error_text}"
+            )
+            context = f"User code:\n```python\n{code}\n```" if code else ""
         self.ask(prompt, context=context, locale=locale, **kwargs)
 
     def review_code(self, code: str, locale: str = "ru", **kwargs):
-        prompt = "Проверь этот код Python. Укажи ошибки, возможные улучшения и кратко объясни, что делает код."
+        if locale == "ru":
+            prompt = "Проверь этот код Python. Укажи ошибки, возможные улучшения и кратко объясни, что делает код."
+        else:
+            prompt = "Review this Python code. Point out errors, possible improvements, and briefly explain what the code does."
         self.ask(prompt, context=f"```python\n{code}\n```", locale=locale, **kwargs)
 
     def lesson_hint(self, task: str, current_code: str, theory: str = "", locale: str = "ru", **kwargs):
-        prompt = "Дай полезную подсказку по этому заданию (не решай полностью)."
-        context = (
-            f"Задание:\n{task}\n\nТеория:\n{theory[:1500]}\n\n"
-            f"Текущий код ученика:\n```python\n{current_code}\n```"
-        )
+        if locale == "ru":
+            prompt = "Дай полезную подсказку по этому заданию (не решай полностью)."
+            context = (
+                f"Задание:\n{task}\n\nТеория:\n{theory[:1500]}\n\n"
+                f"Текущий код ученика:\n```python\n{current_code}\n```"
+            )
+        else:
+            prompt = "Give a helpful hint for this task (do not solve it completely)."
+            context = (
+                f"Task:\n{task}\n\nTheory:\n{theory[:1500]}\n\n"
+                f"Student's current code:\n```python\n{current_code}\n```"
+            )
         self.ask(prompt, context=context, locale=locale, **kwargs)
