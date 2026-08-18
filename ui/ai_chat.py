@@ -1,14 +1,5 @@
 """
 Окно чата с ИИ-тьютором.
-
-Современный мессенджер-стиль:
-  * пузыри сообщений с «хвостиками» по сторонам и временем отправки;
-  * плавный автоскролл вниз + кнопка «к последнему сообщению»;
-  * индикатор набора текста, стриминг ответа;
-  * поле ввода, растущее по мере набора (1..5 строк);
-  * Enter — отправить, Shift+Enter — новая строка;
-  * копирование текста сообщения;
-  * чат строго прилипает к верхней границе экранной клавиатуры.
 """
 
 from datetime import datetime
@@ -20,11 +11,6 @@ from kivy.core.window import Window
 from kivy.metrics import dp, sp
 from kivy.properties import NumericProperty
 from kivy.utils import platform
-
-try:
-    from utils.crash_logger import log_error as crash_log_error
-except ImportError:
-    crash_log_error = None
 from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
@@ -33,6 +19,17 @@ from kivy.uix.modalview import ModalView
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
+
+try:
+    from utils.crash_logger import log_error as crash_log_error
+except ImportError:
+    crash_log_error = None
+
+try:
+    from utils.vibration_manager import wrap_all_buttons, VibrationManager
+except ImportError:
+    wrap_all_buttons = None
+    VibrationManager = None
 
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.button import MDIconButton
@@ -1311,6 +1308,10 @@ def open_ai_chat(agent, locale="ru", get_context_callback=None):
 
     modal.add_widget(chat_screen)
     modal.open()
+
+    # Обёртываем кнопки чата для виброотклика (как в app.py)
+    if wrap_all_buttons:
+        Clock.schedule_once(lambda dt: wrap_all_buttons(chat_screen, recursive=True), 0.1)
 
     def on_dismiss(_instance):
         try:
