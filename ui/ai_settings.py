@@ -11,6 +11,12 @@ from kivy.uix.modalview import ModalView
 from kivy.metrics import dp
 from kivy.utils import platform
 from kivy.graphics import Color, Rectangle
+from kivy.clock import Clock
+
+try:
+    from utils.vibration_manager import wrap_all_buttons
+except ImportError:
+    wrap_all_buttons = None
 
 
 def open_ai_settings(agent, locale="ru", on_save=None):
@@ -232,4 +238,9 @@ def open_ai_settings(agent, locale="ru", on_save=None):
     )
     modal.add_widget(main_box)
     modal.open()
+
+    # Обёртываем кнопки для виброотклика (как в ai_chat.py)
+    if wrap_all_buttons:
+        Clock.schedule_once(lambda dt: wrap_all_buttons(main_box, recursive=True), 0.1)
+
     return modal
