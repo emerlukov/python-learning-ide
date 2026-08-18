@@ -85,6 +85,9 @@ class PythonLearningApp(MDApp):
         self.tab_manager = TabManager()
         self.tab_manager.app = self
         self.file_manager = FileManager(self)
+        
+        # Ссылка на открытый чат ИИ для обновления локали
+        self.ai_chat_screen = None
 
         # Менеджеры операций (новые)
         self.file_handlers = FileOperationHandlers(self)
@@ -784,6 +787,14 @@ class PythonLearningApp(MDApp):
             current_text = self.spinner.text
             self.spinner.values = self._get_example_titles()
             self.spinner.text = current_text
+
+        # Обновляем локаль в открытом чате ИИ
+        if hasattr(self, 'ai_chat_screen') and self.ai_chat_screen:
+            try:
+                self.ai_chat_screen.update_locale(self.current_language)
+                print(f"[DEBUG] Updated AI chat locale to: {self.current_language}")
+            except Exception as e:
+                print(f"[DEBUG] Error updating AI chat locale: {e}")
 
         self._save_language()
 
@@ -1905,6 +1916,14 @@ class PythonLearningApp(MDApp):
         if hasattr(self, '_menu_dropdown'):
             self._create_menu_items(ThemeManager.get_theme())
 
+        # Обновляем локаль в открытом чате ИИ
+        if hasattr(self, 'ai_chat_screen') and self.ai_chat_screen:
+            try:
+                self.ai_chat_screen.update_locale(self.current_language)
+                print(f"[DEBUG] Updated AI chat locale to: {self.current_language}")
+            except Exception as e:
+                print(f"[DEBUG] Error updating AI chat locale: {e}")
+
         self._update_title_from_current_tab()
 
         from managers import examples_manager
@@ -1968,11 +1987,17 @@ class PythonLearningApp(MDApp):
             except Exception:
                 return ""
 
-        open_ai_chat(
+        # Храним ссылку на экран чата для обновления локали
+        modal = open_ai_chat(
             self.ai_agent,
             locale=self.current_language if hasattr(self, "current_language") else "ru",
             get_context_callback=get_context,
         )
+        
+        # Сохраняем ссылку на экран чата
+        if hasattr(modal, 'children') and len(modal.children) > 0:
+            self.ai_chat_screen = modal.children[0]
+        
         print(f"[DEBUG] Opening AI chat with locale: {self.current_language if hasattr(self, 'current_language') else 'ru'}")
 
     def open_ai_settings_dialog(self, *args):
