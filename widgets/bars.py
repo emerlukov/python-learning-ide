@@ -561,6 +561,9 @@ class MySymbolScrollBar(BoxLayout):
         
         self.app = None
         self.text_input = text_input
+        self._saved_tab_sel_from = None
+        self._saved_tab_sel_to = None
+        self._saved_tab_sel_text = None
         print(f"[SYMBOL_BAR] Initialized with height={self.height}, size_hint_y={self.size_hint_y}, pos_hint={self.pos_hint}")
         ThemeManager.register(self)
         self.symbols = ['Tab', 'Auto', '#', '( )', '[ ]', '{ }', '" "', "' '", '=', ':', '.', '_', ',', '+', '-', '*', '/',
@@ -596,12 +599,35 @@ class MySymbolScrollBar(BoxLayout):
                          background_color=theme['symbol_btn_bg'], background_normal='', background_down='',
                          color=theme['symbol_btn_text'], font_size=dp(13))
             # Используем on_release, чтобы не переключать фокус во время нажатия (меньше шансов на hide/show клавиатуры)
-            btn.bind(on_release=self.handle_action)
+            if symbol == 'Tab':
+                # Для Tab сохраняем выделение перед вызовом action
+                btn.bind(on_press=self._save_tab_selection)
+                btn.bind(on_release=self.handle_action)
+            else:
+                btn.bind(on_release=self.handle_action)
             self.buttons.append(btn)
 
     def _add_buttons_to_container(self):
         for btn in self.buttons:
             self.button_container.add_widget(btn)
+
+    def _save_tab_selection(self, instance):
+        """Сохраняет выделение перед нажатием Tab кнопки"""
+        try:
+            ti = self._get_active_text_input()
+            if ti and hasattr(ti, 'selection_text') and ti.selection_text:
+                self._saved_tab_sel_from = ti.selection_from
+                self._saved_tab_sel_to = ti.selection_to
+                self._saved_tab_sel_text = ti.selection_text
+            else:
+                self._saved_tab_sel_from = None
+                self._saved_tab_sel_to = None
+                self._saved_tab_sel_text = None
+        except Exception as e:
+            log_error(f"Save tab selection error: {e}")
+            self._saved_tab_sel_from = None
+            self._saved_tab_sel_to = None
+            self._saved_tab_sel_text = None
 
     def _create_background(self, theme):
         with self.canvas.before:
@@ -648,19 +674,28 @@ class MySymbolScrollBar(BoxLayout):
             btn.color = theme['symbol_btn_text']
 
     def handle_action(self, instance):
-        if instance.text != 'Tab':
-            self._saved_sel_start = None
-            self._saved_sel_end = None
         try:
             ti = self._get_active_text_input()
             if not ti:
                 return
+            
+            # Для Tab восстанавливаем выделение если оно было сохранено
+            if instance.text == 'Tab' and self._saved_tab_sel_from is not None:
+                # Восстанавливаем выделение в TextInput перед выполнением действия
+                try:
+                    ti.select_text(self._saved_tab_sel_from, self._saved_tab_sel_to)
+                except Exception as e:
+                    log_error(f"Restore selection before action: {e}")
+            
             action = self._action_map.get(instance.text)
             if action:
-                # Выполняем вставку без резких переключений фокуса — затем безопасно восстанавливаем фокус и показываем клавиатуру
+                # Выполняем вставку
                 action(ti)
-                # Гарантированно восстановим фокус и вызовем show_keyboard() в следующем кадре
-                Clock.schedule_once(lambda dt: self._refocus(ti), 0.01)
+                # Для остальных кнопок восстанавливаем фокус
+                if instance.text != 'Tab':
+                    # Гарантированно восстановим фокус и вызовем show_keyboard() в следующем кадре
+                    Clock.schedule_once(lambda dt: self._refocus(ti), 0.01)
+                # Для Tab фокус и выделение восстанавливает restore() в _handle_tab_button
         except Exception as e:
             log_error(f"SymbolBar error: {e}")
 
@@ -730,19 +765,17 @@ class MySymbolScrollBar(BoxLayout):
 
             def restore(dt):
                 try:
-                    # Не восстанавливаем фокус чтобы не вызывать обновление клавиатуры
-                    # ti.focus = True
+                    ti.focus = True
                     ti.select_text(new_start, new_end)
+                    # select_text вызывает авто-скролл Kivy к позиции выделения,
+                    # поэтому размораживаем ещё через кадр — уже после select_text
                     Clock.schedule_once(lambda _: editor._unfreeze_scroll(), 0)
                 except Exception as e:
                     editor._unfreeze_scroll()
-                    log_error(f"restore: {e}")
+                    log_error(f"restore selection error: {e}")
                 finally:
-                    # Снимаем флаги
                     editor._tab_indenting = False
                     editor._ensuring_trailing = False
-                    # Запланируем _ensure_trailing только один раз после всех операций
-                    #Clock.schedule_once(editor._ensure_trailing, 0.3)
 
             Clock.schedule_once(restore, 0)
 
