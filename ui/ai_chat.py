@@ -1,5 +1,14 @@
 """
 Окно чата с ИИ-тьютором.
+
+Современный мессенджер-стиль:
+  * пузыри сообщений с «хвостиками» по сторонам и временем отправки;
+  * плавный автоскролл вниз + кнопка «к последнему сообщению»;
+  * индикатор набора текста, стриминг ответа;
+  * поле ввода, растущее по мере набора (1..5 строк);
+  * Enter — отправить, Shift+Enter — новая строка;
+  * копирование текста сообщения;
+  * чат строго прилипает к верхней границе экранной клавиатуры.
 """
 
 from datetime import datetime
@@ -549,6 +558,22 @@ class AiChatScreen(MDBoxLayout):
         self.bind(keyboard_height=self._apply_keyboard_height)
         Clock.schedule_once(lambda dt: self._load_history(), 0.05)
 
+    def update_locale(self, new_locale):
+        """Обновляет локаль чата"""
+        self.locale = new_locale
+        # Обновляем текст заголовка и подзаголовка
+        try:
+            self._update_header_text()
+        except Exception as e:
+            print(f"[AI Chat] Error updating header text: {e}")
+
+    def _update_header_text(self):
+        """Обновляет текст заголовка при смене языка"""
+        if hasattr(self, '_header_title'):
+            self._header_title.text = "ИИ-тьютор" if self.locale == "ru" else "AI Tutor"
+        if hasattr(self, 'subtitle'):
+            self.subtitle.text = "онлайн" if self.locale == "ru" else "online"
+
     # ------------------------------------------------------------------ UI
     def _build_header(self):
         header = MDBoxLayout(
@@ -566,6 +591,7 @@ class AiChatScreen(MDBoxLayout):
             text_color=self.theme["text_color"],
             shorten=True,
         )
+        self._header_title = title  # Сохраняем ссылку для обновления
         self.subtitle = MDLabel(
             text="онлайн" if self.locale == "ru" else "online",
             font_style="Caption",
@@ -1212,8 +1238,9 @@ class AiChatScreen(MDBoxLayout):
             try:
                 if action == "error":
                     if hasattr(self, 'agent') and self.agent is not None:
+                        error_text = "Последняя ошибка выполнения (если была)" if self.locale == "ru" else "Last execution error (if any)"
                         self.agent.explain_error(
-                            "Последняя ошибка выполнения (если была)",
+                            error_text,
                             code=context,
                             locale=self.locale,
                             on_success=ok,
@@ -1315,6 +1342,15 @@ def open_ai_chat(agent, locale="ru", get_context_callback=None):
 
     def on_dismiss(_instance):
         try:
+            # Очищаем ссылку на чат в app
+            try:
+                app = App.get_running_app()
+                if hasattr(app, 'ai_chat_screen'):
+                    app.ai_chat_screen = None
+                    print("[AI Chat] Cleared ai_chat_screen reference on dismiss")
+            except Exception as e:
+                print(f"[AI Chat] Error clearing ai_chat_screen reference: {e}")
+
             # Безопасно отвязываем обработчик
             if keyboard_bound:
                 try:
